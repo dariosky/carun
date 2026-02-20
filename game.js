@@ -53,7 +53,7 @@ const lapData = {
 const car = {
   x: track.cx,
   y: track.cy + 205,
-  angle: -Math.PI / 2,
+  angle: Math.PI,
   speed: 0,
   width: 34,
   height: 20,
@@ -82,7 +82,7 @@ const worldObjects = [
 function resetRace() {
   car.x = track.cx;
   car.y = track.cy + 205;
-  car.angle = -Math.PI / 2;
+  car.angle = Math.PI;
   car.speed = 0;
   state.raceTime = 0;
   state.finished = false;
