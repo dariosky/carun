@@ -499,12 +499,18 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (state.mode === "settings" && state.editingName) {
-    if (key === "escape" || key === "enter") {
+    if (key === "escape") {
       state.editingName = false;
       return;
     }
+    if (key === "enter") {
+      if (state.playerName.trim().length > 0) {
+        state.editingName = false;
+      }
+      return;
+    }
     if (key === "backspace") {
-      state.playerName = state.playerName.slice(0, -1) || "P";
+      state.playerName = state.playerName.slice(0, -1);
       return;
     }
     if (/^[a-z0-9 ]$/.test(key) && state.playerName.length < 12) {
