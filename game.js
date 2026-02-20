@@ -64,9 +64,10 @@ const lapData = {
 const car = {
   x: track.cx,
   y: track.cy + 205,
-  angle: -Math.PI / 2,
   vx: 0,
   vy: 0,
+  angle: Math.PI,
+  speed: 0,
   width: 34,
   height: 20,
 };
@@ -98,9 +99,10 @@ const worldObjects = [
 function resetRace() {
   car.x = track.cx;
   car.y = track.cy + 205;
-  car.angle = -Math.PI / 2;
   car.vx = 0;
   car.vy = 0;
+  car.angle = Math.PI;
+  car.speed = 0;
   state.raceTime = 0;
   state.finished = false;
   lapData.currentLapStart = 0;
@@ -649,12 +651,18 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (state.mode === "settings" && state.editingName) {
-    if (key === "escape" || key === "enter") {
+    if (key === "escape") {
       state.editingName = false;
       return;
     }
+    if (key === "enter") {
+      if (state.playerName.trim().length > 0) {
+        state.editingName = false;
+      }
+      return;
+    }
     if (key === "backspace") {
-      state.playerName = state.playerName.slice(0, -1) || "P";
+      state.playerName = state.playerName.slice(0, -1);
       return;
     }
     if (/^[a-z0-9 ]$/.test(key) && state.playerName.length < 12) {
