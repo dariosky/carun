@@ -33,6 +33,17 @@ const track = {
   outerB: 265,
   innerA: 315,
   innerB: 145,
+  warpOuter: [
+    { f: 2, amp: 0.055, phase: 0.45 },
+    { f: 3, amp: 0.038, phase: -0.7 },
+    { f: 5, amp: 0.022, phase: 1.15 },
+  ],
+  warpInner: [
+    { f: 2, amp: 0.04, phase: 0.7 },
+    { f: 3, amp: 0.025, phase: -0.5 },
+    { f: 5, amp: 0.015, phase: 1.4 },
+  ],
+  borderSize: 22,
 };
 
 const checkpoints = [
@@ -53,6 +64,8 @@ const lapData = {
 const car = {
   x: track.cx,
   y: track.cy + 205,
+  vx: 0,
+  vy: 0,
   angle: Math.PI,
   speed: 0,
   width: 34,
@@ -60,12 +73,16 @@ const car = {
 };
 
 const physics = {
-  accel: 260,
-  brake: 320,
-  drag: 0.985,
-  steering: 2.35,
+  accel: 420,
+  brake: 440,
+  rollDrag: 0.985,
+  steering: 2.45,
   maxSpeed: 320,
   reverseSpeed: -120,
+  lateralGrip: 6.8,
+  driftGrip: 2.8,
+  driftThreshold: 200,
+  steerResponse: 8,
 };
 
 const worldObjects = [
@@ -73,8 +90,8 @@ const worldObjects = [
   { type: "tree", x: 1080, y: 136, r: 24 },
   { type: "tree", x: 172, y: 596, r: 23 },
   { type: "tree", x: 1110, y: 580, r: 22 },
-  { type: "pond", x: 650, y: 350, rx: 95, ry: 52 },
-  { type: "pond", x: 215, y: 340, rx: 60, ry: 34 },
+  { type: "pond", x: 650, y: 350, rx: 95, ry: 52, seed: 0.8 },
+  { type: "pond", x: 215, y: 340, rx: 60, ry: 34, seed: -0.55 },
   { type: "barrel", x: 447, y: 153, r: 13 },
   { type: "barrel", x: 847, y: 567, r: 13 },
 ];
@@ -82,6 +99,8 @@ const worldObjects = [
 function resetRace() {
   car.x = track.cx;
   car.y = track.cy + 205;
+  car.vx = 0;
+  car.vy = 0;
   car.angle = Math.PI;
   car.speed = 0;
   state.raceTime = 0;
@@ -96,23 +115,78 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function normEllipse(x, y, a, b) {
-  return (x * x) / (a * a) + (y * y) / (b * b);
+function ellipseRadiusAtAngle(angle, a, b) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return 1 / Math.sqrt((c * c) / (a * a) + (s * s) / (b * b));
+}
+
+function warpScale(angle, profile) {
+  let wobble = 1;
+  for (const wave of profile) {
+    wobble += wave.amp * Math.sin(angle * wave.f + wave.phase);
+  }
+  return wobble;
+}
+
+function trackRadiiAtAngle(angle) {
+  const outer = ellipseRadiusAtAngle(angle, track.outerA, track.outerB) * warpScale(angle, track.warpOuter);
+  const inner = ellipseRadiusAtAngle(angle, track.innerA, track.innerB) * warpScale(angle, track.warpInner);
+  return { outer, inner };
+}
+
+function pointOnTrackRadius(angle, radius) {
+  return {
+    x: track.cx + Math.cos(angle) * radius,
+    y: track.cy + Math.sin(angle) * radius,
+  };
+}
+
+function pointOnCenterLine(angle) {
+  const radii = trackRadiiAtAngle(angle);
+  return pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5);
+}
+
+function sampleClosedPath(sampleFn, segments = 220) {
+  const points = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    points.push(sampleFn(a));
+  }
+  return points;
+}
+
+function drawPath(points) {
+  if (!points.length) return;
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+}
+
+function blobRadius(ellipseX, ellipseY, angle, seed = 0) {
+  const base = ellipseRadiusAtAngle(angle, ellipseX, ellipseY);
+  const wobble =
+    1 +
+    0.16 * Math.sin(angle * 2 + seed) +
+    0.09 * Math.sin(angle * 4 - seed * 1.7) +
+    0.06 * Math.cos(angle * 7 + seed * 0.6);
+  return base * wobble;
 }
 
 function getSurface(x, y) {
   const dx = x - track.cx;
   const dy = y - track.cy;
-  const nOuter = normEllipse(dx, dy, track.outerA, track.outerB);
-  const nInner = normEllipse(dx, dy, track.innerA, track.innerB);
+  const angle = Math.atan2(dy, dx);
+  const dist = Math.hypot(dx, dy);
+  const radii = trackRadiiAtAngle(angle);
 
-  if (nOuter > 1) return "grass";
-  if (nInner < 1) return "innerGrass";
+  if (dist > radii.outer) return "grass";
+  if (dist < radii.inner) return "innerGrass";
 
-  const borderOuter = normEllipse(dx, dy, track.outerA - 22, track.outerB - 22);
-  const borderInner = normEllipse(dx, dy, track.innerA + 22, track.innerB + 22);
+  if (dist > radii.outer - track.borderSize || dist < radii.inner + track.borderSize) return "curb";
 
-  if (borderOuter > 1 || borderInner < 1) return "curb";
   return "asphalt";
 }
 
@@ -133,8 +207,9 @@ function pondSlowdownAt(x, y) {
     if (obj.type !== "pond") continue;
     const dx = x - obj.x;
     const dy = y - obj.y;
-    const n = normEllipse(dx, dy, obj.rx, obj.ry);
-    if (n < 1) return true;
+    const angle = Math.atan2(dy, dx);
+    const dist = Math.hypot(dx, dy);
+    if (dist < blobRadius(obj.rx, obj.ry, angle, obj.seed || 0)) return true;
   }
   return false;
 }
@@ -144,9 +219,17 @@ function updateRace(dt) {
 
   state.raceTime += dt;
 
-  if (keys.accel) car.speed += physics.accel * dt;
-  if (keys.brake) car.speed -= physics.brake * dt;
-  car.speed *= Math.pow(physics.drag, dt * 60);
+  const forwardX = Math.cos(car.angle);
+  const forwardY = Math.sin(car.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+
+  let forwardSpeed = car.vx * forwardX + car.vy * forwardY;
+  let lateralSpeed = car.vx * rightX + car.vy * rightY;
+
+  if (keys.accel) forwardSpeed += physics.accel * dt;
+  if (keys.brake) forwardSpeed -= physics.brake * dt;
+  forwardSpeed *= Math.pow(physics.rollDrag, dt * 60);
 
   const surface = getSurface(car.x, car.y);
   let grip = 1;
@@ -155,7 +238,7 @@ function updateRace(dt) {
   if (surface === "grass" || surface === "innerGrass") {
     topSpeed = 145;
     grip = 0.55;
-    car.speed *= 0.97;
+    forwardSpeed *= 0.975;
   }
   if (surface === "curb") {
     topSpeed = 350;
@@ -163,25 +246,37 @@ function updateRace(dt) {
   }
   if (pondSlowdownAt(car.x, car.y)) {
     topSpeed = Math.min(topSpeed, 70);
-    car.speed *= 0.9;
+    forwardSpeed *= 0.9;
+    lateralSpeed *= 0.9;
   }
 
-  car.speed = clamp(car.speed, physics.reverseSpeed, topSpeed);
+  forwardSpeed = clamp(forwardSpeed, physics.reverseSpeed, topSpeed);
 
   const steerInput = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
-  car.angle += steerInput * physics.steering * dt * (car.speed / physics.maxSpeed) * grip;
+  const steerSpeedFactor = clamp(Math.abs(forwardSpeed) / 70, 0, 1.8);
+  const driftFactor = clamp((Math.abs(lateralSpeed) + Math.abs(forwardSpeed) - physics.driftThreshold) / 180, 0, 1);
+  const effectiveGrip = physics.lateralGrip * (1 - driftFactor) + physics.driftGrip * driftFactor;
 
-  const vx = Math.cos(car.angle) * car.speed;
-  const vy = Math.sin(car.angle) * car.speed;
+  car.angle += steerInput * physics.steering * dt * (forwardSpeed / physics.maxSpeed) * grip * steerSpeedFactor;
 
-  const nx = car.x + vx * dt;
-  const ny = car.y + vy * dt;
+  const lateralCorrection = clamp(effectiveGrip * dt * grip, 0, 1);
+  lateralSpeed *= 1 - lateralCorrection;
+
+  const targetLateral = steerInput * Math.abs(forwardSpeed) * 0.09;
+  lateralSpeed += (targetLateral - lateralSpeed) * clamp(physics.steerResponse * dt, 0, 1);
+
+  car.vx = forwardX * forwardSpeed + rightX * lateralSpeed;
+  car.vy = forwardY * forwardSpeed + rightY * lateralSpeed;
+
+  const nx = car.x + car.vx * dt;
+  const ny = car.y + car.vy * dt;
 
   if (!objectCollisionAt(nx, ny)) {
     car.x = nx;
     car.y = ny;
   } else {
-    car.speed *= -0.25;
+    car.vx *= -0.15;
+    car.vy *= -0.15;
   }
 
   checkCheckpoints();
@@ -201,7 +296,8 @@ function checkCheckpoints() {
     }
   });
 
-  const nearStart = Math.abs(car.x - track.cx) < 30 && Math.abs(car.y - (track.cy + (track.outerB + track.innerB) * 0.5)) < 34;
+  const startPoint = pointOnCenterLine(Math.PI * 0.5);
+  const nearStart = Math.hypot(car.x - startPoint.x, car.y - startPoint.y) < 38;
 
   if (nearStart && lapData.passed.size === checkpoints.length && !state.finished) {
     const lapTime = state.raceTime - lapData.currentLapStart;
@@ -233,27 +329,45 @@ function drawTrack() {
 
   drawPixelNoise();
 
+  const outerPath = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.outer);
+  });
+  const innerPath = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.inner);
+  });
+
   ctx.fillStyle = "#7f8c8d";
   ctx.beginPath();
-  ctx.ellipse(track.cx, track.cy, track.outerA, track.outerB, 0, 0, Math.PI * 2);
-  ctx.fill();
+  drawPath(outerPath);
+  drawPath([...innerPath].reverse());
+  ctx.fill("evenodd");
 
   ctx.lineWidth = 22;
   ctx.setLineDash([16, 10]);
   ctx.strokeStyle = "#d22e2e";
+  const outerCurbPath = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.outer - 12);
+  });
   ctx.beginPath();
-  ctx.ellipse(track.cx, track.cy, track.outerA - 12, track.outerB - 12, 0, 0, Math.PI * 2);
+  drawPath(outerCurbPath);
   ctx.stroke();
 
   ctx.strokeStyle = "#f1e9d3";
+  const innerCurbPath = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.inner + 12);
+  });
   ctx.beginPath();
-  ctx.ellipse(track.cx, track.cy, track.innerA + 12, track.innerB + 12, 0, 0, Math.PI * 2);
+  drawPath(innerCurbPath);
   ctx.stroke();
   ctx.setLineDash([]);
 
   ctx.fillStyle = "#247637";
   ctx.beginPath();
-  ctx.ellipse(track.cx, track.cy, track.innerA, track.innerB, 0, 0, Math.PI * 2);
+  drawPath(innerPath);
   ctx.fill();
 
   drawDecor();
@@ -267,19 +381,42 @@ function drawDecor() {
       ctx.fillStyle = "#4a2f1e";
       ctx.fillRect(obj.x - 4, obj.y + 8, 8, 16);
       ctx.fillStyle = "#2f9c4a";
+      const canopy = sampleClosedPath((a) => {
+        const radius =
+          obj.r *
+          (1 + 0.2 * Math.sin(a * 3 + obj.x * 0.02) + 0.12 * Math.sin(a * 5 + obj.y * 0.02));
+        return {
+          x: obj.x + Math.cos(a) * radius,
+          y: obj.y + Math.sin(a) * radius,
+        };
+      }, 40);
       ctx.beginPath();
-      ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
+      drawPath(canopy);
       ctx.fill();
       ctx.fillStyle = "#3dcf60";
+      const highlight = sampleClosedPath((a) => {
+        const radius = obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08));
+        return {
+          x: obj.x - 8 + Math.cos(a) * radius,
+          y: obj.y - 6 + Math.sin(a) * radius,
+        };
+      }, 24);
       ctx.beginPath();
-      ctx.arc(obj.x - 8, obj.y - 6, obj.r * 0.45, 0, Math.PI * 2);
+      drawPath(highlight);
       ctx.fill();
     }
 
     if (obj.type === "pond") {
       ctx.fillStyle = "#1f6ca8";
+      const waterPath = sampleClosedPath((a) => {
+        const radius = blobRadius(obj.rx, obj.ry, a, obj.seed || 0);
+        return {
+          x: obj.x + Math.cos(a) * radius,
+          y: obj.y + Math.sin(a) * radius,
+        };
+      }, 64);
       ctx.beginPath();
-      ctx.ellipse(obj.x, obj.y, obj.rx, obj.ry, 0, 0, Math.PI * 2);
+      drawPath(waterPath);
       ctx.fill();
       ctx.strokeStyle = "#8de2ff";
       ctx.lineWidth = 3;
@@ -303,24 +440,39 @@ function drawRoadDetails() {
   ctx.lineWidth = 4;
   for (let i = 0; i < 32; i++) {
     const t = (i / 32) * Math.PI * 2;
-    const x = track.cx + Math.cos(t) * ((track.outerA + track.innerA) * 0.5);
-    const y = track.cy + Math.sin(t) * ((track.outerB + track.innerB) * 0.5);
+    const p = pointOnCenterLine(t);
     ctx.beginPath();
-    ctx.arc(x, y, 1.3, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
 
 function drawStartLine() {
-  const y = track.cy + (track.outerB + track.innerB) * 0.5;
-  const x = track.cx;
+  const startAngle = Math.PI * 0.5;
+  const center = pointOnCenterLine(startAngle);
+  const tangent = {
+    x: -Math.sin(startAngle),
+    y: Math.cos(startAngle),
+  };
+  const normal = {
+    x: Math.cos(startAngle),
+    y: Math.sin(startAngle),
+  };
   const width = 16;
   const height = 62;
 
   for (let i = 0; i < 6; i++) {
     for (let j = 0; j < 2; j++) {
       ctx.fillStyle = (i + j) % 2 ? "#ffffff" : "#111111";
-      ctx.fillRect(x - width + j * width, y - height / 2 + i * 10, width, 10);
+      const along = -height / 2 + i * 10;
+      const across = -width + j * width;
+      const px = center.x + tangent.x * along + normal.x * across;
+      const py = center.y + tangent.y * along + normal.y * across;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(startAngle);
+      ctx.fillRect(0, 0, width, 10);
+      ctx.restore();
     }
   }
 }
