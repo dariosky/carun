@@ -3,12 +3,35 @@ const ctx = canvas.getContext("2d");
 
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
+const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
+
+function sanitizePlayerName(raw) {
+  if (typeof raw !== "string") return "PLAYER";
+  const cleaned = raw.toUpperCase().replace(/[^A-Z0-9 ]/g, "").trim().slice(0, 12);
+  return cleaned || "PLAYER";
+}
+
+function loadPlayerName() {
+  try {
+    return sanitizePlayerName(localStorage.getItem(PLAYER_NAME_STORAGE_KEY));
+  } catch {
+    return "PLAYER";
+  }
+}
+
+function savePlayerName(name) {
+  try {
+    localStorage.setItem(PLAYER_NAME_STORAGE_KEY, sanitizePlayerName(name));
+  } catch {
+    // Ignore storage failures (private mode, blocked storage, etc.).
+  }
+}
 
 const state = {
   mode: "menu",
   menuIndex: 0,
   settingsIndex: 0,
-  playerName: "PLAYER",
+  playerName: loadPlayerName(),
   editingName: false,
   raceTime: 0,
   finished: false,
@@ -657,6 +680,8 @@ window.addEventListener("keydown", (e) => {
     }
     if (key === "enter") {
       if (state.playerName.trim().length > 0) {
+        state.playerName = sanitizePlayerName(state.playerName);
+        savePlayerName(state.playerName);
         state.editingName = false;
       }
       return;
