@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/carun.svg" alt="Carun logo" width="220" />
+</p>
+
 # CaRun
 
 CaRun is an HTML5 arcade racing game prototype inspired by colorful 90s pixel-era racers.

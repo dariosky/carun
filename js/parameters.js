@@ -60,6 +60,8 @@ export const checkpoints = [
   { angle: Math.PI * 1.5 },
 ];
 
+export const CHECKPOINT_WIDTH_MULTIPLIER = 1.4;
+
 export const worldObjects = [
   { type: "tree", x: 150, y: 150, r: 26 },
   { type: "tree", x: 1080, y: 136, r: 24 },

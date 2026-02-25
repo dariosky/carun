@@ -78,6 +78,8 @@ export function setCurbSegments(segments) {
 
 export const kartSprite = new Image();
 export let kartSpriteReady = false;
+export const appLogo = new Image();
+export let appLogoReady = false;
 
 kartSprite.addEventListener("load", () => {
   kartSpriteReady = true;
@@ -86,3 +88,11 @@ kartSprite.addEventListener("error", () => {
   console.warn("Failed to load kart sprite at assets/kart.png");
 });
 kartSprite.src = "assets/kart.png";
+
+appLogo.addEventListener("load", () => {
+  appLogoReady = true;
+});
+appLogo.addEventListener("error", () => {
+  console.warn("Failed to load app logo at assets/carun.svg");
+});
+appLogo.src = "assets/carun.svg";

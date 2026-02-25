@@ -1,4 +1,5 @@
 import {
+  CHECKPOINT_WIDTH_MULTIPLIER,
   ctx,
   WIDTH,
   HEIGHT,
@@ -13,6 +14,8 @@ import {
   worldObjects,
 } from "./parameters.js";
 import {
+  appLogo,
+  appLogoReady,
   car,
   curbSegments,
   kartSprite,
@@ -32,6 +35,7 @@ import {
   sampleClosedPath,
   trackRadiiAtAngle,
 } from "./track.js";
+import { drawAsphaltMaterial } from "./material.js";
 
 function drawPixelNoise() {
   for (let i = 0; i < 250; i++) {
@@ -139,7 +143,23 @@ function drawCheckpointFlags() {
     const tangentX = -Math.sin(a);
     const tangentY = Math.cos(a);
     const roadMid = (radii.inner + radii.outer) * 0.5;
-    const posts = [radii.inner - 10, radii.outer + 10];
+    const roadWidth = radii.outer - radii.inner;
+    const checkpointSpan = roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
+    const posts = [roadMid - checkpointSpan * 0.5, roadMid + checkpointSpan * 0.5];
+
+    if (physicsConfig.flags.DEBUG_VECTORS) {
+      const innerPin = pointOnTrackRadius(a, posts[0]);
+      const outerPin = pointOnTrackRadius(a, posts[1]);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 7]);
+      ctx.beginPath();
+      ctx.moveTo(innerPin.x, innerPin.y);
+      ctx.lineTo(outerPin.x, outerPin.y);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     for (const radius of posts) {
       const baseX = track.cx + radialX * radius;
@@ -211,11 +231,7 @@ function drawTrack() {
     return pointOnTrackRadius(a, radii.inner);
   });
 
-  ctx.fillStyle = "#7f8c8d";
-  ctx.beginPath();
-  drawPath(outerPath);
-  drawPath([...innerPath].reverse());
-  ctx.fill("evenodd");
+  drawAsphaltMaterial(ctx);
 
   curbSegments.outer.forEach((segment) =>
     drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
@@ -523,6 +539,15 @@ function drawMenu() {
   ctx.fillStyle = "#0f2640";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   drawPixelNoise();
+
+  if (appLogoReady) {
+    const maxLogoWidth = 320;
+    const maxLogoHeight = 130;
+    const ratio = Math.min(maxLogoWidth / appLogo.width, maxLogoHeight / appLogo.height);
+    const drawWidth = appLogo.width * ratio;
+    const drawHeight = appLogo.height * ratio;
+    ctx.drawImage(appLogo, WIDTH * 0.5 - drawWidth * 0.5, 22, drawWidth, drawHeight);
+  }
 
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 118px Verdana";
