@@ -11,6 +11,7 @@ import {
   physicsConfig,
   settingsItems,
   track,
+  trackOptions,
   worldObjects,
 } from "./parameters.js";
 import {
@@ -551,7 +552,7 @@ function drawMenu() {
 
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 118px Verdana";
-  ctx.fillText("CARUN", WIDTH / 2 - 245, 210);
+  ctx.fillText("CARUN", WIDTH / 2 - 245, 250);
 
   ctx.font = "bold 42px Verdana";
   menuItems.forEach((item, idx) => {
@@ -568,6 +569,140 @@ function drawMenu() {
   ctx.font = "22px Verdana";
   ctx.fillStyle = "#bfd8f7";
   ctx.fillText("Use ↑ ↓ and Enter", WIDTH / 2 - 108, HEIGHT - 80);
+}
+
+function drawPreviewLoop(points, mapPoint) {
+  if (!points.length) return;
+  const first = mapPoint(points[0]);
+  ctx.moveTo(first.x, first.y);
+  for (let i = 1; i < points.length; i++) {
+    const p = mapPoint(points[i]);
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+}
+
+function drawTrackPreviewCard(x, y, size, selected) {
+  ctx.save();
+  ctx.fillStyle = selected ? "#244864" : "#1a3347";
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = selected ? "#f2d26c" : "#6c879b";
+  ctx.lineWidth = selected ? 5 : 3;
+  ctx.strokeRect(x, y, size, size);
+
+  const pad = 18;
+  const innerX = x + pad;
+  const innerY = y + pad;
+  const innerSize = size - pad * 2;
+
+  ctx.beginPath();
+  ctx.rect(innerX, innerY, innerSize, innerSize);
+  ctx.clip();
+  ctx.fillStyle = "#2e8c42";
+  ctx.fillRect(innerX, innerY, innerSize, innerSize);
+
+  const segments = 120;
+  const outer = [];
+  const inner = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const radii = trackRadiiAtAngle(a);
+    outer.push({ x: Math.cos(a) * radii.outer, y: Math.sin(a) * radii.outer });
+    inner.push({ x: Math.cos(a) * radii.inner, y: Math.sin(a) * radii.inner });
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of outer) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const centerX = (minX + maxX) * 0.5;
+  const centerY = (minY + maxY) * 0.5;
+  const scale = Math.min(innerSize / (maxX - minX), innerSize / (maxY - minY));
+  const cardCenterX = innerX + innerSize * 0.5;
+  const cardCenterY = innerY + innerSize * 0.5;
+  const mapPoint = (p) => ({
+    x: cardCenterX + (p.x - centerX) * scale,
+    y: cardCenterY + (p.y - centerY) * scale,
+  });
+
+  ctx.fillStyle = "#787e86";
+  ctx.beginPath();
+  drawPreviewLoop(outer, mapPoint);
+  drawPreviewLoop([...inner].reverse(), mapPoint);
+  ctx.fill("evenodd");
+
+  ctx.fillStyle = "#247637";
+  ctx.beginPath();
+  drawPreviewLoop(inner, mapPoint);
+  ctx.fill();
+
+  const startAngle = Math.PI * 0.5;
+  const startRadii = trackRadiiAtAngle(startAngle);
+  const startInner = mapPoint({
+    x: Math.cos(startAngle) * startRadii.inner,
+    y: Math.sin(startAngle) * startRadii.inner,
+  });
+  const startOuter = mapPoint({
+    x: Math.cos(startAngle) * startRadii.outer,
+    y: Math.sin(startAngle) * startRadii.outer,
+  });
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(startInner.x, startInner.y);
+  ctx.lineTo(startOuter.x, startOuter.y);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawTrackSelection() {
+  ctx.fillStyle = "#11283e";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawPixelNoise();
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 70px Verdana";
+  ctx.fillText("SELECT TRACK", WIDTH * 0.5 - 248, 148);
+
+  const cardSize = 220;
+  const gap = 40;
+  const cardY = 198;
+  const totalWidth = trackOptions.length * cardSize + Math.max(0, trackOptions.length - 1) * gap;
+  const startX = WIDTH * 0.5 - totalWidth * 0.5;
+
+  for (let i = 0; i < trackOptions.length; i++) {
+    const cardX = startX + i * (cardSize + gap);
+    const selected = state.trackSelectIndex === i;
+    drawTrackPreviewCard(cardX, cardY, cardSize, selected);
+
+    ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
+    ctx.font = "bold 24px Verdana";
+    const label = trackOptions[i].name;
+    const labelWidth = ctx.measureText(label).width;
+    ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
+  }
+
+  const backY = cardY + cardSize + 106;
+  const backSelected = state.trackSelectIndex === trackOptions.length;
+  if (backSelected) {
+    ctx.fillStyle = "#ec4f4f";
+    ctx.fillRect(WIDTH * 0.5 - 145, backY - 39, 290, 52);
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 40px Verdana";
+  ctx.fillText("BACK", WIDTH * 0.5 - 62, backY);
+
+  ctx.font = "20px Verdana";
+  ctx.fillStyle = "#c3d9ec";
+  ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
 }
 
 function drawSettings() {
@@ -607,6 +742,7 @@ export function render() {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
   if (state.mode === "menu") drawMenu();
+  else if (state.mode === "trackSelect") drawTrackSelection();
   else if (state.mode === "settings") drawSettings();
   else {
     drawTrack();

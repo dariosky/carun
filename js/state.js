@@ -5,6 +5,8 @@ export const state = {
   paused: false,
   pauseMenuIndex: 0,
   menuIndex: 0,
+  trackSelectIndex: 0,
+  selectedTrackIndex: 0,
   settingsIndex: 0,
   playerName: loadPlayerName(),
   editingName: false,

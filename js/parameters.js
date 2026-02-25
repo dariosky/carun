@@ -30,8 +30,9 @@ export function savePlayerName(name) {
   }
 }
 
-export const menuItems = ["START RACE", "SETTINGS"];
+export const menuItems = ["START", "SETTINGS"];
 export const settingsItems = ["PLAYER NAME", "BACK"];
+export const trackOptions = [{ id: "classic", name: "CLASSIC LOOP" }];
 
 export const track = {
   cx: WIDTH * 0.5,

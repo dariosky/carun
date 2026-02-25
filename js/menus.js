@@ -1,17 +1,30 @@
-import { menuItems, sanitizePlayerName, savePlayerName, settingsItems } from "./parameters.js";
+import { menuItems, sanitizePlayerName, savePlayerName, settingsItems, trackOptions } from "./parameters.js";
 import { keys, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 
 function activateSelection() {
   if (state.mode === "menu") {
     if (state.menuIndex === 0) {
-      state.mode = "racing";
-      resetRace();
+      state.mode = "trackSelect";
+      state.trackSelectIndex = state.selectedTrackIndex;
     }
     if (state.menuIndex === 1) {
       state.mode = "settings";
       state.settingsIndex = 0;
       state.editingName = false;
+    }
+    return;
+  }
+
+  if (state.mode === "trackSelect") {
+    const backIndex = trackOptions.length;
+    if (state.trackSelectIndex === backIndex) {
+      state.mode = "menu";
+      state.menuIndex = 0;
+    } else {
+      state.selectedTrackIndex = state.trackSelectIndex;
+      state.mode = "racing";
+      resetRace();
     }
     return;
   }
@@ -105,17 +118,37 @@ function onKeyDown(e) {
     }
   }
 
+  if (state.mode === "trackSelect" && key === "escape") {
+    state.mode = "menu";
+    state.menuIndex = 0;
+    return;
+  }
+
   if (key === "arrowup") {
     if (state.mode === "menu") state.menuIndex = (state.menuIndex + menuItems.length - 1) % menuItems.length;
     if (state.mode === "settings") {
       state.settingsIndex = (state.settingsIndex + settingsItems.length - 1) % settingsItems.length;
+    }
+    if (state.mode === "trackSelect") {
+      state.trackSelectIndex =
+        state.trackSelectIndex === trackOptions.length ? state.selectedTrackIndex : trackOptions.length;
     }
     keys.up = true;
   }
   if (key === "arrowdown") {
     if (state.mode === "menu") state.menuIndex = (state.menuIndex + 1) % menuItems.length;
     if (state.mode === "settings") state.settingsIndex = (state.settingsIndex + 1) % settingsItems.length;
+    if (state.mode === "trackSelect") {
+      state.trackSelectIndex =
+        state.trackSelectIndex === trackOptions.length ? state.selectedTrackIndex : trackOptions.length;
+    }
     keys.down = true;
+  }
+  if (key === "arrowleft" && state.mode === "trackSelect" && state.trackSelectIndex < trackOptions.length) {
+    state.trackSelectIndex = (state.trackSelectIndex + trackOptions.length - 1) % trackOptions.length;
+  }
+  if (key === "arrowright" && state.mode === "trackSelect" && state.trackSelectIndex < trackOptions.length) {
+    state.trackSelectIndex = (state.trackSelectIndex + 1) % trackOptions.length;
   }
   if (key === "enter") activateSelection();
 
