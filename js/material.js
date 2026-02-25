@@ -1,5 +1,4 @@
-import { HEIGHT, WIDTH, track } from "./parameters.js";
-import { trackRadiiAtAngle } from "./track.js";
+import { HEIGHT, WIDTH } from "./parameters.js";
 
 let asphaltMaterial = null;
 
@@ -22,30 +21,20 @@ function createMaterialCanvas(width, height) {
 }
 
 function buildAsphaltMaterial() {
-  const materialCanvas = createMaterialCanvas(WIDTH, HEIGHT);
+  const materialCanvas = createMaterialCanvas(256, 256);
   const materialCtx = materialCanvas.getContext("2d");
-  const imageData = materialCtx.createImageData(WIDTH, HEIGHT);
+  const imageData = materialCtx.createImageData(materialCanvas.width, materialCanvas.height);
   const pixels = imageData.data;
+  const width = materialCanvas.width;
+  const height = materialCanvas.height;
 
-  for (let y = 0; y < HEIGHT; y++) {
-    for (let x = 0; x < WIDTH; x++) {
-      const px = (y * WIDTH + x) * 4;
-      const dx = x - track.cx;
-      const dy = y - track.cy;
-      const angle = Math.atan2(dy, dx);
-      const dist = Math.hypot(dx, dy);
-      const radii = trackRadiiAtAngle(angle);
-
-      if (dist < radii.inner || dist > radii.outer) {
-        pixels[px + 3] = 0;
-        continue;
-      }
-
-      const laneT = (dist - radii.inner) / Math.max(radii.outer - radii.inner, 1e-6);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const px = (y * width + x) * 4;
+      const laneT = y / Math.max(height - 1, 1);
       const edgeLift = Math.abs(laneT - 0.5) * 2;
       const outerBias = laneT - 0.5;
       const baseTone = 112 + edgeLift * 16 + outerBias * 8;
-
       const grain = (hashNoise2D(x, y, 17) - 0.5) * 24;
       const speckle = hashNoise2D(x, y, 71) > 0.92 ? (hashNoise2D(x, y, 113) - 0.5) * 18 : 0;
       const shade = clampByte(baseTone + grain + speckle);
@@ -66,7 +55,13 @@ function getAsphaltMaterial() {
   return asphaltMaterial;
 }
 
-export function drawAsphaltMaterial(targetCtx) {
-  targetCtx.drawImage(getAsphaltMaterial(), 0, 0);
+export function getAsphaltPattern(targetCtx) {
+  return targetCtx.createPattern(getAsphaltMaterial(), "repeat");
 }
 
+export function drawAsphaltMaterial(targetCtx) {
+  targetCtx.save();
+  targetCtx.fillStyle = getAsphaltPattern(targetCtx);
+  targetCtx.fillRect(0, 0, WIDTH, HEIGHT);
+  targetCtx.restore();
+}

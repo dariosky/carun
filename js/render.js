@@ -7,6 +7,8 @@ import {
   CURB_MIN_WIDTH,
   CURB_STRIPE_LENGTH,
   checkpoints,
+  getConnectedCenterlinePoints,
+  getTrackPreset,
   menuItems,
   physicsConfig,
   settingsItems,
@@ -31,12 +33,13 @@ import {
   blobRadius,
   drawPath,
   drawStripedCurb,
+  isCenterlineTrack,
   pointOnCenterLine,
-  pointOnTrackRadius,
   sampleClosedPath,
-  trackRadiiAtAngle,
+  trackBoundaryPaths,
+  trackFrameAtAngle,
 } from "./track.js";
-import { drawAsphaltMaterial } from "./material.js";
+import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
 
 function drawPixelNoise() {
   for (let i = 0; i < 250; i++) {
@@ -138,19 +141,23 @@ function drawSkidMarks() {
 function drawCheckpointFlags() {
   for (const cp of checkpoints) {
     const a = cp.angle;
-    const radii = trackRadiiAtAngle(a);
-    const radialX = Math.cos(a);
-    const radialY = Math.sin(a);
-    const tangentX = -Math.sin(a);
-    const tangentY = Math.cos(a);
-    const roadMid = (radii.inner + radii.outer) * 0.5;
-    const roadWidth = radii.outer - radii.inner;
+    const frame = trackFrameAtAngle(a, track);
+    const center = frame.point;
+    const normal = frame.normal;
+    const tangent = frame.tangent;
+    const roadWidth = frame.roadWidth;
     const checkpointSpan = roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
-    const posts = [roadMid - checkpointSpan * 0.5, roadMid + checkpointSpan * 0.5];
+    const posts = [-checkpointSpan * 0.5, checkpointSpan * 0.5];
 
     if (physicsConfig.flags.DEBUG_VECTORS) {
-      const innerPin = pointOnTrackRadius(a, posts[0]);
-      const outerPin = pointOnTrackRadius(a, posts[1]);
+      const innerPin = {
+        x: center.x + normal.x * posts[0],
+        y: center.y + normal.y * posts[0],
+      };
+      const outerPin = {
+        x: center.x + normal.x * posts[1],
+        y: center.y + normal.y * posts[1],
+      };
       ctx.save();
       ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
       ctx.lineWidth = 2;
@@ -163,13 +170,13 @@ function drawCheckpointFlags() {
     }
 
     for (const radius of posts) {
-      const baseX = track.cx + radialX * radius;
-      const baseY = track.cy + radialY * radius;
+      const baseX = center.x + normal.x * radius;
+      const baseY = center.y + normal.y * radius;
       const topX = baseX;
       const topY = baseY - 16;
-      const side = radius < roadMid ? 1 : -1;
-      const flagTipX = topX + tangentX * 10 * side;
-      const flagTipY = topY + tangentY * 10 * side;
+      const side = radius < 0 ? 1 : -1;
+      const flagTipX = topX + tangent.x * 10 * side;
+      const flagTipY = topY + tangent.y * 10 * side;
 
       ctx.strokeStyle = "#e5e5e5";
       ctx.lineWidth = 2;
@@ -191,18 +198,19 @@ function drawCheckpointFlags() {
 
 function drawStartLine() {
   const startAngle = Math.PI * 0.5;
-  const radii = trackRadiiAtAngle(startAngle);
-  const center = pointOnTrackRadius(startAngle, (radii.outer + radii.inner) * 0.5);
-  const span = radii.outer - radii.inner;
+  const frame = trackFrameAtAngle(startAngle, track);
+  const center = frame.point;
+  const span = frame.roadWidth;
   const thickness = 20;
   const cols = Math.max(8, Math.floor(span / 18));
   const rows = 2;
   const cellW = span / cols;
   const cellH = thickness / rows;
+  const normalAngle = Math.atan2(frame.normal.y, frame.normal.x);
 
   ctx.save();
   ctx.translate(center.x, center.y);
-  ctx.rotate(startAngle);
+  ctx.rotate(normalAngle);
 
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
@@ -223,16 +231,38 @@ function drawTrack() {
 
   drawPixelNoise();
 
-  const outerPath = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.outer);
-  });
-  const innerPath = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.inner);
-  });
+  const boundaries = trackBoundaryPaths(track, 260);
+  const outerPath = boundaries.outer;
+  const innerPath = boundaries.inner;
+  const centerlineTrack = isCenterlineTrack(track);
 
-  drawAsphaltMaterial(ctx);
+  if (centerlineTrack) {
+    const roadWidth = Math.max(24, track.centerlineHalfWidth || 90) * 2;
+    if (boundaries.center.length) {
+      const asphaltPattern = getAsphaltPattern(ctx);
+      ctx.save();
+      ctx.strokeStyle = asphaltPattern || "#7f8c8d";
+      ctx.lineWidth = roadWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(boundaries.center[0].x, boundaries.center[0].y);
+      for (let i = 1; i < boundaries.center.length; i++) {
+        ctx.lineTo(boundaries.center[i].x, boundaries.center[i].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+  } else {
+    ctx.save();
+    ctx.beginPath();
+    drawPath(outerPath);
+    drawPath([...innerPath].reverse());
+    ctx.clip("evenodd");
+    drawAsphaltMaterial(ctx);
+    ctx.restore();
+  }
 
   curbSegments.outer.forEach((segment) =>
     drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
@@ -241,10 +271,12 @@ function drawTrack() {
     drawStripedCurb(segment, 1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
   );
 
-  ctx.fillStyle = "#247637";
-  ctx.beginPath();
-  drawPath(innerPath);
-  ctx.fill();
+  if (!centerlineTrack) {
+    ctx.fillStyle = "#247637";
+    ctx.beginPath();
+    drawPath(innerPath);
+    ctx.fill();
+  }
 
   drawDecor();
   drawSkidMarks();
@@ -582,7 +614,7 @@ function drawPreviewLoop(points, mapPoint) {
   ctx.closePath();
 }
 
-function drawTrackPreviewCard(x, y, size, selected) {
+function drawTrackPreviewCard(x, y, size, selected, trackDef) {
   ctx.save();
   ctx.fillStyle = selected ? "#244864" : "#1a3347";
   ctx.fillRect(x, y, size, size);
@@ -601,15 +633,9 @@ function drawTrackPreviewCard(x, y, size, selected) {
   ctx.fillStyle = "#2e8c42";
   ctx.fillRect(innerX, innerY, innerSize, innerSize);
 
-  const segments = 120;
-  const outer = [];
-  const inner = [];
-  for (let i = 0; i < segments; i++) {
-    const a = (i / segments) * Math.PI * 2;
-    const radii = trackRadiiAtAngle(a);
-    outer.push({ x: Math.cos(a) * radii.outer, y: Math.sin(a) * radii.outer });
-    inner.push({ x: Math.cos(a) * radii.inner, y: Math.sin(a) * radii.inner });
-  }
+  const boundaries = trackBoundaryPaths(trackDef, 180);
+  const outer = boundaries.outer;
+  const inner = boundaries.inner;
 
   let minX = Infinity;
   let minY = Infinity;
@@ -644,14 +670,15 @@ function drawTrackPreviewCard(x, y, size, selected) {
   ctx.fill();
 
   const startAngle = Math.PI * 0.5;
-  const startRadii = trackRadiiAtAngle(startAngle);
+  const startFrame = trackFrameAtAngle(startAngle, trackDef);
+  const halfRoad = startFrame.roadWidth * 0.5;
   const startInner = mapPoint({
-    x: Math.cos(startAngle) * startRadii.inner,
-    y: Math.sin(startAngle) * startRadii.inner,
+    x: startFrame.point.x - startFrame.normal.x * halfRoad,
+    y: startFrame.point.y - startFrame.normal.y * halfRoad,
   });
   const startOuter = mapPoint({
-    x: Math.cos(startAngle) * startRadii.outer,
-    y: Math.sin(startAngle) * startRadii.outer,
+    x: startFrame.point.x + startFrame.normal.x * halfRoad,
+    y: startFrame.point.y + startFrame.normal.y * halfRoad,
   });
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 3;
@@ -675,13 +702,14 @@ function drawTrackSelection() {
   const cardSize = 220;
   const gap = 40;
   const cardY = 198;
-  const totalWidth = trackOptions.length * cardSize + Math.max(0, trackOptions.length - 1) * gap;
+  const cardCount = trackOptions.length + 1;
+  const totalWidth = cardCount * cardSize + Math.max(0, cardCount - 1) * gap;
   const startX = WIDTH * 0.5 - totalWidth * 0.5;
 
   for (let i = 0; i < trackOptions.length; i++) {
     const cardX = startX + i * (cardSize + gap);
     const selected = state.trackSelectIndex === i;
-    drawTrackPreviewCard(cardX, cardY, cardSize, selected);
+    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(i).track);
 
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
     ctx.font = "bold 24px Verdana";
@@ -690,8 +718,25 @@ function drawTrackSelection() {
     ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
   }
 
+  const addIndex = trackOptions.length;
+  const addX = startX + addIndex * (cardSize + gap);
+  const addSelected = state.trackSelectIndex === addIndex;
+  ctx.fillStyle = addSelected ? "#244864" : "#1a3347";
+  ctx.fillRect(addX, cardY, cardSize, cardSize);
+  ctx.strokeStyle = addSelected ? "#f2d26c" : "#6c879b";
+  ctx.lineWidth = addSelected ? 5 : 3;
+  ctx.strokeRect(addX, cardY, cardSize, cardSize);
+  ctx.fillStyle = addSelected ? "#ffffff" : "#b6cad9";
+  ctx.font = "bold 102px Verdana";
+  ctx.fillText("+", addX + cardSize * 0.5 - 30, cardY + cardSize * 0.5 + 34);
+  ctx.font = "bold 22px Verdana";
+  const addLabel = "UPLOAD TRACK";
+  const addLabelWidth = ctx.measureText(addLabel).width;
+  ctx.fillText(addLabel, addX + cardSize * 0.5 - addLabelWidth * 0.5, cardY + cardSize + 34);
+
   const backY = cardY + cardSize + 106;
-  const backSelected = state.trackSelectIndex === trackOptions.length;
+  const backIndex = trackOptions.length + 1;
+  const backSelected = state.trackSelectIndex === backIndex;
   if (backSelected) {
     ctx.fillStyle = "#ec4f4f";
     ctx.fillRect(WIDTH * 0.5 - 145, backY - 39, 290, 52);
@@ -703,6 +748,63 @@ function drawTrackSelection() {
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#c3d9ec";
   ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
+  ctx.fillText("+ card imports a JSON track file", WIDTH * 0.5 - 172, HEIGHT - 42);
+  if (physicsConfig.flags.DEBUG_VECTORS) {
+    ctx.fillText("Press E to edit selected track", WIDTH * 0.5 - 150, HEIGHT - 14);
+  }
+}
+
+function drawStroke(stroke, color, lineWidth) {
+  if (!stroke || stroke.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(stroke[0].x, stroke[0].y);
+  for (let i = 1; i < stroke.length; i++) {
+    ctx.lineTo(stroke[i].x, stroke[i].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawEditorOverlay() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const strokes = preset.centerlineStrokes || [];
+  const connectedLoop = getConnectedCenterlinePoints(strokes);
+  drawStroke(connectedLoop, "rgba(96, 248, 255, 0.78)", 2);
+  for (const stroke of strokes) {
+    drawStroke(stroke, "rgba(245, 241, 88, 0.9)", 4);
+  }
+  drawStroke(state.editor.activeStroke, "rgba(255, 255, 255, 0.95)", 3);
+
+  const cx = state.editor.cursorX;
+  const cy = state.editor.cursorY;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, cy);
+  ctx.lineTo(cx + 12, cy);
+  ctx.moveTo(cx, cy - 12);
+  ctx.lineTo(cx, cy + 12);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(5, 10, 18, 0.75)";
+  ctx.fillRect(18, 16, 572, 84);
+  ctx.fillStyle = "#d7e8ff";
+  ctx.font = "18px Verdana";
+  ctx.fillText("EDITOR MODE - Mouse drag: draw centerline", 30, 48);
+  ctx.fillText("T: tree  W: water  B: barrel  Space: generate  Esc: back", 30, 76);
+}
+
+function drawEditor() {
+  drawTrack();
+  drawEditorOverlay();
 }
 
 function drawSettings() {
@@ -738,11 +840,34 @@ function drawSettings() {
   ctx.fillText("Enter edits/chooses. Esc exits name edit.", WIDTH / 2 - 205, HEIGHT - 80);
 }
 
+function drawSnackbar() {
+  if (!state.snackbar.text || state.snackbar.time <= 0) return;
+  const text = state.snackbar.text;
+  const alpha = Math.min(1, state.snackbar.time / 0.25);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = "bold 22px Verdana";
+  const paddingX = 22;
+  const width = ctx.measureText(text).width + paddingX * 2;
+  const height = 44;
+  const x = WIDTH * 0.5 - width * 0.5;
+  const y = HEIGHT - 58;
+  ctx.fillStyle = "rgba(8, 16, 24, 0.85)";
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, width, height);
+  ctx.fillStyle = "#f2fbff";
+  ctx.fillText(text, x + paddingX, y + 30);
+  ctx.restore();
+}
+
 export function render() {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
   if (state.mode === "menu") drawMenu();
   else if (state.mode === "trackSelect") drawTrackSelection();
+  else if (state.mode === "editor") drawEditor();
   else if (state.mode === "settings") drawSettings();
   else {
     drawTrack();
@@ -752,4 +877,6 @@ export function render() {
     drawHUD();
     drawPauseOverlay();
   }
+
+  drawSnackbar();
 }

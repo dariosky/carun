@@ -7,7 +7,7 @@ import {
   CURB_OUTSET,
   ctx,
 } from "./parameters.js";
-import { clamp, normalizeVec, signedAngleBetween } from "./utils.js";
+import {clamp, normalizeVec, signedAngleBetween} from "./utils.js";
 
 export function ellipseRadiusAtAngle(angle, a, b) {
   const c = Math.cos(angle);
@@ -23,22 +23,176 @@ export function warpScale(angle, profile) {
   return wobble;
 }
 
-export function trackRadiiAtAngle(angle) {
-  const outer = ellipseRadiusAtAngle(angle, track.outerA, track.outerB) * warpScale(angle, track.warpOuter);
-  const inner = ellipseRadiusAtAngle(angle, track.innerA, track.innerB) * warpScale(angle, track.warpInner);
-  return { outer, inner };
+function normalizeAngle(angle) {
+  let a = angle % (Math.PI * 2);
+  if (a < 0) a += Math.PI * 2;
+  return a;
 }
 
-export function pointOnTrackRadius(angle, radius) {
+function getCenterlineLoop(trackDef = track) {
+  if (!Array.isArray(trackDef.centerlineLoop) || trackDef.centerlineLoop.length < 3) return null;
+  return trackDef.centerlineLoop;
+}
+
+export function isCenterlineTrack(trackDef = track) {
+  return !!getCenterlineLoop(trackDef);
+}
+
+function pointOnLoopProgress(loop, progress) {
+  const n = loop.length;
+  if (!n) return {x: 0, y: 0};
+  const wrapped = ((progress % 1) + 1) % 1;
+  const f = wrapped * n;
+  const i = Math.floor(f) % n;
+  const j = (i + 1) % n;
+  const t = f - Math.floor(f);
+  const a = loop[i];
+  const b = loop[j];
   return {
-    x: track.cx + Math.cos(angle) * radius,
-    y: track.cy + Math.sin(angle) * radius,
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
   };
 }
 
-export function pointOnCenterLine(angle) {
-  const radii = trackRadiiAtAngle(angle);
-  return pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5);
+function tangentOnLoopProgress(loop, progress) {
+  const n = loop.length;
+  if (!n) return {x: 1, y: 0};
+  const wrapped = ((progress % 1) + 1) % 1;
+  const i = Math.floor(wrapped * n) % n;
+  const prev = loop[(i - 1 + n) % n];
+  const next = loop[(i + 1) % n];
+  return normalizeVec(next.x - prev.x, next.y - prev.y);
+}
+
+function offsetLoop(loop, offset) {
+  const n = loop.length;
+  if (!n) return [];
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const prev = loop[(i - 1 + n) % n];
+    const next = loop[(i + 1) % n];
+    const t = normalizeVec(next.x - prev.x, next.y - prev.y);
+    const nx = -t.y;
+    const ny = t.x;
+    out[i] = {
+      x: loop[i].x + nx * offset,
+      y: loop[i].y + ny * offset,
+    };
+  }
+  return out;
+}
+
+function nearestDistanceAndProgressToLoop(x, y, loop) {
+  let bestDistSq = Infinity;
+  let bestProgress = 0;
+  const n = loop.length;
+
+  for (let i = 0; i < n; i++) {
+    const a = loop[i];
+    const b = loop[(i + 1) % n];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = Math.max(dx * dx + dy * dy, 1e-8);
+    const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / lenSq, 0, 1);
+    const px = a.x + dx * t;
+    const py = a.y + dy * t;
+    const distSq = (x - px) * (x - px) + (y - py) * (y - py);
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestProgress = (i + t) / n;
+    }
+  }
+
+  return {distance: Math.sqrt(bestDistSq), progress: bestProgress};
+}
+
+export function trackRadiiAtAngle(angle, trackDef = track) {
+  const loop = getCenterlineLoop(trackDef);
+  if (loop) {
+    const progress = normalizeAngle(angle) / (Math.PI * 2);
+    const centerPoint = pointOnLoopProgress(loop, progress);
+    const centerRadius = Math.hypot(centerPoint.x - trackDef.cx, centerPoint.y - trackDef.cy);
+    const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
+    return {
+      outer: centerRadius + halfWidth,
+      inner: Math.max(8, centerRadius - halfWidth),
+    };
+  }
+
+  const outer =
+    ellipseRadiusAtAngle(angle, trackDef.outerA, trackDef.outerB) * warpScale(angle, trackDef.warpOuter);
+  const inner =
+    ellipseRadiusAtAngle(angle, trackDef.innerA, trackDef.innerB) * warpScale(angle, trackDef.warpInner);
+  return {outer, inner};
+}
+
+export function pointOnTrackRadius(angle, radius, trackDef = track) {
+  return {
+    x: trackDef.cx + Math.cos(angle) * radius,
+    y: trackDef.cy + Math.sin(angle) * radius,
+  };
+}
+
+export function pointOnCenterLine(angle, trackDef = track) {
+  const loop = getCenterlineLoop(trackDef);
+  if (loop) {
+    const progress = normalizeAngle(angle) / (Math.PI * 2);
+    return pointOnLoopProgress(loop, progress);
+  }
+  const radii = trackRadiiAtAngle(angle, trackDef);
+  return pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5, trackDef);
+}
+
+export function trackProgressAtPoint(x, y, trackDef = track) {
+  const loop = getCenterlineLoop(trackDef);
+  if (loop) {
+    return nearestDistanceAndProgressToLoop(x, y, loop).progress;
+  }
+
+  const angle = normalizeAngle(Math.atan2(y - trackDef.cy, x - trackDef.cx));
+  return angle / (Math.PI * 2);
+}
+
+export function trackFrameAtAngle(angle, trackDef = track) {
+  const loop = getCenterlineLoop(trackDef);
+  if (loop) {
+    const progress = normalizeAngle(angle) / (Math.PI * 2);
+    const point = pointOnLoopProgress(loop, progress);
+    const tangent = tangentOnLoopProgress(loop, progress);
+    const normal = {x: -tangent.y, y: tangent.x};
+    const roadWidth = (trackDef.centerlineHalfWidth || 90) * 2;
+    return {point, tangent, normal, roadWidth};
+  }
+
+  const radii = trackRadiiAtAngle(angle, trackDef);
+  const point = pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5, trackDef);
+  const tangent = {x: -Math.sin(angle), y: Math.cos(angle)};
+  const normal = {x: Math.cos(angle), y: Math.sin(angle)};
+  return {point, tangent, normal, roadWidth: radii.outer - radii.inner};
+}
+
+export function trackBoundaryPaths(trackDef = track, segments = 220) {
+  const loop = getCenterlineLoop(trackDef);
+  if (loop) {
+    const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
+    return {
+      center: loop.map((p) => ({x: p.x, y: p.y})),
+      outer: offsetLoop(loop, halfWidth),
+      inner: offsetLoop(loop, -halfWidth),
+    };
+  }
+
+  return {
+    center: sampleClosedPath((a) => pointOnCenterLine(a, trackDef), segments),
+    outer: sampleClosedPath((a) => {
+      const radii = trackRadiiAtAngle(a, trackDef);
+      return pointOnTrackRadius(a, radii.outer, trackDef);
+    }, segments),
+    inner: sampleClosedPath((a) => {
+      const radii = trackRadiiAtAngle(a, trackDef);
+      return pointOnTrackRadius(a, radii.inner, trackDef);
+    }, segments),
+  };
 }
 
 export function sampleClosedPath(sampleFn, segments = 220) {
@@ -118,7 +272,7 @@ export function drawStripedCurb(
 
     const endInfo = pointAtDistance(endDist, seg);
     points.push(endInfo.point);
-    return { points, segIndex: endInfo.segIndex };
+    return {points, segIndex: endInfo.segIndex};
   };
 
   const drawExtrudedSlice = (points, width, color) => {
@@ -170,16 +324,30 @@ export function drawStripedCurb(
 }
 
 function buildCurbSegments() {
-  const segmentCount = 280;
-  const center = sampleClosedPath((a) => pointOnCenterLine(a), segmentCount);
-  const outer = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
-  }, segmentCount);
-  const inner = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
-  }, segmentCount);
+  const base = trackBoundaryPaths(track, 280);
+  const center = base.center;
+  const segmentCount = center.length;
+  if (segmentCount < 6) {
+    throw new Error("Insufficient centerline samples for curb generation.");
+  }
+
+  let outer;
+  let inner;
+  if (isCenterlineTrack(track)) {
+    const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
+    const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
+    outer = offsetLoop(center, curbOffset);
+    inner = offsetLoop(center, -curbOffset);
+  } else {
+    outer = sampleClosedPath((a) => {
+      const radii = trackRadiiAtAngle(a);
+      return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
+    }, segmentCount);
+    inner = sampleClosedPath((a) => {
+      const radii = trackRadiiAtAngle(a);
+      return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
+    }, segmentCount);
+  }
 
   const absCurvatures = [];
   const turning = new Array(segmentCount).fill(false);
@@ -248,6 +416,16 @@ function buildCurbSegments() {
 }
 
 function buildFullCurbSegments() {
+  if (isCenterlineTrack(track)) {
+    const center = trackBoundaryPaths(track, 280).center;
+    const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
+    const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
+    return {
+      outer: [offsetLoop(center, curbOffset)],
+      inner: [offsetLoop(center, -curbOffset)],
+    };
+  }
+
   return {
     outer: [
       sampleClosedPath((a) => {
@@ -274,6 +452,15 @@ export function initCurbSegments() {
 }
 
 function getSurface(x, y) {
+  const loop = getCenterlineLoop(track);
+  if (loop) {
+    const {distance} = nearestDistanceAndProgressToLoop(x, y, loop);
+    const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
+    if (distance > halfWidth) return "grass";
+    if (distance > halfWidth - track.borderSize) return "curb";
+    return "asphalt";
+  }
+
   const dx = x - track.cx;
   const dy = y - track.cy;
   const angle = Math.atan2(dy, dx);
@@ -342,5 +529,5 @@ export function resolveObjectCollisions(x, y) {
     if (!pushed) break;
   }
 
-  return { x: rx, y: ry, hit, normalX, normalY };
+  return {x: rx, y: ry, hit, normalX, normalY};
 }

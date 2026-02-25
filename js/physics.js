@@ -1,7 +1,7 @@
 import { physicsConfig, checkpoints, track } from "./parameters.js";
 import { car, keys, lapData, physicsRuntime, skidMarks, state } from "./state.js";
 import { clamp, moveTowards } from "./utils.js";
-import { pointOnCenterLine, resolveObjectCollisions, surfaceAt } from "./track.js";
+import { pointOnCenterLine, resolveObjectCollisions, surfaceAt, trackProgressAtPoint } from "./track.js";
 
 function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
@@ -68,11 +68,14 @@ function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
 }
 
 export function resetRace() {
-  car.x = track.cx;
-  car.y = track.cy + 205;
+  const spawnAngle = Math.PI * 0.5;
+  const spawnPoint = pointOnCenterLine(spawnAngle, track);
+  const aheadPoint = pointOnCenterLine(spawnAngle + 0.02, track);
+  car.x = spawnPoint.x;
+  car.y = spawnPoint.y;
   car.vx = 0;
   car.vy = 0;
-  car.angle = Math.PI;
+  car.angle = Math.atan2(aheadPoint.y - spawnPoint.y, aheadPoint.x - spawnPoint.x);
   car.speed = 0;
   state.raceTime = 0;
   state.finished = false;
@@ -315,15 +318,13 @@ export function updateRace(dt) {
 }
 
 function checkCheckpoints() {
-  const dx = car.x - track.cx;
-  const dy = car.y - track.cy;
-  let angle = Math.atan2(dy, dx);
-  if (angle < 0) angle += Math.PI * 2;
+  const progress = trackProgressAtPoint(car.x, car.y, track);
 
   checkpoints.forEach((cp, idx) => {
-    let diff = Math.abs(angle - cp.angle);
-    diff = Math.min(diff, Math.PI * 2 - diff);
-    if (diff < 0.2) {
+    const cpProgress = ((cp.angle % (Math.PI * 2)) + Math.PI * 2) / (Math.PI * 2);
+    let diff = Math.abs(progress - cpProgress);
+    diff = Math.min(diff, 1 - diff);
+    if (diff < 0.06) {
       lapData.passed.add(idx);
     }
   });

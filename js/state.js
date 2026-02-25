@@ -18,6 +18,17 @@ export const state = {
     goTime: 0,
     goFlash: 0,
   },
+  editor: {
+    trackIndex: 0,
+    cursorX: track.cx,
+    cursorY: track.cy,
+    drawing: false,
+    activeStroke: [],
+  },
+  snackbar: {
+    text: "",
+    time: 0,
+  },
 };
 
 export const keys = {

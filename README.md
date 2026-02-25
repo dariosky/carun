@@ -73,6 +73,12 @@ npx serve .
 
 Then open the local URL shown by the server.
 
+## Screenshots
+
+### Current build
+
+![CaRun gameplay screenshot](screenshots/Screenshot%202026-02-26%20at%2000.38.18.png)
+
 ## Project Structure
 
 - `index.html`: canvas app shell
