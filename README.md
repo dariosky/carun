@@ -52,6 +52,8 @@ Build a fun-first, indie-style top-down racing game where:
 - `S` or `ArrowDown`: brake/reverse
 - `A` or `ArrowLeft`: steer left
 - `D` or `ArrowRight`: steer right
+- `Space`: handbrake
+- `P`: pause/resume (shows controls modal and freezes race timers)
 - `Esc`: return to menu
 
 ## Run Locally
@@ -69,8 +71,8 @@ Then open the local URL shown by the server.
 
 ## Project Structure
 
-- `index.html`: canvas app shell + help panel
-- `styles.css`: presentation and responsive layout
+- `index.html`: canvas app shellw
+- `styles.css`: full-screen presentation and responsive layout
 - `game.js`: game loop, menu flow, rendering, physics, collisions, timing
 
 ## Next Roadmap

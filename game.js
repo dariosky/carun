@@ -29,6 +29,8 @@ function savePlayerName(name) {
 
 const state = {
   mode: "menu",
+  paused: false,
+  pauseMenuIndex: 0,
   menuIndex: 0,
   settingsIndex: 0,
   playerName: loadPlayerName(),
@@ -104,8 +106,8 @@ const car = {
 
 const physicsConfig = {
   car: {
-    maxSpeed: 360,
-    engineAccel: 900,
+    maxSpeed: 350,
+    engineAccel: 800,
     brakeDecel: 1500,
     coastDecel: 320,
     longDrag: 0.85,
@@ -124,6 +126,7 @@ const physicsConfig = {
     speedSensitiveSteer: 0.55,
     handbrakeGrip: 0.28,
     handbrakeYawBoost: 0.8,
+    handbrakeLongDecel: 1400,
   },
   surfaces: {
     asphalt: { lateralGripMul: 0.95, longDragMul: 1.0, engineMul: 1.0, coastDecelMul: 1.0 },
@@ -144,7 +147,9 @@ const physicsConfig = {
     surfaceBlendTime: 0.05,
     driftSteerThreshold: 0.08,
     lowSpeedSteerAt: 120,
+    pivotAtLowSpeedRatio: 0.5,
     pivotFromRearRatio: 0.9,
+    pivotBlendSpeed: 320,
   },
 };
 
@@ -166,6 +171,8 @@ const physicsRuntime = {
     vForward: 0,
     vLateral: 0,
   },
+  wheelLastPoints: null,
+  prevForwardSpeed: null,
 };
 
 const worldObjects = [
@@ -185,6 +192,7 @@ const CURB_MIN_WIDTH = 3;
 const CURB_MAX_WIDTH = 22;
 const CURB_STRIPE_LENGTH = 10;
 const CURB_OUTSET = 20;
+const skidMarks = [];
 const kartSprite = new Image();
 let kartSpriteReady = false;
 
@@ -205,6 +213,8 @@ function resetRace() {
   car.speed = 0;
   state.raceTime = 0;
   state.finished = false;
+  state.paused = false;
+  state.pauseMenuIndex = 0;
   lapData.currentLapStart = 0;
   lapData.lapTimes = [];
   lapData.passed = new Set([0]);
@@ -222,6 +232,17 @@ function resetRace() {
   physicsRuntime.collisionGripTimer = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = { lateralGripMul: 1, longDragMul: 1, engineMul: 1, coastDecelMul: 1 };
+  physicsRuntime.wheelLastPoints = null;
+  physicsRuntime.prevForwardSpeed = null;
+  skidMarks.length = 0;
+}
+
+function clearRaceInputs() {
+  keys.accel = false;
+  keys.brake = false;
+  keys.left = false;
+  keys.right = false;
+  keys.handbrake = false;
 }
 
 function clamp(v, min, max) {
@@ -237,6 +258,59 @@ function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
   const response = clamp((1 - smoothing) * dt * 60, 0, 1);
   return current + (target - current) * response;
+}
+
+function wheelWorldPoints() {
+  const forwardX = Math.cos(car.angle);
+  const forwardY = Math.sin(car.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  const frontOffset = car.width * 0.36;
+  const rearOffset = -car.width * 0.34;
+  const sideOffset = car.height * 0.43;
+  const localOffsets = [
+    { x: frontOffset, y: -sideOffset },
+    { x: frontOffset, y: sideOffset },
+    { x: rearOffset, y: -sideOffset },
+    { x: rearOffset, y: sideOffset },
+  ];
+
+  return localOffsets.map((o) => ({
+    x: car.x + forwardX * o.x + rightX * o.y,
+    y: car.y + forwardY * o.x + rightY * o.y,
+  }));
+}
+
+function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
+  const points = wheelWorldPoints();
+  const lastPoints = physicsRuntime.wheelLastPoints;
+  physicsRuntime.wheelLastPoints = points;
+  if (!lastPoints) return;
+
+  const isGrass = surfaceName === "grass";
+  const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
+  const speedAbs = Math.abs(forwardSpeed);
+  if (!isGrass && speedAbs < 8 && Math.abs(lateralSpeed) < 8) return;
+  const strongAccel = longAccel > 480;
+  const strongBrake = longAccel < -520;
+  const skidding = Math.abs(lateralSpeed) > 95;
+  const handbrakeSkid = physicsRuntime.input.handbrake > 0.08 && speedAbs > 24;
+  const shouldDrawRoadSkids = isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid);
+  if (!isGrass && !shouldDrawRoadSkids) return;
+
+  const color = isGrass ? "rgba(112, 74, 44, 0.40)" : "rgba(20, 20, 20, 0.37)";
+  const width = isGrass ? 2.7 : 2.2;
+
+  for (let i = 0; i < points.length; i++) {
+    skidMarks.push({
+      x1: lastPoints[i].x,
+      y1: lastPoints[i].y,
+      x2: points[i].x,
+      y2: points[i].y,
+      color,
+      width,
+    });
+  }
 }
 
 function ellipseRadiusAtAngle(angle, a, b) {
@@ -628,16 +702,42 @@ function surfaceAt(x, y) {
   return "asphalt";
 }
 
-function objectCollisionAt(x, y) {
-  for (const obj of worldObjects) {
-    if (obj.type === "tree" || obj.type === "barrel") {
-      const r = obj.r + 8;
-      const dx = x - obj.x;
-      const dy = y - obj.y;
-      if (dx * dx + dy * dy < r * r) return true;
+function resolveObjectCollisions(x, y) {
+  let rx = x;
+  let ry = y;
+  let hit = false;
+  let normalX = 0;
+  let normalY = 0;
+  const carRadius = 8;
+
+  // Iterate to resolve overlaps cleanly when touching multiple props.
+  for (let pass = 0; pass < 3; pass++) {
+    let pushed = false;
+
+    for (const obj of worldObjects) {
+      if (obj.type !== "tree" && obj.type !== "barrel") continue;
+      const minDist = obj.r + carRadius;
+      const dx = rx - obj.x;
+      const dy = ry - obj.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= minDist * minDist) continue;
+
+      hit = true;
+      pushed = true;
+      const dist = Math.sqrt(Math.max(distSq, 1e-8));
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const penetration = minDist - dist;
+      rx += nx * (penetration + 0.25);
+      ry += ny * (penetration + 0.25);
+      normalX = nx;
+      normalY = ny;
     }
+
+    if (!pushed) break;
   }
-  return false;
+
+  return { x: rx, y: ry, hit, normalX, normalY };
 }
 
 function pondSlowdownAt(x, y) {
@@ -722,6 +822,13 @@ function updateRace(dt) {
       carCfg.coastDecel * physicsRuntime.surface.coastDecelMul * dt,
     );
   }
+  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
+    forwardSpeed = moveTowards(
+      forwardSpeed,
+      0,
+      assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt,
+    );
+  }
   forwardSpeed *= Math.exp(-carCfg.longDrag * physicsRuntime.surface.longDragMul * dt);
 
   const maxForwardSpeed = carCfg.maxSpeed;
@@ -785,32 +892,52 @@ function updateRace(dt) {
 
   const headingForwardX = Math.cos(car.angle);
   const headingForwardY = Math.sin(car.angle);
-  const pivotOffset = car.width * (constants.pivotFromRearRatio - 0.5);
+  const pivotBlend = clamp(Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1), 0, 1);
+  const pivotRatio =
+    constants.pivotAtLowSpeedRatio +
+    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) * pivotBlend;
+  const pivotOffset = car.width * (pivotRatio - 0.5);
   const pivotShiftX = Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
   const pivotShiftY = Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
   const nx = car.x + car.vx * dt + pivotShiftX;
   const ny = car.y + car.vy * dt + pivotShiftY;
 
-  if (!objectCollisionAt(nx, ny)) {
-    car.x = nx;
-    car.y = ny;
-  } else {
+  const collision = resolveObjectCollisions(nx, ny);
+  car.x = collision.x;
+  car.y = collision.y;
+  if (collision.hit) {
+    const inwardSpeed = car.vx * collision.normalX + car.vy * collision.normalY;
+    if (inwardSpeed < 0) {
+      // Remove penetration-causing velocity component along hit normal.
+      car.vx -= inwardSpeed * collision.normalX;
+      car.vy -= inwardSpeed * collision.normalY;
+    }
     if (flags.ARCADE_COLLISION_PUSH) {
-      const impactDir = Math.sign(lateralSpeed) || Math.sign(physicsRuntime.input.steer) || 1;
-      lateralSpeed += impactDir * 120;
-      forwardSpeed *= -0.2;
-      car.vx = forwardX * forwardSpeed + rightX * lateralSpeed;
-      car.vy = forwardY * forwardSpeed + rightY * lateralSpeed;
-      physicsRuntime.collisionGripTimer = 0.12;
+      // Mild arcade rebound without catapulting.
+      car.vx *= 0.72;
+      car.vy *= 0.72;
+      car.vx += collision.normalX * 18;
+      car.vy += collision.normalY * 18;
+      physicsRuntime.collisionGripTimer = 0.08;
     } else {
-      car.vx *= -0.15;
-      car.vy *= -0.15;
+      car.vx *= 0.55;
+      car.vy *= 0.55;
     }
   }
 
-  car.speed = Math.hypot(car.vx, car.vy);
   const headingRightX = -headingForwardY;
   const headingRightY = headingForwardX;
+  const rawHeadingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
+  const maxVectorSpeed =
+    rawHeadingForwardSpeed >= 0 ? carCfg.maxSpeed : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  const vectorSpeed = Math.hypot(car.vx, car.vy);
+  if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
+    const s = maxVectorSpeed / vectorSpeed;
+    car.vx *= s;
+    car.vy *= s;
+  }
+
+  car.speed = Math.hypot(car.vx, car.vy);
   const headingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
   const headingLateralSpeed = car.vx * headingRightX + car.vy * headingRightY;
   physicsRuntime.debug.surface = surfaceName;
@@ -820,6 +947,11 @@ function updateRace(dt) {
     Math.abs(headingLateralSpeed),
     Math.abs(headingForwardSpeed) + 0.0001,
   );
+  const prevForward = physicsRuntime.prevForwardSpeed;
+  const longAccel = prevForward === null || dt <= 0 ? 0 : (headingForwardSpeed - prevForward) / dt;
+  physicsRuntime.prevForwardSpeed = headingForwardSpeed;
+  const skidSurface = surfaceAt(car.x, car.y);
+  recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
 
   if (!state.finished) {
     checkCheckpoints();
@@ -900,6 +1032,7 @@ function drawTrack() {
   drawPath(innerPath);
   ctx.fill();
 
+  drawSkidMarks();
   drawDecor();
   drawRoadDetails();
   drawStartLine();
@@ -976,6 +1109,22 @@ function drawRoadDetails() {
     ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
     ctx.stroke();
   }
+}
+
+function drawSkidMarks() {
+  if (!skidMarks.length) return;
+
+  ctx.save();
+  ctx.lineCap = "round";
+  for (const mark of skidMarks) {
+    ctx.strokeStyle = mark.color;
+    ctx.lineWidth = mark.width;
+    ctx.beginPath();
+    ctx.moveTo(mark.x1, mark.y1);
+    ctx.lineTo(mark.x2, mark.y2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawCheckpointFlags() {
@@ -1326,9 +1475,54 @@ function drawHUD() {
     ctx.font = "20px Verdana";
     ctx.fillStyle = "#ffffff";
     const total = lapData.lapTimes.reduce((a, b) => a + b, 0);
+    const bestLap = lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0;
     ctx.fillText(`TOTAL: ${formatTime(total)}`, WIDTH / 2 - 104, HEIGHT / 2 + 20);
-    ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, HEIGHT / 2 + 52);
+    ctx.fillText(`BEST: ${formatTime(bestLap)}`, WIDTH / 2 - 104, HEIGHT / 2 + 46);
+    ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, HEIGHT / 2 + 72);
   }
+}
+
+function drawPauseOverlay() {
+  if (!state.paused || state.mode !== "racing") return;
+
+  const panelW = 540;
+  const panelH = 310;
+  const x = WIDTH * 0.5 - panelW * 0.5;
+  const y = HEIGHT * 0.5 - panelH * 0.5;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.fillStyle = "rgba(8, 14, 24, 0.94)";
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = "#c4a13c";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 54px Verdana";
+  ctx.fillText("PAUSED", x + 148, y + 78);
+
+  const pauseItems = ["RESUME RACE", "END RACE"];
+  ctx.font = "bold 28px Verdana";
+  for (let i = 0; i < pauseItems.length; i++) {
+    const rowY = y + 118 + i * 44;
+    if (i === state.pauseMenuIndex) {
+      ctx.fillStyle = "#ec4f4f";
+      ctx.fillRect(x + 130, rowY - 27, 280, 34);
+      ctx.fillStyle = "#ffffff";
+    } else {
+      ctx.fillStyle = "#b9cde3";
+    }
+    ctx.fillText(pauseItems[i], x + 148, rowY);
+  }
+
+  ctx.fillStyle = "#f0f4fb";
+  ctx.font = "20px Verdana";
+  ctx.fillText("W/S or Up/Down: Accelerate and brake", x + 46, y + 214);
+  ctx.fillText("A/D or Left/Right: Steer", x + 46, y + 238);
+  ctx.fillText("Space: Handbrake", x + 46, y + 262);
+  ctx.fillText("P or Esc: Open pause", x + 46, y + 286);
 }
 
 function drawMenu() {
@@ -1401,6 +1595,7 @@ function render() {
     drawDebugVectors();
     drawStartSequenceOverlay();
     drawHUD();
+    drawPauseOverlay();
   }
 }
 
@@ -1424,12 +1619,15 @@ function activateSelection() {
     }
     if (state.settingsIndex === 1) {
       state.mode = "menu";
+      state.paused = false;
     }
     return;
   }
 
   if (state.mode === "racing" && state.finished) {
     state.mode = "menu";
+    state.paused = false;
+    state.pauseMenuIndex = 0;
   }
 }
 
@@ -1463,6 +1661,47 @@ window.addEventListener("keydown", (e) => {
     }
   }
 
+  if (state.mode === "racing") {
+    if (state.finished && key === "escape") {
+      state.mode = "menu";
+      state.paused = false;
+      state.pauseMenuIndex = 0;
+      clearRaceInputs();
+      return;
+    }
+
+    if (key === "p" || key === "escape") {
+      if (!state.paused) {
+        state.paused = true;
+        state.pauseMenuIndex = 0;
+      } else if (key === "p") {
+        state.paused = false;
+      }
+      clearRaceInputs();
+      return;
+    }
+
+    if (state.paused) {
+      if (key === "arrowup" || key === "w") {
+        state.pauseMenuIndex = (state.pauseMenuIndex + 2 - 1) % 2;
+      }
+      if (key === "arrowdown" || key === "s") {
+        state.pauseMenuIndex = (state.pauseMenuIndex + 1) % 2;
+      }
+      if (key === "enter") {
+        if (state.pauseMenuIndex === 0) {
+          state.paused = false;
+        } else {
+          state.mode = "menu";
+          state.paused = false;
+          state.pauseMenuIndex = 0;
+        }
+      }
+      clearRaceInputs();
+      return;
+    }
+  }
+
   if (key === "arrowup") {
     if (state.mode === "menu") state.menuIndex = (state.menuIndex + menuItems.length - 1) % menuItems.length;
     if (state.mode === "settings") state.settingsIndex = (state.settingsIndex + settingsItems.length - 1) % settingsItems.length;
@@ -1481,7 +1720,6 @@ window.addEventListener("keydown", (e) => {
     if (key === "a" || key === "arrowleft") keys.left = true;
     if (key === "d" || key === "arrowright") keys.right = true;
     if (key === " ") keys.handbrake = true;
-    if (key === "escape") state.mode = "menu";
   }
 });
 
@@ -1505,7 +1743,7 @@ function loop(now) {
   const dt = Math.min(physicsConfig.car.dtClamp, (now - last) / 1000);
   last = now;
 
-  if (state.mode === "racing") {
+  if (state.mode === "racing" && !state.paused) {
     updateRace(dt);
   }
 
