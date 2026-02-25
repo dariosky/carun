@@ -288,18 +288,23 @@ function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
   if (!lastPoints) return;
 
   const isGrass = surfaceName === "grass";
+  const isWater = surfaceName === "water";
   const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
   const speedAbs = Math.abs(forwardSpeed);
-  if (!isGrass && speedAbs < 8 && Math.abs(lateralSpeed) < 8) return;
+  if (!isGrass && !isWater && speedAbs < 8 && Math.abs(lateralSpeed) < 8) return;
   const strongAccel = longAccel > 480;
   const strongBrake = longAccel < -520;
   const skidding = Math.abs(lateralSpeed) > 95;
   const handbrakeSkid = physicsRuntime.input.handbrake > 0.08 && speedAbs > 24;
   const shouldDrawRoadSkids = isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid);
-  if (!isGrass && !shouldDrawRoadSkids) return;
+  if (!isGrass && !isWater && !shouldDrawRoadSkids) return;
 
-  const color = isGrass ? "rgba(112, 74, 44, 0.40)" : "rgba(20, 20, 20, 0.37)";
-  const width = isGrass ? 2.7 : 2.2;
+  const color = isGrass
+    ? "rgba(112, 74, 44, 0.40)"
+    : isWater
+      ? "rgba(245, 250, 255, 0.42)"
+      : "rgba(20, 20, 20, 0.37)";
+  const width = isGrass || isWater ? 2.7 : 2.2;
 
   for (let i = 0; i < points.length; i++) {
     skidMarks.push({
@@ -893,9 +898,14 @@ function updateRace(dt) {
   const headingForwardX = Math.cos(car.angle);
   const headingForwardY = Math.sin(car.angle);
   const pivotBlend = clamp(Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1), 0, 1);
-  const pivotRatio =
+  let pivotRatio =
     constants.pivotAtLowSpeedRatio +
     (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) * pivotBlend;
+  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
+    // Handbrake should not drag the kart backward from front-pivot rotation.
+    pivotRatio +=
+      (constants.pivotAtLowSpeedRatio - pivotRatio) * clamp(physicsRuntime.input.handbrake, 0, 1);
+  }
   const pivotOffset = car.width * (pivotRatio - 0.5);
   const pivotShiftX = Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
   const pivotShiftY = Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
@@ -1032,8 +1042,8 @@ function drawTrack() {
   drawPath(innerPath);
   ctx.fill();
 
-  drawSkidMarks();
   drawDecor();
+  drawSkidMarks();
   drawRoadDetails();
   drawStartLine();
   drawCheckpointFlags();
@@ -1071,7 +1081,7 @@ function drawDecor() {
     }
 
     if (obj.type === "pond") {
-      ctx.fillStyle = "#1f6ca8";
+      ctx.fillStyle = "#7aa1c2";
       const waterPath = sampleClosedPath((a) => {
         const radius = blobRadius(obj.rx, obj.ry, a, obj.seed || 0);
         return {
