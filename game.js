@@ -35,6 +35,12 @@ const state = {
   editingName: false,
   raceTime: 0,
   finished: false,
+  startSequence: {
+    active: false,
+    elapsed: 0,
+    goTime: 0,
+    goFlash: 0,
+  },
 };
 
 const keys = {
@@ -118,6 +124,13 @@ const worldObjects = [
   { type: "barrel", x: 447, y: 153, r: 13 },
   { type: "barrel", x: 847, y: 567, r: 13 },
 ];
+const EDGE_BARRIER_WIDTH = 24;
+const trackEdgeRails = [];
+let curbSegments = { outer: [], inner: [] };
+const CURB_MIN_WIDTH = 3;
+const CURB_MAX_WIDTH = 22;
+const CURB_STRIPE_LENGTH = 10;
+const CURB_OUTSET = 16;
 
 function resetRace() {
   car.x = track.cx;
@@ -132,6 +145,10 @@ function resetRace() {
   lapData.lapTimes = [];
   lapData.passed = new Set([0]);
   lapData.lap = 1;
+  state.startSequence.active = true;
+  state.startSequence.elapsed = 0;
+  state.startSequence.goTime = 3 + Math.random() * 2;
+  state.startSequence.goFlash = 0;
 }
 
 function clamp(v, min, max) {
@@ -179,6 +196,99 @@ function sampleClosedPath(sampleFn, segments = 220) {
   return points;
 }
 
+function normalizeVec(x, y) {
+  const len = Math.hypot(x, y) || 1;
+  return { x: x / len, y: y / len };
+}
+
+function signedAngleBetween(v1, v2) {
+  return Math.atan2(v1.x * v2.y - v1.y * v2.x, v1.x * v2.x + v1.y * v2.y);
+}
+
+function buildTrackEdgeRails() {
+  const segments = 260;
+  const centerLine = sampleClosedPath((a) => pointOnCenterLine(a), segments);
+  const samples = [];
+  const absCurvatures = [];
+
+  for (let i = 0; i < segments; i++) {
+    const prev = centerLine[(i - 1 + segments) % segments];
+    const curr = centerLine[i];
+    const next = centerLine[(i + 1) % segments];
+
+    const segIn = normalizeVec(curr.x - prev.x, curr.y - prev.y);
+    const segOut = normalizeVec(next.x - curr.x, next.y - curr.y);
+    const signedTurn = signedAngleBetween(segIn, segOut);
+    const ds = (Math.hypot(curr.x - prev.x, curr.y - prev.y) + Math.hypot(next.x - curr.x, next.y - curr.y)) * 0.5;
+    const curvature = signedTurn / Math.max(ds, 1);
+
+    const tangent = normalizeVec(next.x - prev.x, next.y - prev.y);
+    const leftNormal = { x: -tangent.y, y: tangent.x };
+    const angleFromCenter = Math.atan2(curr.y - track.cy, curr.x - track.cx);
+    const radii = trackRadiiAtAngle(angleFromCenter);
+    const halfWidth = (radii.outer - radii.inner) * 0.5;
+
+    samples.push({ x: curr.x, y: curr.y, leftNormal, halfWidth, curvature });
+    absCurvatures.push(Math.abs(curvature));
+  }
+
+  const sorted = [...absCurvatures].sort((a, b) => a - b);
+  const threshold = sorted[Math.floor(sorted.length * 0.62)] || 0.0022;
+  const rails = [];
+  let current = null;
+  let currentSide = 0;
+
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    const absK = Math.abs(s.curvature);
+    const side = s.curvature >= 0 ? 1 : -1;
+    const isTurning = absK >= threshold;
+
+    if (!isTurning) {
+      if (current && current.points.length >= 3) rails.push(current);
+      current = null;
+      currentSide = 0;
+      continue;
+    }
+
+    // Outside of bend: left turn -> right side, right turn -> left side.
+    const sideNormal =
+      s.curvature >= 0
+        ? { x: -s.leftNormal.x, y: -s.leftNormal.y }
+        : { x: s.leftNormal.x, y: s.leftNormal.y };
+    const offset = s.halfWidth + 3;
+    const p = {
+      x: s.x + sideNormal.x * offset,
+      y: s.y + sideNormal.y * offset,
+    };
+
+    if (!current || currentSide !== side) {
+      if (current && current.points.length >= 3) rails.push(current);
+      current = { points: [p], width: EDGE_BARRIER_WIDTH };
+      currentSide = side;
+    } else {
+      current.points.push(p);
+    }
+  }
+  if (current && current.points.length >= 3) rails.push(current);
+
+  return rails;
+}
+
+function pointToSegmentDistanceSq(px, py, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx * abx + aby * aby;
+  const t = abLenSq > 0 ? clamp((apx * abx + apy * aby) / abLenSq, 0, 1) : 0;
+  const cx = ax + abx * t;
+  const cy = ay + aby * t;
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy;
+}
+
 function drawPath(points) {
   if (!points.length) return;
   ctx.moveTo(points[0].x, points[0].y);
@@ -186,6 +296,219 @@ function drawPath(points) {
     ctx.lineTo(points[i].x, points[i].y);
   }
   ctx.closePath();
+}
+
+function drawPolyline(points) {
+  if (!points.length) return;
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+}
+
+function drawStripedCurb(
+  pathPoints,
+  sideSign,
+  minWidth = CURB_MIN_WIDTH,
+  maxWidth = CURB_MAX_WIDTH,
+  stripeLen = CURB_STRIPE_LENGTH,
+) {
+  if (pathPoints.length < 2) return;
+
+  const cumulative = [0];
+  for (let i = 1; i < pathPoints.length; i++) {
+    const a = pathPoints[i - 1];
+    const b = pathPoints[i];
+    cumulative.push(cumulative[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const totalLen = cumulative[cumulative.length - 1];
+  if (totalLen <= 0) return;
+
+  const pointAtDistance = (distance, startIndex = 0) => {
+    let segIndex = startIndex;
+    while (segIndex < cumulative.length - 2 && cumulative[segIndex + 1] < distance) segIndex++;
+
+    const segStart = cumulative[segIndex];
+    const segEnd = cumulative[segIndex + 1];
+    const span = Math.max(segEnd - segStart, 1e-6);
+    const t = clamp((distance - segStart) / span, 0, 1);
+    const a = pathPoints[segIndex];
+    const b = pathPoints[segIndex + 1];
+    return {
+      point: {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+      },
+      segIndex,
+    };
+  };
+
+  const buildSlice = (startDist, endDist, startSegHint = 0) => {
+    const startInfo = pointAtDistance(startDist, startSegHint);
+    const points = [startInfo.point];
+    let seg = startInfo.segIndex;
+
+    while (seg < cumulative.length - 1 && cumulative[seg + 1] < endDist) {
+      points.push(pathPoints[seg + 1]);
+      seg++;
+    }
+
+    const endInfo = pointAtDistance(endDist, seg);
+    points.push(endInfo.point);
+    return { points, segIndex: endInfo.segIndex };
+  };
+
+  const drawExtrudedSlice = (points, width, color) => {
+    if (points.length < 2) return;
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len <= 1e-6) continue;
+
+      const tx = dx / len;
+      const ty = dy / len;
+      const nx = -ty * sideSign;
+      const ny = tx * sideSign;
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(b.x + nx * width, b.y + ny * width);
+      ctx.lineTo(a.x + nx * width, a.y + ny * width);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+
+  ctx.save();
+
+  let stripeIndex = 0;
+  let segHint = 0;
+  for (let start = 0; start < totalLen; start += stripeLen) {
+    const end = Math.min(totalLen, start + stripeLen);
+    const mid = (start + end) * 0.5;
+    const progress = clamp(mid / totalLen, 0, 1);
+    const taper = Math.sin(progress * Math.PI);
+    const width = minWidth + (maxWidth - minWidth) * taper;
+    const slice = buildSlice(start, end, segHint);
+    segHint = slice.segIndex;
+    if (slice.points.length < 2) continue;
+
+    const color = stripeIndex % 2 === 0 ? "#d22e2e" : "#ddd4be";
+    drawExtrudedSlice(slice.points, width, color);
+    stripeIndex++;
+  }
+
+  ctx.restore();
+}
+
+function buildCurbSegments() {
+  const segmentCount = 280;
+  const center = sampleClosedPath((a) => pointOnCenterLine(a), segmentCount);
+  const outer = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
+  }, segmentCount);
+  const inner = sampleClosedPath((a) => {
+    const radii = trackRadiiAtAngle(a);
+    return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
+  }, segmentCount);
+
+  const absCurvatures = [];
+  const turning = new Array(segmentCount).fill(false);
+
+  for (let i = 0; i < segmentCount; i++) {
+    const prev = center[(i - 1 + segmentCount) % segmentCount];
+    const curr = center[i];
+    const next = center[(i + 1) % segmentCount];
+
+    const segIn = normalizeVec(curr.x - prev.x, curr.y - prev.y);
+    const segOut = normalizeVec(next.x - curr.x, next.y - curr.y);
+    const signedTurn = signedAngleBetween(segIn, segOut);
+    const ds = (Math.hypot(curr.x - prev.x, curr.y - prev.y) + Math.hypot(next.x - curr.x, next.y - curr.y)) * 0.5;
+    absCurvatures.push(Math.abs(signedTurn / Math.max(ds, 1)));
+  }
+
+  const sorted = [...absCurvatures].sort((a, b) => a - b);
+  const threshold = sorted[Math.floor(sorted.length * 0.62)] || 0.0022;
+  for (let i = 0; i < segmentCount; i++) {
+    turning[i] = absCurvatures[i] >= threshold;
+  }
+
+  // Expand each turning zone slightly so curbs start before the apex and end after it.
+  const expanded = new Array(segmentCount).fill(false);
+  const expandBy = 2;
+  for (let i = 0; i < segmentCount; i++) {
+    if (!turning[i]) continue;
+    for (let j = -expandBy; j <= expandBy; j++) {
+      expanded[(i + j + segmentCount) % segmentCount] = true;
+    }
+  }
+
+  const collectRuns = (points) => {
+    const runs = [];
+    const allTrue = expanded.every(Boolean);
+    if (allTrue) return [[...points, points[0]]];
+
+    let current = null;
+    for (let i = 0; i < segmentCount; i++) {
+      if (expanded[i]) {
+        if (!current) current = [];
+        current.push(points[i]);
+      } else if (current) {
+        current.push(points[i]);
+        if (current.length >= 4) runs.push(current);
+        current = null;
+      }
+    }
+
+    if (current) {
+      current.push(points[0]);
+      if (runs.length && expanded[0]) {
+        const first = runs.shift();
+        runs.unshift([...current, ...first]);
+      } else if (current.length >= 4) {
+        runs.push(current);
+      }
+    }
+
+    return runs;
+  };
+
+  return {
+    outer: collectRuns(outer),
+    inner: collectRuns(inner),
+  };
+}
+
+function buildFullCurbSegments() {
+  return {
+    outer: [
+      sampleClosedPath((a) => {
+        const radii = trackRadiiAtAngle(a);
+        return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
+      }),
+    ],
+    inner: [
+      sampleClosedPath((a) => {
+        const radii = trackRadiiAtAngle(a);
+        return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
+      }),
+    ],
+  };
+}
+
+function initCurbSegments() {
+  try {
+    curbSegments = buildCurbSegments();
+  } catch (err) {
+    console.error("Curb segment generation failed, falling back to full curbs.", err);
+    curbSegments = buildFullCurbSegments();
+  }
 }
 
 function blobRadius(ellipseX, ellipseY, angle, seed = 0) {
@@ -238,7 +561,22 @@ function pondSlowdownAt(x, y) {
 }
 
 function updateRace(dt) {
+  if (state.startSequence.goFlash > 0) {
+    state.startSequence.goFlash = Math.max(0, state.startSequence.goFlash - dt);
+  }
+
   if (state.finished) return;
+
+  if (state.startSequence.active) {
+    state.startSequence.elapsed += dt;
+    if (state.startSequence.elapsed >= state.startSequence.goTime) {
+      state.startSequence.active = false;
+      state.startSequence.goFlash = 0.85;
+      state.raceTime = 0;
+      lapData.currentLapStart = 0;
+    }
+    return;
+  }
 
   state.raceTime += dt;
 
@@ -264,8 +602,8 @@ function updateRace(dt) {
     forwardSpeed *= 0.975;
   }
   if (surface === "curb") {
-    topSpeed = 350;
-    grip = 1.16;
+    topSpeed = physics.maxSpeed * 0.95;
+    grip = 0.9;
   }
   if (pondSlowdownAt(car.x, car.y)) {
     topSpeed = Math.min(topSpeed, 70);
@@ -367,26 +705,12 @@ function drawTrack() {
   drawPath([...innerPath].reverse());
   ctx.fill("evenodd");
 
-  ctx.lineWidth = 22;
-  ctx.setLineDash([16, 10]);
-  ctx.strokeStyle = "#d22e2e";
-  const outerCurbPath = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.outer - 12);
-  });
-  ctx.beginPath();
-  drawPath(outerCurbPath);
-  ctx.stroke();
-
-  ctx.strokeStyle = "#f1e9d3";
-  const innerCurbPath = sampleClosedPath((a) => {
-    const radii = trackRadiiAtAngle(a);
-    return pointOnTrackRadius(a, radii.inner + 12);
-  });
-  ctx.beginPath();
-  drawPath(innerCurbPath);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  curbSegments.outer.forEach((segment) =>
+    drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
+  );
+  curbSegments.inner.forEach((segment) =>
+    drawStripedCurb(segment, 1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
+  );
 
   ctx.fillStyle = "#247637";
   ctx.beginPath();
@@ -470,34 +794,68 @@ function drawRoadDetails() {
   }
 }
 
+function drawTrackEdges() {
+  for (const rail of trackEdgeRails) {
+    if (rail.points.length < 2) continue;
+
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.28)";
+    ctx.lineWidth = rail.width + 3;
+    ctx.beginPath();
+    ctx.moveTo(rail.points[0].x + 1, rail.points[0].y + 1);
+    for (let i = 1; i < rail.points.length; i++) {
+      ctx.lineTo(rail.points[i].x + 1, rail.points[i].y + 1);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d4dadc";
+    ctx.lineWidth = rail.width;
+    ctx.beginPath();
+    ctx.moveTo(rail.points[0].x, rail.points[0].y);
+    for (let i = 1; i < rail.points.length; i++) {
+      ctx.lineTo(rail.points[i].x, rail.points[i].y);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = "#c63c2e";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(rail.points[0].x, rail.points[0].y);
+    for (let i = 1; i < rail.points.length; i++) {
+      ctx.lineTo(rail.points[i].x, rail.points[i].y);
+    }
+    ctx.stroke();
+  }
+}
+
 function drawStartLine() {
   const startAngle = Math.PI * 0.5;
-  const center = pointOnCenterLine(startAngle);
-  const tangent = {
-    x: -Math.sin(startAngle),
-    y: Math.cos(startAngle),
-  };
-  const normal = {
-    x: Math.cos(startAngle),
-    y: Math.sin(startAngle),
-  };
-  const width = 16;
-  const height = 62;
+  const radii = trackRadiiAtAngle(startAngle);
+  const center = pointOnTrackRadius(startAngle, (radii.outer + radii.inner) * 0.5);
+  const span = radii.outer - radii.inner;
+  const thickness = 20;
+  const cols = Math.max(8, Math.floor(span / 18));
+  const rows = 2;
+  const cellW = span / cols;
+  const cellH = thickness / rows;
 
-  for (let i = 0; i < 6; i++) {
-    for (let j = 0; j < 2; j++) {
-      ctx.fillStyle = (i + j) % 2 ? "#ffffff" : "#111111";
-      const along = -height / 2 + i * 10;
-      const across = -width + j * width;
-      const px = center.x + tangent.x * along + normal.x * across;
-      const py = center.y + tangent.y * along + normal.y * across;
-      ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(startAngle);
-      ctx.fillRect(0, 0, width, 10);
-      ctx.restore();
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(startAngle);
+
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      ctx.fillStyle = (c + r) % 2 ? "#ffffff" : "#111111";
+      ctx.fillRect(-span * 0.5 + c * cellW, -thickness * 0.5 + r * cellH, cellW, cellH);
     }
   }
+
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-span * 0.5, -thickness * 0.5, span, thickness);
+  ctx.restore();
 }
 
 function drawCar() {
@@ -516,6 +874,135 @@ function drawCar() {
   ctx.fillRect(car.width / 2 - 2, car.height / 2 - 6, 6, 8);
 
   ctx.restore();
+}
+
+function drawStartSequenceOverlay() {
+  const seq = state.startSequence;
+  if (!seq.active && seq.goFlash <= 0) return;
+
+  const cx = track.cx;
+  const cy = track.cy;
+
+  if (seq.active) {
+    const readyHold = 0.95;
+    const readyFadeEnd = 1.8;
+    let readyAlpha = 0;
+    if (seq.elapsed < readyHold) readyAlpha = 1;
+    else readyAlpha = clamp(1 - (seq.elapsed - readyHold) / (readyFadeEnd - readyHold), 0, 1);
+
+    if (readyAlpha > 0) {
+      const pulse = 1 + Math.sin(seq.elapsed * 9) * 0.06;
+      ctx.save();
+      ctx.translate(cx, cy - 82);
+      ctx.scale(pulse, pulse);
+      ctx.globalAlpha = readyAlpha;
+      ctx.fillStyle = "rgba(11, 19, 28, 0.78)";
+      ctx.fillRect(-165, -54, 330, 82);
+      ctx.fillStyle = "#fff2a6";
+      ctx.font = "bold 56px Verdana";
+      ctx.fillText("READY?", -145, 4);
+      ctx.restore();
+    }
+
+    const redCount = Math.min(3, Math.floor(seq.elapsed));
+    const plateX = cx - 146;
+    const plateY = cy - 18;
+    const plateW = 292;
+    const plateH = 112;
+
+    ctx.save();
+    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
+    plateGradient.addColorStop(0, "#707985");
+    plateGradient.addColorStop(1, "#2b3138");
+    ctx.fillStyle = plateGradient;
+    ctx.fillRect(plateX, plateY, plateW, plateH);
+    ctx.strokeStyle = "#181d21";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(plateX, plateY, plateW, plateH);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.fillRect(plateX + 8, plateY + 8, plateW - 16, 18);
+
+    for (let i = 0; i < 3; i++) {
+      const x = cx - 92 + i * 92;
+      const y = cy + 38;
+      const lit = i < redCount;
+      const glow = lit ? "rgba(255, 72, 72, 0.5)" : "rgba(0, 0, 0, 0.35)";
+      const lamp = ctx.createRadialGradient(x - 6, y - 8, 5, x, y, 29);
+      if (lit) {
+        lamp.addColorStop(0, "#ffd8d8");
+        lamp.addColorStop(0.45, "#fa4747");
+        lamp.addColorStop(1, "#640f0f");
+      } else {
+        lamp.addColorStop(0, "#797f89");
+        lamp.addColorStop(0.55, "#444a54");
+        lamp.addColorStop(1, "#1e232a");
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = glow;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.fillStyle = lamp;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x - 7, y - 8, 6, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  if (!seq.active && seq.goFlash > 0) {
+    const a = clamp(seq.goFlash / 0.85, 0, 1);
+    const pop = 1 + (1 - a) * 0.12;
+    ctx.save();
+    const plateX = cx - 146;
+    const plateY = cy - 18;
+    const plateW = 292;
+    const plateH = 112;
+    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
+    plateGradient.addColorStop(0, "#707985");
+    plateGradient.addColorStop(1, "#2b3138");
+    ctx.globalAlpha = Math.min(1, a + 0.2);
+    ctx.fillStyle = plateGradient;
+    ctx.fillRect(plateX, plateY, plateW, plateH);
+    ctx.strokeStyle = "#181d21";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(plateX, plateY, plateW, plateH);
+
+    for (let i = 0; i < 3; i++) {
+      const x = cx - 92 + i * 92;
+      const y = cy + 38;
+      const lamp = ctx.createRadialGradient(x - 6, y - 8, 5, x, y, 29);
+      lamp.addColorStop(0, "#d5ffe3");
+      lamp.addColorStop(0.45, "#57e58a");
+      lamp.addColorStop(1, "#0f5228");
+      ctx.beginPath();
+      ctx.arc(x, y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(96, 255, 162, 0.45)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.fillStyle = lamp;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x - 7, y - 8, 6, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.fill();
+    }
+
+    ctx.translate(cx, cy - 18);
+    ctx.scale(pop, pop);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = "rgba(9, 19, 16, 0.8)";
+    ctx.fillRect(-125, -58, 250, 92);
+    ctx.fillStyle = "#6af0a8";
+    ctx.font = "bold 64px Verdana";
+    ctx.fillText("GO!", -85, 12);
+    ctx.restore();
+  }
 }
 
 function formatTime(t) {
@@ -633,6 +1120,7 @@ function render() {
   else {
     drawTrack();
     drawCar();
+    drawStartSequenceOverlay();
     drawHUD();
   }
 }
@@ -744,5 +1232,6 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+initCurbSegments();
 render();
 requestAnimationFrame(loop);
