@@ -130,7 +130,7 @@ let curbSegments = { outer: [], inner: [] };
 const CURB_MIN_WIDTH = 3;
 const CURB_MAX_WIDTH = 22;
 const CURB_STRIPE_LENGTH = 10;
-const CURB_OUTSET = 16;
+const CURB_OUTSET = 20;
 
 function resetRace() {
   car.x = track.cx;
