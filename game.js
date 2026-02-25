@@ -50,6 +50,7 @@ const keys = {
   right: false,
   accel: false,
   brake: false,
+  handbrake: false,
 };
 
 const menuItems = ["START RACE", "SETTINGS"];
@@ -101,17 +102,70 @@ const car = {
   height: 20,
 };
 
-const physics = {
-  accel: 420,
-  brake: 440,
-  rollDrag: 0.985,
-  steering: 2.45,
-  maxSpeed: 320,
-  reverseSpeed: -120,
-  lateralGrip: 6.8,
-  driftGrip: 2.8,
-  driftThreshold: 200,
-  steerResponse: 8,
+const physicsConfig = {
+  car: {
+    maxSpeed: 360,
+    engineAccel: 900,
+    brakeDecel: 1500,
+    coastDecel: 320,
+    longDrag: 0.85,
+    lateralGrip: 6.4,
+    steerRate: 3.6,
+    steerAtLowSpeedMul: 0.35,
+    yawDamping: 8.0,
+    reverseMaxSpeedMul: 0.32,
+    inputSmoothing: 0.2,
+    dtClamp: 0.033,
+  },
+  assists: {
+    autoDriftGripCut: 0.3,
+    driftAssistRecoveryBoost: 0.75,
+    driftAssistRecoveryTime: 0.2,
+    speedSensitiveSteer: 0.55,
+    handbrakeGrip: 0.28,
+    handbrakeYawBoost: 0.8,
+  },
+  surfaces: {
+    asphalt: { lateralGripMul: 0.95, longDragMul: 1.0, engineMul: 1.0, coastDecelMul: 1.0 },
+    curb: { lateralGripMul: 1.18, longDragMul: 1.02, engineMul: 1.0, coastDecelMul: 1.05 },
+    grass: { lateralGripMul: 0.85, longDragMul: 4.0, engineMul: 0.24, coastDecelMul: 5.0 },
+    water: { lateralGripMul: 0.14, longDragMul: 3.3, engineMul: 0.22, coastDecelMul: 2.8 },
+  },
+  flags: {
+    AUTO_DRIFT_ON_STEER: true,
+    DRIFT_ASSIST_RECOVERY: false,
+    HANDBRAKE_MODE: true,
+    SPEED_SENSITIVE_STEERING: true,
+    SURFACE_BLENDING: true,
+    DEBUG_VECTORS: true,
+    ARCADE_COLLISION_PUSH: true,
+  },
+  constants: {
+    surfaceBlendTime: 0.05,
+    driftSteerThreshold: 0.08,
+    lowSpeedSteerAt: 120,
+    pivotFromRearRatio: 0.9,
+  },
+};
+
+const physicsRuntime = {
+  input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
+  steeringRate: 0,
+  recoveryTimer: 0,
+  collisionGripTimer: 0,
+  prevSteerAbs: 0,
+  surface: {
+    lateralGripMul: 1,
+    longDragMul: 1,
+    engineMul: 1,
+    coastDecelMul: 1,
+  },
+  debug: {
+    slipAngle: 0,
+    surface: "asphalt",
+    vForward: 0,
+    vLateral: 0,
+  },
 };
 
 const worldObjects = [
@@ -131,6 +185,16 @@ const CURB_MIN_WIDTH = 3;
 const CURB_MAX_WIDTH = 22;
 const CURB_STRIPE_LENGTH = 10;
 const CURB_OUTSET = 20;
+const kartSprite = new Image();
+let kartSpriteReady = false;
+
+kartSprite.addEventListener("load", () => {
+  kartSpriteReady = true;
+});
+kartSprite.addEventListener("error", () => {
+  console.warn("Failed to load kart sprite at assets/kart.png");
+});
+kartSprite.src = "assets/kart.png";
 
 function resetRace() {
   car.x = track.cx;
@@ -149,10 +213,30 @@ function resetRace() {
   state.startSequence.elapsed = 0;
   state.startSequence.goTime = 3 + Math.random() * 2;
   state.startSequence.goFlash = 0;
+  physicsRuntime.input.throttle = 0;
+  physicsRuntime.input.brake = 0;
+  physicsRuntime.input.steer = 0;
+  physicsRuntime.input.handbrake = 0;
+  physicsRuntime.steeringRate = 0;
+  physicsRuntime.recoveryTimer = 0;
+  physicsRuntime.collisionGripTimer = 0;
+  physicsRuntime.prevSteerAbs = 0;
+  physicsRuntime.surface = { lateralGripMul: 1, longDragMul: 1, engineMul: 1, coastDecelMul: 1 };
 }
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
+}
+
+function moveTowards(current, target, maxDelta) {
+  if (Math.abs(target - current) <= maxDelta) return target;
+  return current + Math.sign(target - current) * maxDelta;
+}
+
+function smoothInputValue(current, target, dt) {
+  const smoothing = physicsConfig.car.inputSmoothing;
+  const response = clamp((1 - smoothing) * dt * 60, 0, 1);
+  return current + (target - current) * response;
 }
 
 function ellipseRadiusAtAngle(angle, a, b) {
@@ -536,6 +620,14 @@ function getSurface(x, y) {
   return "asphalt";
 }
 
+function surfaceAt(x, y) {
+  if (pondSlowdownAt(x, y)) return "water";
+  const surface = getSurface(x, y);
+  if (surface === "grass" || surface === "innerGrass") return "grass";
+  if (surface === "curb") return "curb";
+  return "asphalt";
+}
+
 function objectCollisionAt(x, y) {
   for (const obj of worldObjects) {
     if (obj.type === "tree" || obj.type === "barrel") {
@@ -561,11 +653,15 @@ function pondSlowdownAt(x, y) {
 }
 
 function updateRace(dt) {
+  const carCfg = physicsConfig.car;
+  const assistCfg = physicsConfig.assists;
+  const flags = physicsConfig.flags;
+  const constants = physicsConfig.constants;
+  dt = Math.min(dt, carCfg.dtClamp);
+
   if (state.startSequence.goFlash > 0) {
     state.startSequence.goFlash = Math.max(0, state.startSequence.goFlash - dt);
   }
-
-  if (state.finished) return;
 
   if (state.startSequence.active) {
     state.startSequence.elapsed += dt;
@@ -578,69 +674,156 @@ function updateRace(dt) {
     return;
   }
 
-  state.raceTime += dt;
+  if (!state.finished) {
+    state.raceTime += dt;
+  }
+
+  const surfaceName = surfaceAt(car.x, car.y);
+  const targetSurface = physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
+  const blendAlpha = flags.SURFACE_BLENDING
+    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
+    : 1;
+  physicsRuntime.surface.lateralGripMul +=
+    (targetSurface.lateralGripMul - physicsRuntime.surface.lateralGripMul) * blendAlpha;
+  physicsRuntime.surface.longDragMul +=
+    (targetSurface.longDragMul - physicsRuntime.surface.longDragMul) * blendAlpha;
+  physicsRuntime.surface.engineMul += (targetSurface.engineMul - physicsRuntime.surface.engineMul) * blendAlpha;
+  physicsRuntime.surface.coastDecelMul +=
+    (targetSurface.coastDecelMul - physicsRuntime.surface.coastDecelMul) * blendAlpha;
+
+  const throttleTarget = keys.accel ? 1 : 0;
+  const brakeTarget = keys.brake ? 1 : 0;
+  const steerTarget = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  const handbrakeTarget = keys.handbrake ? 1 : 0;
+
+  physicsRuntime.input.throttle = smoothInputValue(physicsRuntime.input.throttle, throttleTarget, dt);
+  physicsRuntime.input.brake = smoothInputValue(physicsRuntime.input.brake, brakeTarget, dt);
+  physicsRuntime.input.steer = smoothInputValue(physicsRuntime.input.steer, steerTarget, dt);
+  physicsRuntime.input.handbrake = smoothInputValue(physicsRuntime.input.handbrake, handbrakeTarget, dt);
 
   const forwardX = Math.cos(car.angle);
   const forwardY = Math.sin(car.angle);
   const rightX = -forwardY;
   const rightY = forwardX;
-
   let forwardSpeed = car.vx * forwardX + car.vy * forwardY;
   let lateralSpeed = car.vx * rightX + car.vy * rightY;
 
-  if (keys.accel) forwardSpeed += physics.accel * dt;
-  if (keys.brake) forwardSpeed -= physics.brake * dt;
-  forwardSpeed *= Math.pow(physics.rollDrag, dt * 60);
-
-  const surface = getSurface(car.x, car.y);
-  let grip = 1;
-  let topSpeed = physics.maxSpeed;
-
-  if (surface === "grass" || surface === "innerGrass") {
-    topSpeed = 145;
-    grip = 0.55;
-    forwardSpeed *= 0.975;
+  if (physicsRuntime.input.throttle > 0.01) {
+    forwardSpeed +=
+      carCfg.engineAccel * physicsRuntime.surface.engineMul * physicsRuntime.input.throttle * dt;
   }
-  if (surface === "curb") {
-    topSpeed = physics.maxSpeed * 0.95;
-    grip = 0.9;
+  if (physicsRuntime.input.brake > 0.01) {
+    forwardSpeed -= carCfg.brakeDecel * physicsRuntime.input.brake * dt;
   }
-  if (pondSlowdownAt(car.x, car.y)) {
-    topSpeed = Math.min(topSpeed, 70);
-    forwardSpeed *= 0.9;
-    lateralSpeed *= 0.9;
+  if (physicsRuntime.input.throttle <= 0.01 && physicsRuntime.input.brake <= 0.01) {
+    forwardSpeed = moveTowards(
+      forwardSpeed,
+      0,
+      carCfg.coastDecel * physicsRuntime.surface.coastDecelMul * dt,
+    );
+  }
+  forwardSpeed *= Math.exp(-carCfg.longDrag * physicsRuntime.surface.longDragMul * dt);
+
+  const maxForwardSpeed = carCfg.maxSpeed;
+  const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
+
+  const speedAbs = Math.abs(forwardSpeed);
+  const lowSpeedSteerMul =
+    carCfg.steerAtLowSpeedMul +
+    (1 - carCfg.steerAtLowSpeedMul) * clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
+  const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
+    ? 1 - assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
+    : 1;
+  let targetYawRate = physicsRuntime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
+  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
+    targetYawRate += assistCfg.handbrakeYawBoost * physicsRuntime.input.handbrake * physicsRuntime.input.steer;
+  }
+  physicsRuntime.steeringRate += (targetYawRate - physicsRuntime.steeringRate) * clamp(carCfg.yawDamping * dt, 0, 1);
+  const oldAngle = car.angle;
+  car.angle += physicsRuntime.steeringRate * dt;
+
+  let effectiveLateralGrip = carCfg.lateralGrip * physicsRuntime.surface.lateralGripMul;
+  const allowAutoDrift = surfaceName !== "grass";
+  if (
+    flags.AUTO_DRIFT_ON_STEER &&
+    allowAutoDrift &&
+    Math.abs(physicsRuntime.input.steer) > constants.driftSteerThreshold
+  ) {
+    effectiveLateralGrip *= 1 - assistCfg.autoDriftGripCut * Math.abs(physicsRuntime.input.steer);
+  }
+  if (flags.DRIFT_ASSIST_RECOVERY) {
+    const steerAbs = Math.abs(physicsRuntime.input.steer);
+    if (
+      physicsRuntime.prevSteerAbs > constants.driftSteerThreshold &&
+      steerAbs <= constants.driftSteerThreshold
+    ) {
+      physicsRuntime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
+    }
+    physicsRuntime.prevSteerAbs = steerAbs;
+    if (physicsRuntime.recoveryTimer > 0) {
+      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
+      physicsRuntime.recoveryTimer = Math.max(0, physicsRuntime.recoveryTimer - dt);
+    }
+  }
+  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
+    const gripMul = 1 + (assistCfg.handbrakeGrip - 1) * physicsRuntime.input.handbrake;
+    effectiveLateralGrip *= gripMul;
+  }
+  if (physicsRuntime.collisionGripTimer > 0) {
+    effectiveLateralGrip *= 0.7;
+    physicsRuntime.collisionGripTimer = Math.max(0, physicsRuntime.collisionGripTimer - dt);
   }
 
-  forwardSpeed = clamp(forwardSpeed, physics.reverseSpeed, topSpeed);
-
-  const steerInput = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
-  const steerSpeedFactor = clamp(Math.abs(forwardSpeed) / 70, 0, 1.8);
-  const driftFactor = clamp((Math.abs(lateralSpeed) + Math.abs(forwardSpeed) - physics.driftThreshold) / 180, 0, 1);
-  const effectiveGrip = physics.lateralGrip * (1 - driftFactor) + physics.driftGrip * driftFactor;
-
-  car.angle += steerInput * physics.steering * dt * (forwardSpeed / physics.maxSpeed) * grip * steerSpeedFactor;
-
-  const lateralCorrection = clamp(effectiveGrip * dt * grip, 0, 1);
+  const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
   lateralSpeed *= 1 - lateralCorrection;
 
-  const targetLateral = steerInput * Math.abs(forwardSpeed) * 0.09;
-  lateralSpeed += (targetLateral - lateralSpeed) * clamp(physics.steerResponse * dt, 0, 1);
-
+  // Keep velocity integration in the pre-steer world basis so heading rotates
+  // independently and slip angle naturally emerges from mismatch.
   car.vx = forwardX * forwardSpeed + rightX * lateralSpeed;
   car.vy = forwardY * forwardSpeed + rightY * lateralSpeed;
 
-  const nx = car.x + car.vx * dt;
-  const ny = car.y + car.vy * dt;
+  const headingForwardX = Math.cos(car.angle);
+  const headingForwardY = Math.sin(car.angle);
+  const pivotOffset = car.width * (constants.pivotFromRearRatio - 0.5);
+  const pivotShiftX = Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
+  const pivotShiftY = Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
+  const nx = car.x + car.vx * dt + pivotShiftX;
+  const ny = car.y + car.vy * dt + pivotShiftY;
 
   if (!objectCollisionAt(nx, ny)) {
     car.x = nx;
     car.y = ny;
   } else {
-    car.vx *= -0.15;
-    car.vy *= -0.15;
+    if (flags.ARCADE_COLLISION_PUSH) {
+      const impactDir = Math.sign(lateralSpeed) || Math.sign(physicsRuntime.input.steer) || 1;
+      lateralSpeed += impactDir * 120;
+      forwardSpeed *= -0.2;
+      car.vx = forwardX * forwardSpeed + rightX * lateralSpeed;
+      car.vy = forwardY * forwardSpeed + rightY * lateralSpeed;
+      physicsRuntime.collisionGripTimer = 0.12;
+    } else {
+      car.vx *= -0.15;
+      car.vy *= -0.15;
+    }
   }
 
-  checkCheckpoints();
+  car.speed = Math.hypot(car.vx, car.vy);
+  const headingRightX = -headingForwardY;
+  const headingRightY = headingForwardX;
+  const headingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
+  const headingLateralSpeed = car.vx * headingRightX + car.vy * headingRightY;
+  physicsRuntime.debug.surface = surfaceName;
+  physicsRuntime.debug.vForward = headingForwardSpeed;
+  physicsRuntime.debug.vLateral = headingLateralSpeed;
+  physicsRuntime.debug.slipAngle = Math.atan2(
+    Math.abs(headingLateralSpeed),
+    Math.abs(headingForwardSpeed) + 0.0001,
+  );
+
+  if (!state.finished) {
+    checkCheckpoints();
+  }
 }
 
 function checkCheckpoints() {
@@ -720,6 +903,7 @@ function drawTrack() {
   drawDecor();
   drawRoadDetails();
   drawStartLine();
+  drawCheckpointFlags();
 }
 
 function drawDecor() {
@@ -794,6 +978,44 @@ function drawRoadDetails() {
   }
 }
 
+function drawCheckpointFlags() {
+  for (const cp of checkpoints) {
+    const a = cp.angle;
+    const radii = trackRadiiAtAngle(a);
+    const radialX = Math.cos(a);
+    const radialY = Math.sin(a);
+    const tangentX = -Math.sin(a);
+    const tangentY = Math.cos(a);
+    const roadMid = (radii.inner + radii.outer) * 0.5;
+    const posts = [radii.inner - 10, radii.outer + 10];
+
+    for (const radius of posts) {
+      const baseX = track.cx + radialX * radius;
+      const baseY = track.cy + radialY * radius;
+      const topX = baseX;
+      const topY = baseY - 16;
+      const side = radius < roadMid ? 1 : -1;
+      const flagTipX = topX + tangentX * 10 * side;
+      const flagTipY = topY + tangentY * 10 * side;
+
+      ctx.strokeStyle = "#e5e5e5";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(topX, topY);
+      ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(topX, topY);
+      ctx.lineTo(flagTipX, flagTipY + 4);
+      ctx.lineTo(topX, topY + 7);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
 function drawTrackEdges() {
   for (const rail of trackEdgeRails) {
     if (rail.points.length < 2) continue;
@@ -861,18 +1083,74 @@ function drawStartLine() {
 function drawCar() {
   ctx.save();
   ctx.translate(car.x, car.y);
-  ctx.rotate(car.angle);
+  // Sprite faces up, so rotate by +90deg to align nose with car forward axis.
+  ctx.rotate(car.angle + Math.PI * 0.5);
 
-  ctx.fillStyle = "#d22525";
-  ctx.fillRect(-car.width / 2, -car.height / 2, car.width, car.height);
-  ctx.fillStyle = "#ffd34d";
-  ctx.fillRect(-8, -6, 16, 12);
-  ctx.fillStyle = "#2a2a2a";
-  ctx.fillRect(-car.width / 2 - 4, -car.height / 2 - 2, 6, 8);
-  ctx.fillRect(-car.width / 2 - 4, car.height / 2 - 6, 6, 8);
-  ctx.fillRect(car.width / 2 - 2, -car.height / 2 - 2, 6, 8);
-  ctx.fillRect(car.width / 2 - 2, car.height / 2 - 6, 6, 8);
+  if (kartSpriteReady) {
+    const spriteWidth = 30;
+    const spriteLength = 56;
+    ctx.drawImage(
+      kartSprite,
+      -spriteWidth * 0.5,
+      -spriteLength * 0.5,
+      spriteWidth,
+      spriteLength,
+    );
+  } else {
+    // Fallback body if sprite is unavailable.
+    ctx.fillStyle = "#d22525";
+    ctx.fillRect(-car.height / 2, -car.width / 2, car.height, car.width);
+    ctx.fillStyle = "#ffd34d";
+    ctx.fillRect(-6, -8, 12, 16);
+  }
 
+  ctx.restore();
+}
+
+function drawDebugVectors() {
+  if (!physicsConfig.flags.DEBUG_VECTORS || state.mode !== "racing") return;
+
+  const forwardX = Math.cos(car.angle);
+  const forwardY = Math.sin(car.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  const velMag = Math.hypot(car.vx, car.vy);
+  const velDirX = velMag > 0.001 ? car.vx / velMag : 0;
+  const velDirY = velMag > 0.001 ? car.vy / velMag : 0;
+  const lateralWorldX = rightX * physicsRuntime.debug.vLateral;
+  const lateralWorldY = rightY * physicsRuntime.debug.vLateral;
+  const scale = 0.08;
+  const originX = car.x + forwardX * car.width * 0.38;
+  const originY = car.y + forwardY * car.width * 0.38;
+
+  ctx.save();
+  ctx.lineWidth = 3;
+
+  ctx.strokeStyle = "#ffe167";
+  ctx.beginPath();
+  ctx.moveTo(originX, originY);
+  ctx.lineTo(originX + forwardX * 60, originY + forwardY * 60);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#4da6ff";
+  ctx.beginPath();
+  ctx.moveTo(originX, originY);
+  ctx.lineTo(originX + velDirX * 70, originY + velDirY * 70);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#ff6969";
+  ctx.beginPath();
+  ctx.moveTo(originX, originY);
+  ctx.lineTo(originX + lateralWorldX * scale, originY + lateralWorldY * scale);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(5, 8, 18, 0.84)";
+  ctx.fillRect(20, HEIGHT - 116, 310, 92);
+  ctx.fillStyle = "#e9f0ff";
+  ctx.font = "15px Verdana";
+  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - 86);
+  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - 64);
+  ctx.fillText(`Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`, 34, HEIGHT - 42);
   ctx.restore();
 }
 
@@ -1120,6 +1398,7 @@ function render() {
   else {
     drawTrack();
     drawCar();
+    drawDebugVectors();
     drawStartSequenceOverlay();
     drawHUD();
   }
@@ -1201,6 +1480,7 @@ window.addEventListener("keydown", (e) => {
     if (key === "s" || key === "arrowdown") keys.brake = true;
     if (key === "a" || key === "arrowleft") keys.left = true;
     if (key === "d" || key === "arrowright") keys.right = true;
+    if (key === " ") keys.handbrake = true;
     if (key === "escape") state.mode = "menu";
   }
 });
@@ -1217,11 +1497,12 @@ window.addEventListener("keyup", (e) => {
   }
   if (key === "a" || key === "arrowleft") keys.left = false;
   if (key === "d" || key === "arrowright") keys.right = false;
+  if (key === " ") keys.handbrake = false;
 });
 
 let last = performance.now();
 function loop(now) {
-  const dt = Math.min(0.033, (now - last) / 1000);
+  const dt = Math.min(physicsConfig.car.dtClamp, (now - last) / 1000);
   last = now;
 
   if (state.mode === "racing") {
