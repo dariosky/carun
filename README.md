@@ -71,9 +71,17 @@ Then open the local URL shown by the server.
 
 ## Project Structure
 
-- `index.html`: canvas app shellw
+- `index.html`: canvas app shell
 - `styles.css`: full-screen presentation and responsive layout
-- `game.js`: game loop, menu flow, rendering, physics, collisions, timing
+- `js/main.js`: startup wiring
+- `js/parameters.js`: constants/config/static parameters
+- `js/state.js`: mutable runtime state
+- `js/menus.js`: menu/settings flow + keyboard handlers
+- `js/physics.js`: car physics + race progression
+- `js/track.js`: track geometry, surfaces, and collision helpers
+- `js/render.js`: world/UI rendering
+- `js/game-loop.js`: frame loop timing
+- `js/utils.js`: shared helpers
 
 ## Next Roadmap
 

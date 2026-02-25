@@ -51,6 +51,7 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - Keep code dependency-light (vanilla JS unless explicitly needed).
 - Preserve full-track visibility in gameplay scenes.
 - Avoid large rewrites without clear gameplay gain.
+- Keep modular ES-module structure (no monolithic `game.js` reintroduction).
 - Separate concerns where practical:
 - input/state flow
 - physics/surfaces/collisions
@@ -59,6 +60,19 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - When adding new surfaces/objects, define both:
 - visual representation
 - physical behavior
+
+## Current Code Layout
+
+- `index.html`: canvas shell + module entry script
+- `js/main.js`: startup wiring
+- `js/parameters.js`: constants/config/static parameters
+- `js/state.js`: mutable runtime state
+- `js/menus.js`: menu/settings flow + keyboard handlers
+- `js/physics.js`: car physics + race progression
+- `js/track.js`: track geometry, surfaces, and collision helpers
+- `js/render.js`: world/UI rendering
+- `js/game-loop.js`: frame loop timing
+- `js/utils.js`: shared helpers
 
 ## Definition of Done for Gameplay Changes
 
