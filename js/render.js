@@ -41,6 +41,8 @@ import {
 } from "./track.js";
 import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
 
+const TOP_BAR_HEIGHT = 56;
+
 function drawPixelNoise() {
   for (let i = 0; i < 250; i++) {
     const x = Math.floor(Math.random() * WIDTH);
@@ -363,13 +365,21 @@ function drawDebugVectors() {
   ctx.stroke();
 
   ctx.fillStyle = "rgba(5, 8, 18, 0.84)";
-  ctx.fillRect(20, HEIGHT - 134, 330, 110);
+  ctx.fillRect(20, HEIGHT - TOP_BAR_HEIGHT - 134, 330, 110);
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
-  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - 104);
-  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - 82);
-  ctx.fillText(`Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`, 34, HEIGHT - 60);
-  ctx.fillText(`CHECKPOINTS: ${lapData.passed.size}/${checkpoints.length}`, 34, HEIGHT - 38);
+  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - TOP_BAR_HEIGHT - 104);
+  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - TOP_BAR_HEIGHT - 82);
+  ctx.fillText(
+    `Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`,
+    34,
+    HEIGHT - TOP_BAR_HEIGHT - 60,
+  );
+  ctx.fillText(
+    `CHECKPOINTS: ${lapData.passed.size}/${checkpoints.length}`,
+    34,
+    HEIGHT - TOP_BAR_HEIGHT - 38,
+  );
   ctx.restore();
 }
 
@@ -502,43 +512,80 @@ function drawStartSequenceOverlay() {
   }
 }
 
-function drawHUD() {
-  ctx.fillStyle = "rgba(5, 8, 18, 0.78)";
-  ctx.fillRect(20, 16, 350, 160);
+function drawTitleBar() {
+  const gradient = ctx.createLinearGradient(0, 0, 0, TOP_BAR_HEIGHT);
+  gradient.addColorStop(0, "#1f3342");
+  gradient.addColorStop(1, "#142431");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, WIDTH, TOP_BAR_HEIGHT);
+  ctx.strokeStyle = "#0c161e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, TOP_BAR_HEIGHT - 1);
+  ctx.lineTo(WIDTH, TOP_BAR_HEIGHT - 1);
+  ctx.stroke();
 
+  let x = 18;
   ctx.fillStyle = "#ffe167";
-  ctx.font = "bold 24px Verdana";
-  ctx.fillText(`DRIVER: ${state.playerName}`, 34, 46);
+  ctx.font = "bold 28px Verdana";
+  ctx.fillText("Carun", x, 38);
+  x += ctx.measureText("Carun").width + 10;
 
-  ctx.fillStyle = "#f0f0f0";
-  ctx.font = "18px Verdana";
+  if (appLogoReady) {
+    ctx.drawImage(appLogo, x, 6, 44, 44);
+  }
+  x += 44 + 12;
+
+  ctx.fillStyle = "#f4fbff";
+  ctx.font = "bold 20px Verdana";
+  ctx.fillText(state.playerName, x, 38);
+  x += ctx.measureText(state.playerName).width + 18;
+
+  const lapLabel = `LAP ${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`;
+  ctx.fillStyle = "#d8e8f7";
+  ctx.font = "bold 18px Verdana";
+  ctx.fillText(lapLabel, x, 38);
+  x += ctx.measureText(lapLabel).width + 16;
+
   const liveLap = state.finished
     ? lapData.lapTimes[lapData.lapTimes.length - 1] || 0
     : state.raceTime - lapData.currentLapStart;
-  ctx.fillText(`LAP ${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`, 34, 75);
-  ctx.fillText(`CURRENT: ${formatTime(liveLap)}`, 34, 102);
+  const fastestIndex =
+    lapData.lapTimes.length > 0
+      ? lapData.lapTimes.reduce((bestIdx, t, idx, arr) => (t < arr[bestIdx] ? idx : bestIdx), 0)
+      : -1;
 
   ctx.font = "16px Verdana";
   for (let i = 0; i < lapData.maxLaps; i++) {
-    const t = lapData.lapTimes[i];
-    ctx.fillStyle = t ? "#ffffff" : "#8ea4aa";
-    ctx.fillText(`L${i + 1}: ${t ? formatTime(t) : "--:--.---"}`, 34, 128 + i * 20);
+    const isCurrent = !state.finished && i === lapData.lapTimes.length;
+    const isCompleted = i < lapData.lapTimes.length;
+    const value = isCurrent ? liveLap : lapData.lapTimes[i];
+    if (isCurrent) ctx.fillStyle = "#f3f8ff";
+    else if (isCompleted && i === fastestIndex) ctx.fillStyle = "#ffe167";
+    else if (isCompleted) ctx.fillStyle = "#8b98a7";
+    else ctx.fillStyle = "rgba(180, 194, 208, 0.45)";
+    const label = value !== undefined ? `L${i + 1} ${formatTime(value)}` : `L${i + 1} --:--.---`;
+    ctx.fillText(label, x, 38);
+    x += ctx.measureText(label).width + 14;
   }
+}
 
-  if (state.finished) {
-    ctx.fillStyle = "rgba(12, 22, 18, 0.86)";
-    ctx.fillRect(WIDTH / 2 - 210, HEIGHT / 2 - 90, 420, 180);
-    ctx.fillStyle = "#6af0a8";
-    ctx.font = "bold 42px Verdana";
-    ctx.fillText("FINISH!", WIDTH / 2 - 95, HEIGHT / 2 - 18);
-    ctx.font = "20px Verdana";
-    ctx.fillStyle = "#ffffff";
-    const total = lapData.lapTimes.reduce((a, b) => a + b, 0);
-    const bestLap = lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0;
-    ctx.fillText(`TOTAL: ${formatTime(total)}`, WIDTH / 2 - 104, HEIGHT / 2 + 20);
-    ctx.fillText(`BEST: ${formatTime(bestLap)}`, WIDTH / 2 - 104, HEIGHT / 2 + 46);
-    ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, HEIGHT / 2 + 72);
-  }
+function drawFinishOverlay() {
+  if (!state.finished || state.mode !== "racing") return;
+  const viewportCenterY = TOP_BAR_HEIGHT + (HEIGHT - TOP_BAR_HEIGHT) * 0.5;
+
+  ctx.fillStyle = "rgba(12, 22, 18, 0.86)";
+  ctx.fillRect(WIDTH / 2 - 210, viewportCenterY - 90, 420, 180);
+  ctx.fillStyle = "#6af0a8";
+  ctx.font = "bold 42px Verdana";
+  ctx.fillText("FINISH!", WIDTH / 2 - 95, viewportCenterY - 18);
+  ctx.font = "20px Verdana";
+  ctx.fillStyle = "#ffffff";
+  const total = lapData.lapTimes.reduce((a, b) => a + b, 0);
+  const bestLap = lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0;
+  ctx.fillText(`TOTAL: ${formatTime(total)}`, WIDTH / 2 - 104, viewportCenterY + 20);
+  ctx.fillText(`BEST: ${formatTime(bestLap)}`, WIDTH / 2 - 104, viewportCenterY + 46);
+  ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 72);
 }
 
 function drawPauseOverlay() {
@@ -888,11 +935,18 @@ export function render() {
   else if (state.mode === "editor") drawEditor();
   else if (state.mode === "settings") drawSettings();
   else {
+    drawTitleBar();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, TOP_BAR_HEIGHT, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
+    ctx.clip();
+    ctx.translate(0, TOP_BAR_HEIGHT);
     drawTrack();
     drawCar();
     drawDebugVectors();
     drawStartSequenceOverlay();
-    drawHUD();
+    ctx.restore();
+    drawFinishOverlay();
     drawPauseOverlay();
   }
 
