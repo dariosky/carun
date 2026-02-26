@@ -28,6 +28,7 @@ export const state = {
     cursorY: track.cy,
     drawing: false,
     activeStroke: [],
+    showCurbs: true,
   },
   snackbar: {
     text: "",

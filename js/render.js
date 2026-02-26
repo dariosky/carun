@@ -224,6 +224,27 @@ function drawSkidMarks() {
   ctx.restore();
 }
 
+function drawVertexAsterisks(points, size = 3.2, color = "rgba(255, 245, 120, 0.95)") {
+  if (!Array.isArray(points) || !points.length) return;
+  const d = size * 0.72;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  for (const p of points) {
+    ctx.beginPath();
+    ctx.moveTo(p.x - size, p.y);
+    ctx.lineTo(p.x + size, p.y);
+    ctx.moveTo(p.x, p.y - size);
+    ctx.lineTo(p.x, p.y + size);
+    ctx.moveTo(p.x - d, p.y - d);
+    ctx.lineTo(p.x + d, p.y + d);
+    ctx.moveTo(p.x + d, p.y - d);
+    ctx.lineTo(p.x - d, p.y + d);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawCheckpointFlags() {
   const CHECKPOINT_PIN_WIDTH_MULTIPLIER = 1.2;
   for (const cp of checkpoints) {
@@ -352,12 +373,19 @@ function drawTrack() {
     ctx.restore();
   }
 
-  curbSegments.outer.forEach((segment) =>
-    drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
-  );
-  curbSegments.inner.forEach((segment) =>
-    drawStripedCurb(segment, 1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
-  );
+  const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
+  if (showCurbs) {
+    curbSegments.outer.forEach((segment) =>
+      drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
+    );
+    curbSegments.inner.forEach((segment) =>
+      drawStripedCurb(segment, 1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
+    );
+  }
+  if (state.mode === "editor" && !state.editor.showCurbs) {
+    drawVertexAsterisks(outerPath);
+    drawVertexAsterisks(innerPath);
+  }
 
   if (!centerlineTrack) {
     ctx.fillStyle = "#247637";

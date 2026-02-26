@@ -8,6 +8,7 @@ import {
   ctx,
 } from "./parameters.js";
 import {clamp, normalizeVec, signedAngleBetween} from "./utils.js";
+import {cleanOffsetLoop, hasSelfIntersections, intersectLines, signedLoopArea} from "./polygon-clean.js";
 
 export function ellipseRadiusAtAngle(angle, a, b) {
   const c = Math.cos(angle);
@@ -127,27 +128,7 @@ function sampleLoop(loop, segments = 220) {
   return points;
 }
 
-function intersectLines(aPoint, aDir, bPoint, bDir) {
-  const det = aDir.x * bDir.y - aDir.y * bDir.x;
-  if (Math.abs(det) < 1e-8) return null;
-  const dx = bPoint.x - aPoint.x;
-  const dy = bPoint.y - aPoint.y;
-  const t = (dx * bDir.y - dy * bDir.x) / det;
-  return {
-    x: aPoint.x + aDir.x * t,
-    y: aPoint.y + aDir.y * t,
-  };
-}
-
-function signedLoopArea(loop) {
-  let sum = 0;
-  for (let i = 0; i < loop.length; i++) {
-    const a = loop[i];
-    const b = loop[(i + 1) % loop.length];
-    sum += a.x * b.y - b.x * a.y;
-  }
-  return sum * 0.5;
-}
+// intersectLines and signedLoopArea are imported from polygon-clean.js
 
 function offsetLoop(loop, offset, miterLimit = 2.6) {
   const n = loop.length;
@@ -194,6 +175,134 @@ function offsetLoop(loop, offset, miterLimit = 2.6) {
     };
   }
   return out;
+}
+
+function shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol) {
+  const prevLen = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+  const nextLen = Math.hypot(next.x - curr.x, next.y - curr.y);
+  if (prevLen < minEdgeLen || nextLen < minEdgeLen) return true;
+
+  const segX = next.x - prev.x;
+  const segY = next.y - prev.y;
+  const segLenSq = segX * segX + segY * segY;
+  if (segLenSq < 1e-8) return true;
+
+  // Only remove points that project inside the local hull span [prev, next].
+  const t = clamp(((curr.x - prev.x) * segX + (curr.y - prev.y) * segY) / segLenSq, 0, 1);
+  if (t <= 1e-3 || t >= 1 - 1e-3) return false;
+
+  const projX = prev.x + segX * t;
+  const projY = prev.y + segY * t;
+  const dist = Math.hypot(curr.x - projX, curr.y - projY);
+  return dist <= collinearTol;
+}
+
+function simplifyOpenPathRdp(points, epsilon) {
+  if (!Array.isArray(points) || points.length <= 2) return Array.isArray(points) ? [...points] : [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  const segX = last.x - first.x;
+  const segY = last.y - first.y;
+  const segLen = Math.hypot(segX, segY);
+
+  let maxDist = -1;
+  let splitIndex = -1;
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i];
+    let dist = 0;
+    if (segLen < 1e-8) {
+      dist = Math.hypot(p.x - first.x, p.y - first.y);
+    } else {
+      dist = Math.abs((p.x - first.x) * segY - (p.y - first.y) * segX) / segLen;
+    }
+    if (dist > maxDist) {
+      maxDist = dist;
+      splitIndex = i;
+    }
+  }
+
+  if (maxDist <= epsilon || splitIndex < 0) {
+    return [first, last];
+  }
+
+  const left = simplifyOpenPathRdp(points.slice(0, splitIndex + 1), epsilon);
+  const right = simplifyOpenPathRdp(points.slice(splitIndex), epsilon);
+  return left.slice(0, -1).concat(right);
+}
+
+function simplifyClosedLoopRdp(loop, epsilon, minVertices) {
+  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
+
+  let tol = epsilon;
+  let simplified = [...loop];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const openLoop = loop.concat([loop[0]]);
+    const openSimplified = simplifyOpenPathRdp(openLoop, tol);
+    simplified = openSimplified.slice(0, -1);
+    if (simplified.length >= minVertices) break;
+    tol *= 0.68;
+  }
+  return simplified.length >= 3 ? simplified : [...loop];
+}
+
+function simplifyClosedLoop(
+  loop,
+  {minEdgeLen = 1.2, collinearTol = 1.6, rdpTolerance = 2.2, maxPasses = 6, minVertices = 14} = {},
+) {
+  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
+  let points = loop.map((p) => ({x: p.x, y: p.y}));
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const n = points.length;
+    if (n <= minVertices) break;
+
+    const keep = new Array(n).fill(true);
+    for (let i = 0; i < n; i++) {
+      const prev = points[(i - 1 + n) % n];
+      const curr = points[i];
+      const next = points[(i + 1) % n];
+      if (shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol)) {
+        keep[i] = false;
+      }
+    }
+
+    const keptCount = keep.reduce((acc, v) => acc + (v ? 1 : 0), 0);
+    if (keptCount < minVertices || keptCount === n) break;
+
+    points = points.filter((_, i) => keep[i]);
+  }
+
+  return simplifyClosedLoopRdp(points, rdpTolerance, Math.min(minVertices, Math.max(points.length - 1, 3)));
+}
+
+function simplifyOpenRunPath(points, tolerance = 1.8, minPoints = 4) {
+  if (!Array.isArray(points) || points.length <= minPoints) return Array.isArray(points) ? [...points] : [];
+  const simplified = simplifyOpenPathRdp(points, tolerance);
+  return simplified.length >= minPoints ? simplified : [...points];
+}
+
+/**
+ * Clean and simplify an offset polygon:
+ *   1. Remove self-intersections from the raw offset (extracts outermost contour).
+ *   2. Simplify the clean polygon (vertex reduction via collinearity culling + RDP).
+ *   3. Clean again — simplification can reintroduce crossings on tight corners.
+ *
+ * This replaces the old projectInteriorVerticesToBorder heuristic with a
+ * geometrically correct contour-extraction algorithm.
+ */
+function simplifyOffsetClosedLoop(loop, simplifyParams) {
+  // Phase 1: clean raw offset self-intersections.
+  const cleaned = cleanOffsetLoop(loop);
+
+  // Phase 2: simplify vertex count.
+  const simplified = simplifyClosedLoop(cleaned, simplifyParams);
+
+  // Phase 3: if simplification introduced new crossings, clean again.
+  if (hasSelfIntersections(simplified)) {
+    return cleanOffsetLoop(simplified);
+  }
+
+  return simplified;
 }
 
 function nearestDistanceAndProgressToLoop(x, y, loop) {
@@ -290,10 +399,19 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
   if (loop) {
     const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
     const sampledCenter = sampleLoop(loop, Math.max(segments, loop.length));
+    const simplifyParams = {
+      minEdgeLen: Math.max(1.2, halfWidth * 0.04),
+      collinearTol: Math.max(1.6, halfWidth * 0.05),
+      rdpTolerance: Math.max(2.2, halfWidth * 0.08),
+      maxPasses: 6,
+      minVertices: Math.max(14, Math.floor(sampledCenter.length * 0.08)),
+    };
+    const outer = simplifyOffsetClosedLoop(offsetLoop(sampledCenter, halfWidth), simplifyParams);
+    const inner = simplifyOffsetClosedLoop(offsetLoop(sampledCenter, -halfWidth), simplifyParams);
     return {
       center: sampledCenter,
-      outer: offsetLoop(sampledCenter, halfWidth),
-      inner: offsetLoop(sampledCenter, -halfWidth),
+      outer,
+      inner,
     };
   }
 
@@ -497,7 +615,7 @@ function buildCurbSegments() {
   const collectRuns = (points) => {
     const runs = [];
     const allTrue = expanded.every(Boolean);
-    if (allTrue) return [[...points, points[0]]];
+    if (allTrue) return [simplifyOpenRunPath([...points, points[0]], 1.8, 4)];
 
     let current = null;
     for (let i = 0; i < segmentCount; i++) {
@@ -517,7 +635,7 @@ function buildCurbSegments() {
         const first = runs.shift();
         runs.unshift([...current, ...first]);
       } else if (current.length >= 4) {
-        runs.push(current);
+        runs.push(simplifyOpenRunPath(current, 1.8, 4));
       }
     }
 
@@ -535,9 +653,16 @@ function buildFullCurbSegments() {
     const center = trackBoundaryPaths(track, 420).center;
     const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
     const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
+    const simplifyParams = {
+      minEdgeLen: Math.max(1.2, halfWidth * 0.035),
+      collinearTol: Math.max(1.4, halfWidth * 0.045),
+      rdpTolerance: Math.max(1.8, halfWidth * 0.07),
+      maxPasses: 6,
+      minVertices: Math.max(14, Math.floor(center.length * 0.08)),
+    };
     return {
-      outer: [offsetLoop(center, curbOffset)],
-      inner: [offsetLoop(center, -curbOffset)],
+      outer: [simplifyOffsetClosedLoop(offsetLoop(center, curbOffset), simplifyParams)],
+      inner: [simplifyOffsetClosedLoop(offsetLoop(center, -curbOffset), simplifyParams)],
     };
   }
 

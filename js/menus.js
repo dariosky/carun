@@ -386,6 +386,11 @@ function onKeyDown(e) {
   }
 
   if (state.mode === "editor") {
+    if (key === "c") {
+      if (e.repeat) return;
+      state.editor.showCurbs = !state.editor.showCurbs;
+      return;
+    }
     if (key === "t") placeEditorObject("tree");
     if (key === "w") placeEditorObject("pond");
     if (key === "b") placeEditorObject("barrel");
