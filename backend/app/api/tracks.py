@@ -14,7 +14,11 @@ router = APIRouter(prefix="/api/tracks", tags=["tracks"])
 
 @router.get("", response_model=list[TrackResponse])
 def list_tracks(session: Session = Depends(get_session)):
-    query = select(Track).where((Track.is_published == True) | (Track.source == "system")).order_by(Track.created_at.desc())
+    query = (
+        select(Track)
+        .where((Track.is_published) | (Track.source == "system"))
+        .order_by(Track.created_at.desc())
+    )
     tracks = session.exec(query).all()
     return [
         TrackResponse(

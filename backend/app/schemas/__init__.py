@@ -1,5 +1,5 @@
 from .auth import AuthMeResponse
-from .leaderboard import LeaderboardEntry, LeaderboardResponse, LapSubmitRequest, LapSubmitResponse
+from .leaderboard import LapSubmitRequest, LapSubmitResponse, LeaderboardEntry, LeaderboardResponse
 from .tracks import TrackCreateRequest, TrackResponse, TrackShareResponse
 
 __all__ = [

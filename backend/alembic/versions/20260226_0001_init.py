@@ -5,8 +5,9 @@ Revises:
 Create Date: 2026-02-26 22:55:00
 
 """
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -35,7 +36,9 @@ def upgrade() -> None:
         sa.Column("slug", sa.String(), nullable=True),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("source", sa.String(), nullable=False),
-        sa.Column("owner_user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "owner_user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True
+        ),
         sa.Column("is_published", sa.Boolean(), nullable=False),
         sa.Column("share_token", sa.String(), nullable=True),
         sa.Column("min_lap_ms", sa.Integer(), nullable=False),
@@ -52,8 +55,12 @@ def upgrade() -> None:
     op.create_table(
         "best_laps",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("track_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
+        sa.Column(
+            "track_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False
+        ),
         sa.Column("lap_ms", sa.Integer(), nullable=False),
         sa.Column("build_version", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -68,8 +75,12 @@ def upgrade() -> None:
     op.create_table(
         "lap_events",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("track_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
+        sa.Column(
+            "track_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False
+        ),
         sa.Column("lap_ms", sa.Integer(), nullable=False),
         sa.Column("accepted", sa.Boolean(), nullable=False),
         sa.Column("reason", sa.String(), nullable=True),

@@ -1,11 +1,10 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from sqlmodel import SQLModel
-
 from app.config import get_settings
 from app.models import BestLap, LapEvent, Track, User  # noqa: F401
+from sqlalchemy import engine_from_config, pool
+from sqlmodel import SQLModel
 
 config = context.config
 settings = get_settings()

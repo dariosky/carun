@@ -1,7 +1,7 @@
-from sqlalchemy import UniqueConstraint
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     frontend_dir: Path = ROOT_DIR / "frontend"
 
     model_config = SettingsConfigDict(
-        env_file=(ROOT_DIR / ".env", ROOT_DIR / ".env.prod"),
+        env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

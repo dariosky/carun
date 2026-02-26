@@ -24,7 +24,9 @@ def google_login(request: Request):
 
 
 @router.get("/google/callback")
-async def google_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
+async def google_callback(
+    request: Request, code: str, state: str, session: Session = Depends(get_session)
+):
     expected_state = request.session.get("oauth_state")
     if not expected_state or expected_state != state:
         return RedirectResponse("/?auth=failed", status_code=302)

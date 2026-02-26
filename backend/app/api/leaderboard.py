@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import BestLap, LapEvent, Track, User
-from ..schemas import LeaderboardEntry, LeaderboardResponse, LapSubmitRequest, LapSubmitResponse
+from ..schemas import LapSubmitRequest, LapSubmitResponse, LeaderboardEntry, LeaderboardResponse
 
 router = APIRouter(prefix="/api", tags=["leaderboard"])
 
@@ -35,7 +35,9 @@ def get_leaderboard(track_id: str, limit: int = 50, session: Session = Depends(g
     rows = session.exec(stmt).all()
 
     entries = [
-        LeaderboardEntry(rank=i + 1, user_id=str(user.id), display_name=user.display_name, lap_ms=lap.lap_ms)
+        LeaderboardEntry(
+            rank=i + 1, user_id=str(user.id), display_name=user.display_name, lap_ms=lap.lap_ms
+        )
         for i, (lap, user) in enumerate(rows)
     ]
     return LeaderboardResponse(track_id=track_id, entries=entries)

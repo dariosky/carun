@@ -46,11 +46,15 @@ async def exchange_code_for_userinfo(code: str) -> dict:
         )
 
         if token_res.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token exchange failed")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token exchange failed"
+            )
 
         access_token = token_res.json().get("access_token")
         if not access_token:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No Google access token")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="No Google access token"
+            )
 
         user_res = await client.get(
             GOOGLE_USERINFO_ENDPOINT,
@@ -58,7 +62,9 @@ async def exchange_code_for_userinfo(code: str) -> dict:
         )
 
         if user_res.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google userinfo fetch failed")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Google userinfo fetch failed"
+            )
 
         return user_res.json()
 
@@ -66,7 +72,9 @@ async def exchange_code_for_userinfo(code: str) -> dict:
 def upsert_user_from_google(session: Session, payload: dict) -> User:
     google_sub = payload.get("sub")
     if not google_sub:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google payload missing sub")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Google payload missing sub"
+        )
 
     display_name = payload.get("name") or payload.get("email") or "Carun Player"
     email = payload.get("email")
