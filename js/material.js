@@ -1,6 +1,8 @@
 import { HEIGHT, WIDTH } from "./parameters.js";
 
 let asphaltMaterial = null;
+let asphaltPattern = null;
+let asphaltPatternCtx = null;
 
 function clampByte(value) {
   return Math.max(0, Math.min(255, value | 0));
@@ -56,7 +58,10 @@ function getAsphaltMaterial() {
 }
 
 export function getAsphaltPattern(targetCtx) {
-  return targetCtx.createPattern(getAsphaltMaterial(), "repeat");
+  if (asphaltPattern && asphaltPatternCtx === targetCtx) return asphaltPattern;
+  asphaltPatternCtx = targetCtx;
+  asphaltPattern = targetCtx.createPattern(getAsphaltMaterial(), "repeat");
+  return asphaltPattern;
 }
 
 export function drawAsphaltMaterial(targetCtx) {

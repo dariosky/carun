@@ -342,6 +342,77 @@ function resampleClosedLoop(points, targetCount = 220) {
   return sampled;
 }
 
+function normalizeVec(x, y) {
+  const len = Math.hypot(x, y);
+  if (len < 1e-8) return { x: 1, y: 0 };
+  return { x: x / len, y: y / len };
+}
+
+function intersectLines(aPoint, aDir, bPoint, bDir) {
+  const det = aDir.x * bDir.y - aDir.y * bDir.x;
+  if (Math.abs(det) < 1e-8) return null;
+  const dx = bPoint.x - aPoint.x;
+  const dy = bPoint.y - aPoint.y;
+  const t = (dx * bDir.y - dy * bDir.x) / det;
+  return {
+    x: aPoint.x + aDir.x * t,
+    y: aPoint.y + aDir.y * t,
+  };
+}
+
+function signedLoopArea(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum * 0.5;
+}
+
+function offsetClosedLoop(points, offset, miterLimit = 2.6) {
+  if (!Array.isArray(points) || points.length < 3) return [];
+  const n = points.length;
+  const orientation = signedLoopArea(points) < 0 ? 1 : -1;
+  const signedOffset = offset * orientation;
+  const out = new Array(n);
+
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n];
+    const curr = points[i];
+    const next = points[(i + 1) % n];
+    const inDir = normalizeVec(curr.x - prev.x, curr.y - prev.y);
+    const outDir = normalizeVec(next.x - curr.x, next.y - curr.y);
+    const inNormal = { x: -inDir.y, y: inDir.x };
+    const outNormal = { x: -outDir.y, y: outDir.x };
+
+    const inPoint = {
+      x: curr.x + inNormal.x * signedOffset,
+      y: curr.y + inNormal.y * signedOffset,
+    };
+    const outPoint = {
+      x: curr.x + outNormal.x * signedOffset,
+      y: curr.y + outNormal.y * signedOffset,
+    };
+
+    const candidate = intersectLines(inPoint, inDir, outPoint, outDir);
+    if (candidate) {
+      const miterLen = Math.hypot(candidate.x - curr.x, candidate.y - curr.y);
+      if (miterLen <= Math.abs(signedOffset) * miterLimit + 1e-6) {
+        out[i] = candidate;
+        continue;
+      }
+    }
+
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
+    out[i] = {
+      x: curr.x + avg.x * signedOffset,
+      y: curr.y + avg.y * signedOffset,
+    };
+  }
+  return out;
+}
+
 function solveLinearSystem(matrix, values) {
   const n = values.length;
   const a = matrix.map((row) => [...row]);
@@ -457,8 +528,27 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   const preset = getTrackPreset(index);
   const rawLoop = getConnectedCenterlinePoints(preset.centerlineStrokes);
   if (rawLoop.length < 6) return false;
+  const anchor = rawLoop[0];
   const smoothedLoop = chaikinSmoothClosed(rawLoop, 2);
   const loopPoints = resampleClosedLoop(smoothedLoop, 220);
+  if (loopPoints.length > 0 && anchor) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < loopPoints.length; i++) {
+      const dx = loopPoints[i].x - anchor.x;
+      const dy = loopPoints[i].y - anchor.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx > 0) {
+      const rotated = loopPoints.slice(bestIdx).concat(loopPoints.slice(0, bestIdx));
+      loopPoints.length = 0;
+      loopPoints.push(...rotated);
+    }
+  }
   if (loopPoints.length < 20) return false;
 
   let cx = 0;
@@ -482,26 +572,6 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   const spanY = maxY - minY;
   if (spanX < 120 || spanY < 120) return false;
 
-  const sampleCount = 180;
-  const angles = [];
-  const centerRadii = [];
-  const fallbackRadius = Math.min(spanX, spanY) * 0.35;
-
-  for (let i = 0; i < sampleCount; i++) {
-    const angle = (i / sampleCount) * Math.PI * 2;
-    let best = null;
-    for (let j = 0; j < loopPoints.length; j++) {
-      const a = loopPoints[j];
-      const b = loopPoints[(j + 1) % loopPoints.length];
-      const t = raySegmentDistance(cx, cy, angle, a, b);
-      if (t === null) continue;
-      if (best === null || t < best) best = t;
-    }
-    const radius = best !== null ? best : fallbackRadius;
-    angles.push(angle);
-    centerRadii.push(radius);
-  }
-
   let perimeter = 0;
   for (let i = 0; i < loopPoints.length; i++) {
     const a = loopPoints[i];
@@ -513,22 +583,47 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   const perimeterBasedWidth = perimeter / 90;
   const safeMaxWidth = Math.min(spanX, spanY) * 0.24;
   const halfWidth = clamp(Math.min(Math.max(spanBasedWidth, perimeterBasedWidth), safeMaxWidth), 24, 72);
-  const outerA = Math.max(...loopPoints.map((p) => Math.abs(p.x - cx))) + halfWidth;
-  const outerB = Math.max(...loopPoints.map((p) => Math.abs(p.y - cy))) + halfWidth;
-  const innerA = Math.max(outerA - halfWidth * 2, 85);
-  const innerB = Math.max(outerB - halfWidth * 2, 75);
+  const outerLoop = offsetClosedLoop(loopPoints, halfWidth);
+  const innerLoop = offsetClosedLoop(loopPoints, -halfWidth);
+  const outerA = Math.max(...outerLoop.map((p) => Math.abs(p.x - cx)));
+  const outerB = Math.max(...outerLoop.map((p) => Math.abs(p.y - cy)));
+  const innerA = Math.max(...innerLoop.map((p) => Math.abs(p.x - cx)));
+  const innerB = Math.max(...innerLoop.map((p) => Math.abs(p.y - cy)));
 
+  const sampleCount = 180;
+  const angles = [];
   const outerScales = [];
   const innerScales = [];
+  const fallbackOuter = Math.max(outerA, outerB);
+  const fallbackInner = Math.max(24, Math.max(innerA, innerB));
+
   for (let i = 0; i < sampleCount; i++) {
-    const angle = angles[i];
-    const centerRadius = centerRadii[i];
-    const outerTarget = centerRadius + halfWidth;
-    const innerTarget = Math.max(28, centerRadius - halfWidth);
+    const angle = (i / sampleCount) * Math.PI * 2;
+    angles.push(angle);
+    let outerTarget = null;
+    let innerTarget = null;
+    for (let j = 0; j < outerLoop.length; j++) {
+      const a = outerLoop[j];
+      const b = outerLoop[(j + 1) % outerLoop.length];
+      const t = raySegmentDistance(cx, cy, angle, a, b);
+      if (t === null) continue;
+      if (outerTarget === null || t > outerTarget) outerTarget = t;
+    }
+    for (let j = 0; j < innerLoop.length; j++) {
+      const a = innerLoop[j];
+      const b = innerLoop[(j + 1) % innerLoop.length];
+      const t = raySegmentDistance(cx, cy, angle, a, b);
+      if (t === null) continue;
+      if (innerTarget === null || t < innerTarget) innerTarget = t;
+    }
+
+    outerTarget = outerTarget === null ? fallbackOuter : outerTarget;
+    innerTarget = innerTarget === null ? fallbackInner : innerTarget;
+    const clampedInnerTarget = Math.max(24, Math.min(innerTarget, outerTarget - 12));
     const outerBase = ellipseRadiusAtAngle(angle, outerA, outerB);
     const innerBase = ellipseRadiusAtAngle(angle, innerA, innerB);
     outerScales.push(outerTarget / Math.max(outerBase, 1e-6));
-    innerScales.push(innerTarget / Math.max(innerBase, 1e-6));
+    innerScales.push(clampedInnerTarget / Math.max(innerBase, 1e-6));
   }
 
   const frequencies = [1, 2, 3, 5, 7];
@@ -543,6 +638,7 @@ export function regenerateTrackFromCenterlineStrokes(index) {
     warpOuter: fitWarpProfile(angles, outerScales, frequencies, 0.22),
     warpInner: fitWarpProfile(angles, innerScales, frequencies, 0.24),
     centerlineHalfWidth: Number(halfWidth.toFixed(1)),
+    startAngle: 0,
     centerlineLoop: loopPoints.map((p) => ({ x: Number(p.x.toFixed(1)), y: Number(p.y.toFixed(1)) })),
   };
 

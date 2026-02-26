@@ -33,6 +33,9 @@ export const state = {
     text: "",
     time: 0,
   },
+  performance: {
+    fps: 0,
+  },
 };
 
 export const keys = {

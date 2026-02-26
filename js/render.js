@@ -38,18 +38,102 @@ import {
   sampleClosedPath,
   trackBoundaryPaths,
   trackFrameAtAngle,
+  trackStartAngle,
 } from "./track.js";
 import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
 
 const TOP_BAR_HEIGHT = 56;
+const TRACK_SEGMENTS = 260;
+
+let pixelNoiseOverlay = null;
+let cachedTrackBoundaries = null;
+let cachedTrackSignature = null;
+
+function createTextureCanvas(width, height) {
+  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
+  const canvasEl = document.createElement("canvas");
+  canvasEl.width = width;
+  canvasEl.height = height;
+  return canvasEl;
+}
+
+function ensurePixelNoiseOverlay() {
+  if (pixelNoiseOverlay) return pixelNoiseOverlay;
+  const noiseCanvas = createTextureCanvas(256, 144);
+  const noiseCtx = noiseCanvas.getContext("2d");
+  noiseCtx.clearRect(0, 0, noiseCanvas.width, noiseCanvas.height);
+  for (let i = 0; i < 2200; i++) {
+    const x = Math.floor(Math.random() * noiseCanvas.width);
+    const y = Math.floor(Math.random() * noiseCanvas.height);
+    noiseCtx.fillStyle = i % 2 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)";
+    noiseCtx.fillRect(x, y, 1, 1);
+  }
+  pixelNoiseOverlay = noiseCanvas;
+  return pixelNoiseOverlay;
+}
+
+function warpProfileSignature(waves) {
+  let sum = 0;
+  for (let i = 0; i < waves.length; i++) {
+    const w = waves[i];
+    sum += (w.f || 0) * 1.7 + (w.amp || 0) * 17 + (w.phase || 0) * 9;
+  }
+  return Number(sum.toFixed(5));
+}
+
+function trackSignature(trackDef, segments) {
+  return {
+    segments,
+    cx: trackDef.cx,
+    cy: trackDef.cy,
+    outerA: trackDef.outerA,
+    outerB: trackDef.outerB,
+    innerA: trackDef.innerA,
+    innerB: trackDef.innerB,
+    borderSize: trackDef.borderSize,
+    centerlineHalfWidth: trackDef.centerlineHalfWidth,
+    warpOuterSig: warpProfileSignature(trackDef.warpOuter || []),
+    warpInnerSig: warpProfileSignature(trackDef.warpInner || []),
+    centerlineLoopRef: trackDef.centerlineLoop,
+    centerlineLoopLength: trackDef.centerlineLoop ? trackDef.centerlineLoop.length : 0,
+  };
+}
+
+function sameTrackSignature(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.segments === b.segments &&
+    a.cx === b.cx &&
+    a.cy === b.cy &&
+    a.outerA === b.outerA &&
+    a.outerB === b.outerB &&
+    a.innerA === b.innerA &&
+    a.innerB === b.innerB &&
+    a.borderSize === b.borderSize &&
+    a.centerlineHalfWidth === b.centerlineHalfWidth &&
+    a.warpOuterSig === b.warpOuterSig &&
+    a.warpInnerSig === b.warpInnerSig &&
+    a.centerlineLoopRef === b.centerlineLoopRef &&
+    a.centerlineLoopLength === b.centerlineLoopLength
+  );
+}
+
+function getTrackBoundariesCached(trackDef, segments) {
+  const nextSignature = trackSignature(trackDef, segments);
+  if (!sameTrackSignature(cachedTrackSignature, nextSignature)) {
+    cachedTrackBoundaries = trackBoundaryPaths(trackDef, segments);
+    cachedTrackSignature = nextSignature;
+  }
+  return cachedTrackBoundaries;
+}
 
 function drawPixelNoise() {
-  for (let i = 0; i < 250; i++) {
-    const x = Math.floor(Math.random() * WIDTH);
-    const y = Math.floor(Math.random() * HEIGHT);
-    ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.03)";
-    ctx.fillRect(x, y, 2, 2);
-  }
+  const overlay = ensurePixelNoiseOverlay();
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(overlay, 0, 0, WIDTH, HEIGHT);
+  ctx.restore();
 }
 
 function drawDecor() {
@@ -201,7 +285,7 @@ function drawCheckpointFlags() {
 }
 
 function drawStartLine() {
-  const startAngle = Math.PI * 0.5;
+  const startAngle = trackStartAngle(track);
   const frame = trackFrameAtAngle(startAngle, track);
   const center = frame.point;
   const span = frame.roadWidth;
@@ -235,7 +319,7 @@ function drawTrack() {
 
   drawPixelNoise();
 
-  const boundaries = trackBoundaryPaths(track, 260);
+  const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
   const centerlineTrack = isCenterlineTrack(track);
@@ -364,21 +448,38 @@ function drawDebugVectors() {
   ctx.lineTo(originX + lateralWorldX * scale, originY + lateralWorldY * scale);
   ctx.stroke();
 
+  const panelX = 20;
+  const panelY = HEIGHT - TOP_BAR_HEIGHT - 126;
+  const panelW = 330;
+  const panelH = 114;
+  const lineX = panelX + 14;
+  const firstLineY = panelY + 24;
+  const lineStep = 20;
+  const toStableInt = (value) => {
+    const rounded = Math.round(value);
+    return Object.is(rounded, -0) ? 0 : rounded;
+  };
+
   ctx.fillStyle = "rgba(5, 8, 18, 0.84)";
-  ctx.fillRect(20, HEIGHT - TOP_BAR_HEIGHT - 134, 330, 110);
+  ctx.fillRect(panelX, panelY, panelW, panelH);
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
-  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - TOP_BAR_HEIGHT - 104);
-  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - TOP_BAR_HEIGHT - 82);
+  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, lineX, firstLineY);
+  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, lineX, firstLineY + lineStep);
   ctx.fillText(
-    `Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`,
-    34,
-    HEIGHT - TOP_BAR_HEIGHT - 60,
+    `Vf: ${toStableInt(physicsRuntime.debug.vForward)} Vl: ${toStableInt(physicsRuntime.debug.vLateral)}`,
+    lineX,
+    firstLineY + lineStep * 2,
   );
   ctx.fillText(
     `CHECKPOINTS: ${lapData.passed.size}/${checkpoints.length}`,
-    34,
-    HEIGHT - TOP_BAR_HEIGHT - 38,
+    lineX,
+    firstLineY + lineStep * 3,
+  );
+  ctx.fillText(
+    `FPS: ${toStableInt(state.performance.fps)}`,
+    lineX,
+    firstLineY + lineStep * 4,
   );
   ctx.restore();
 }
@@ -570,6 +671,49 @@ function drawTitleBar() {
   }
 }
 
+function drawEditorTitleBar() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, TOP_BAR_HEIGHT);
+  gradient.addColorStop(0, "#1f3342");
+  gradient.addColorStop(1, "#142431");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, WIDTH, TOP_BAR_HEIGHT);
+  ctx.strokeStyle = "#0c161e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, TOP_BAR_HEIGHT - 1);
+  ctx.lineTo(WIDTH, TOP_BAR_HEIGHT - 1);
+  ctx.stroke();
+
+  let x = 18;
+  ctx.fillStyle = "#ffe167";
+  ctx.font = "bold 28px Verdana";
+  ctx.fillText("Carun", x, 38);
+  x += ctx.measureText("Carun").width + 10;
+
+  if (appLogoReady) ctx.drawImage(appLogo, x, 6, 44, 44);
+  x += 56;
+
+  ctx.fillStyle = "#f4fbff";
+  ctx.font = "bold 18px Verdana";
+  ctx.fillText(`EDITOR: ${preset.name}`, x, 38);
+  x += ctx.measureText(`EDITOR: ${preset.name}`).width + 16;
+
+  ctx.fillStyle = "#d8e8f7";
+  ctx.font = "15px Verdana";
+  const compactInfo = [
+    "LMB draw",
+    "T/W/B add",
+    "R race",
+    "Space build",
+    "S save",
+    "Backspace undo",
+    "Esc back",
+  ].join("   ");
+  ctx.fillText(compactInfo, x, 38);
+}
+
 function drawFinishOverlay() {
   if (!state.finished || state.mode !== "racing") return;
   const viewportCenterY = TOP_BAR_HEIGHT + (HEIGHT - TOP_BAR_HEIGHT) * 0.5;
@@ -677,7 +821,8 @@ function drawPreviewLoop(points, mapPoint) {
   ctx.closePath();
 }
 
-function drawTrackPreviewCard(x, y, size, selected, trackDef) {
+function drawTrackPreviewCard(x, y, size, selected, preset) {
+  const trackDef = preset.track;
   ctx.save();
   ctx.fillStyle = selected ? "#244864" : "#1a3347";
   ctx.fillRect(x, y, size, size);
@@ -732,7 +877,56 @@ function drawTrackPreviewCard(x, y, size, selected, trackDef) {
   drawPreviewLoop(inner, mapPoint);
   ctx.fill();
 
-  const startAngle = Math.PI * 0.5;
+  for (const obj of preset.worldObjects || []) {
+    const center = mapPoint(obj);
+    if (obj.type === "pond") {
+      const rx = Math.max(2.5, (obj.rx || 0) * scale);
+      const ry = Math.max(2, (obj.ry || 0) * scale);
+      const waterPath = sampleClosedPath((a) => {
+        const radius = blobRadius(rx, ry, a, obj.seed || 0);
+        return {
+          x: center.x + Math.cos(a) * radius,
+          y: center.y + Math.sin(a) * radius,
+        };
+      }, 18);
+      ctx.fillStyle = "#7aa1c2";
+      ctx.beginPath();
+      drawPath(waterPath);
+      ctx.fill();
+      ctx.strokeStyle = "#8de2ff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    if (obj.type === "tree") {
+      const radius = Math.max(3, (obj.r || 0) * scale);
+      const trunkW = Math.max(1.2, radius * 0.28);
+      const trunkH = Math.max(2, radius * 0.6);
+      ctx.fillStyle = "#4a2f1e";
+      ctx.fillRect(center.x - trunkW * 0.5, center.y + radius * 0.2, trunkW, trunkH);
+      ctx.fillStyle = "#2f9c4a";
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3dcf60";
+      ctx.beginPath();
+      ctx.arc(center.x - radius * 0.3, center.y - radius * 0.3, radius * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (obj.type === "barrel") {
+      const radius = Math.max(2.2, (obj.r || 0) * scale);
+      ctx.fillStyle = "#d16f0d";
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#3a2a12";
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+  }
+
+  const startAngle = trackStartAngle(trackDef);
   const startFrame = trackFrameAtAngle(startAngle, trackDef);
   const halfRoad = startFrame.roadWidth * 0.5;
   const startInner = mapPoint({
@@ -772,7 +966,7 @@ function drawTrackSelection() {
   for (let i = 0; i < trackOptions.length; i++) {
     const cardX = startX + i * (cardSize + gap);
     const selected = state.trackSelectIndex === i;
-    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(i).track);
+    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(i));
 
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
     ctx.font = "bold 24px Verdana";
@@ -856,18 +1050,18 @@ function drawEditorOverlay() {
   ctx.lineTo(cx, cy + 12);
   ctx.stroke();
   ctx.restore();
-
-  ctx.fillStyle = "rgba(5, 10, 18, 0.75)";
-  ctx.fillRect(18, 16, 572, 84);
-  ctx.fillStyle = "#d7e8ff";
-  ctx.font = "18px Verdana";
-  ctx.fillText("EDITOR MODE - Mouse drag: draw centerline", 30, 48);
-  ctx.fillText("T: tree  W: water  B: barrel  Space: generate  Esc: back", 30, 76);
 }
 
 function drawEditor() {
+  drawEditorTitleBar();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, TOP_BAR_HEIGHT, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
+  ctx.clip();
+  ctx.translate(0, TOP_BAR_HEIGHT);
   drawTrack();
   drawEditorOverlay();
+  ctx.restore();
 }
 
 function drawSettings() {

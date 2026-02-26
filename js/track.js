@@ -38,45 +38,159 @@ export function isCenterlineTrack(trackDef = track) {
   return !!getCenterlineLoop(trackDef);
 }
 
+export function trackStartAngle(trackDef = track) {
+  if (Number.isFinite(trackDef.startAngle)) return trackDef.startAngle;
+  return isCenterlineTrack(trackDef) ? 0 : Math.PI * 0.5;
+}
+
+function catmullRomPoint(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return {
+    x:
+      0.5 *
+      (2 * p1.x +
+        (-p0.x + p2.x) * t +
+        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+    y:
+      0.5 *
+      (2 * p1.y +
+        (-p0.y + p2.y) * t +
+        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+  };
+}
+
+function catmullRomTangent(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  return normalizeVec(
+    0.5 *
+      ((-p0.x + p2.x) +
+        2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t +
+        3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t2),
+    0.5 *
+      ((-p0.y + p2.y) +
+        2 * (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t +
+        3 * (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t2),
+  );
+}
+
 function pointOnLoopProgress(loop, progress) {
   const n = loop.length;
   if (!n) return {x: 0, y: 0};
   const wrapped = ((progress % 1) + 1) % 1;
   const f = wrapped * n;
   const i = Math.floor(f) % n;
-  const j = (i + 1) % n;
   const t = f - Math.floor(f);
-  const a = loop[i];
-  const b = loop[j];
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t,
-  };
+  if (n < 4) {
+    const j = (i + 1) % n;
+    const a = loop[i];
+    const b = loop[j];
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+    };
+  }
+  const p0 = loop[(i - 1 + n) % n];
+  const p1 = loop[i];
+  const p2 = loop[(i + 1) % n];
+  const p3 = loop[(i + 2) % n];
+  return catmullRomPoint(p0, p1, p2, p3, t);
 }
 
 function tangentOnLoopProgress(loop, progress) {
   const n = loop.length;
   if (!n) return {x: 1, y: 0};
   const wrapped = ((progress % 1) + 1) % 1;
-  const i = Math.floor(wrapped * n) % n;
-  const prev = loop[(i - 1 + n) % n];
-  const next = loop[(i + 1) % n];
-  return normalizeVec(next.x - prev.x, next.y - prev.y);
+  const f = wrapped * n;
+  const i = Math.floor(f) % n;
+  const t = f - Math.floor(f);
+  if (n < 4) {
+    const prev = loop[(i - 1 + n) % n];
+    const next = loop[(i + 1) % n];
+    return normalizeVec(next.x - prev.x, next.y - prev.y);
+  }
+  const p0 = loop[(i - 1 + n) % n];
+  const p1 = loop[i];
+  const p2 = loop[(i + 1) % n];
+  const p3 = loop[(i + 2) % n];
+  return catmullRomTangent(p0, p1, p2, p3, t);
 }
 
-function offsetLoop(loop, offset) {
+function sampleLoop(loop, segments = 220) {
+  const count = Math.max(3, Math.floor(segments));
+  const points = new Array(count);
+  for (let i = 0; i < count; i++) {
+    points[i] = pointOnLoopProgress(loop, i / count);
+  }
+  return points;
+}
+
+function intersectLines(aPoint, aDir, bPoint, bDir) {
+  const det = aDir.x * bDir.y - aDir.y * bDir.x;
+  if (Math.abs(det) < 1e-8) return null;
+  const dx = bPoint.x - aPoint.x;
+  const dy = bPoint.y - aPoint.y;
+  const t = (dx * bDir.y - dy * bDir.x) / det;
+  return {
+    x: aPoint.x + aDir.x * t,
+    y: aPoint.y + aDir.y * t,
+  };
+}
+
+function signedLoopArea(loop) {
+  let sum = 0;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i];
+    const b = loop[(i + 1) % loop.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum * 0.5;
+}
+
+function offsetLoop(loop, offset, miterLimit = 2.6) {
   const n = loop.length;
   if (!n) return [];
+  const orientation = signedLoopArea(loop) < 0 ? 1 : -1;
+  const signedOffset = offset * orientation;
   const out = new Array(n);
   for (let i = 0; i < n; i++) {
     const prev = loop[(i - 1 + n) % n];
+    const curr = loop[i];
     const next = loop[(i + 1) % n];
-    const t = normalizeVec(next.x - prev.x, next.y - prev.y);
-    const nx = -t.y;
-    const ny = t.x;
+    const inDir = normalizeVec(curr.x - prev.x, curr.y - prev.y);
+    const outDir = normalizeVec(next.x - curr.x, next.y - curr.y);
+    const inNormal = {x: -inDir.y, y: inDir.x};
+    const outNormal = {x: -outDir.y, y: outDir.x};
+
+    const inPoint = {
+      x: curr.x + inNormal.x * signedOffset,
+      y: curr.y + inNormal.y * signedOffset,
+    };
+    const outPoint = {
+      x: curr.x + outNormal.x * signedOffset,
+      y: curr.y + outNormal.y * signedOffset,
+    };
+
+    const candidate = intersectLines(inPoint, inDir, outPoint, outDir);
+    if (candidate) {
+      const miterLen = Math.hypot(candidate.x - curr.x, candidate.y - curr.y);
+      if (miterLen <= Math.abs(signedOffset) * miterLimit + 1e-6) {
+        out[i] = candidate;
+        continue;
+      }
+    }
+
+    // Bevel fallback on very sharp/degenerate corners avoids offset spikes and self-overlaps.
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
+    const fallbackNormal =
+      Math.hypot(avg.x, avg.y) > 1e-4
+        ? avg
+        : normalizeVec(-(inDir.y + outDir.y), inDir.x + outDir.x);
     out[i] = {
-      x: loop[i].x + nx * offset,
-      y: loop[i].y + ny * offset,
+      x: curr.x + fallbackNormal.x * signedOffset,
+      y: curr.y + fallbackNormal.y * signedOffset,
     };
   }
   return out;
@@ -175,10 +289,11 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
   const loop = getCenterlineLoop(trackDef);
   if (loop) {
     const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
+    const sampledCenter = sampleLoop(loop, Math.max(segments, loop.length));
     return {
-      center: loop.map((p) => ({x: p.x, y: p.y})),
-      outer: offsetLoop(loop, halfWidth),
-      inner: offsetLoop(loop, -halfWidth),
+      center: sampledCenter,
+      outer: offsetLoop(sampledCenter, halfWidth),
+      inner: offsetLoop(sampledCenter, -halfWidth),
     };
   }
 
@@ -417,7 +532,7 @@ function buildCurbSegments() {
 
 function buildFullCurbSegments() {
   if (isCenterlineTrack(track)) {
-    const center = trackBoundaryPaths(track, 280).center;
+    const center = trackBoundaryPaths(track, 420).center;
     const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
     const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
     return {

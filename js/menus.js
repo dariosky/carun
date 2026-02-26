@@ -18,6 +18,8 @@ import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 import { initCurbSegments } from "./track.js";
 
+const EDITOR_TOP_BAR_HEIGHT = 56;
+
 function returnToTrackSelect() {
   if (trackOptions.length > 0) {
     state.selectedTrackIndex = Math.max(0, Math.min(state.selectedTrackIndex, trackOptions.length - 1));
@@ -35,7 +37,7 @@ function updateEditorCursorFromEvent(event) {
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   state.editor.cursorX = (event.clientX - rect.left) * scaleX;
-  state.editor.cursorY = (event.clientY - rect.top) * scaleY;
+  state.editor.cursorY = (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
 }
 
 function placeEditorObject(type) {
@@ -44,6 +46,7 @@ function placeEditorObject(type) {
   if (!preset.editStack) preset.editStack = [];
   const x = state.editor.cursorX;
   const y = state.editor.cursorY;
+  if (y < 0) return;
 
   if (type === "tree") {
     const tree = { type: "tree", x, y, r: 22 + Math.random() * 6 };
@@ -77,7 +80,17 @@ function placeEditorObject(type) {
 function undoLastEditorAddition() {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
-  if (!preset.editStack || preset.editStack.length === 0) return;
+  if (!preset.editStack) preset.editStack = [];
+
+  // Legacy/imported tracks can have strokes without an aligned editStack.
+  if (preset.editStack.length === 0) {
+    if (preset.centerlineStrokes && preset.centerlineStrokes.length) {
+      preset.centerlineStrokes.pop();
+      applyTrackPreset(state.editor.trackIndex);
+      setCurbSegments(initCurbSegments());
+    }
+    return;
+  }
 
   const lastAction = preset.editStack.pop();
   if (lastAction.kind === "object" && preset.worldObjects.length) {
@@ -252,6 +265,7 @@ function activateSelection() {
     }
     if (state.settingsIndex === 2) {
       state.mode = "menu";
+      state.menuIndex = 1;
       state.paused = false;
     }
     return;
@@ -339,6 +353,12 @@ function onKeyDown(e) {
     state.menuIndex = 0;
     return;
   }
+  if (state.mode === "settings" && key === "escape") {
+    state.mode = "menu";
+    state.menuIndex = 1;
+    state.paused = false;
+    return;
+  }
   if (state.mode === "editor" && key === "escape") {
     state.editor.drawing = false;
     state.editor.activeStroke = [];
@@ -346,13 +366,13 @@ function onKeyDown(e) {
     return;
   }
   if (state.mode === "editor" && key === "backspace") {
+    if (e.repeat) return;
     undoLastEditorAddition();
     return;
   }
 
   if (
     key === "e" &&
-    physicsConfig.flags.DEBUG_MODE &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex >= 0 &&
     state.trackSelectIndex < trackOptions.length
@@ -369,6 +389,14 @@ function onKeyDown(e) {
     if (key === "t") placeEditorObject("tree");
     if (key === "w") placeEditorObject("pond");
     if (key === "b") placeEditorObject("barrel");
+    if (key === "r") {
+      state.selectedTrackIndex = state.editor.trackIndex;
+      applyTrackPreset(state.editor.trackIndex);
+      setCurbSegments(initCurbSegments());
+      state.mode = "racing";
+      resetRace();
+      return;
+    }
     if (key === "s") {
       saveEditorTrack();
       return;
@@ -389,8 +417,9 @@ function onKeyDown(e) {
       state.settingsIndex = (state.settingsIndex + settingsItems.length - 1) % settingsItems.length;
     }
     if (state.mode === "trackSelect") {
-      state.trackSelectIndex =
-        state.trackSelectIndex === trackSelectBackIndex() ? state.selectedTrackIndex : trackSelectBackIndex();
+      if (state.trackSelectIndex === trackSelectBackIndex()) {
+        state.trackSelectIndex = state.selectedTrackIndex;
+      }
     }
     keys.up = true;
   }
@@ -398,8 +427,7 @@ function onKeyDown(e) {
     if (state.mode === "menu") state.menuIndex = (state.menuIndex + 1) % menuItems.length;
     if (state.mode === "settings") state.settingsIndex = (state.settingsIndex + 1) % settingsItems.length;
     if (state.mode === "trackSelect") {
-      state.trackSelectIndex =
-        state.trackSelectIndex === trackSelectBackIndex() ? state.selectedTrackIndex : trackSelectBackIndex();
+      state.trackSelectIndex = trackSelectBackIndex();
     }
     keys.down = true;
   }
@@ -455,6 +483,7 @@ export function initInputHandlers() {
   window.addEventListener("mousedown", (event) => {
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
+    if (state.editor.cursorY < 0) return;
     state.editor.drawing = true;
     state.editor.activeStroke = [{ x: state.editor.cursorX, y: state.editor.cursorY }];
   });

@@ -61,6 +61,14 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - visual representation
 - physical behavior
 
+## Performance Notes
+
+- Aim for smooth real-time play on common laptop hardware; 60 FPS is the target where browser/display allow it.
+- Avoid per-frame allocations and random sampling in hot render paths; prefer cached textures/patterns and reusable geometry.
+- Recompute heavy track geometry only when track data changes (preset swap, editor generation), not every frame.
+- Keep debug overlays informative but lightweight; they must not become a primary frame-time cost.
+- For visual effects, prefer prebuilt/offscreen assets and simple blits over rebuilding procedural details each frame.
+
 ## Current Code Layout
 
 - `index.html`: canvas shell + module entry script

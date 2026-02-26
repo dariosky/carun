@@ -1,7 +1,13 @@
 import { CHECKPOINT_WIDTH_MULTIPLIER, physicsConfig, checkpoints, track } from "./parameters.js";
 import { car, keys, lapData, physicsRuntime, skidMarks, state } from "./state.js";
 import { clamp, moveTowards } from "./utils.js";
-import { pointOnCenterLine, resolveObjectCollisions, surfaceAt, trackFrameAtAngle } from "./track.js";
+import {
+  pointOnCenterLine,
+  resolveObjectCollisions,
+  surfaceAt,
+  trackFrameAtAngle,
+  trackStartAngle,
+} from "./track.js";
 
 function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
@@ -28,7 +34,7 @@ function angularDistance(a, b) {
 }
 
 function getStartCheckpointIndex() {
-  const startAngle = Math.PI * 0.5;
+  const startAngle = trackStartAngle(track);
   let bestIdx = 0;
   let bestDiff = Infinity;
   checkpoints.forEach((cp, idx) => {
@@ -100,7 +106,7 @@ function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
 }
 
 export function resetRace() {
-  const spawnAngle = Math.PI * 0.5;
+  const spawnAngle = trackStartAngle(track);
   const spawnPoint = pointOnCenterLine(spawnAngle, track);
   const aheadPoint = pointOnCenterLine(spawnAngle + 0.02, track);
   car.x = spawnPoint.x;
