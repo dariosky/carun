@@ -18,6 +18,10 @@ export const state = {
     goTime: 0,
     goFlash: 0,
   },
+  checkpointBlink: {
+    time: 0,
+    duration: 0.45,
+  },
   editor: {
     trackIndex: 0,
     cursorX: track.cx,
@@ -46,6 +50,7 @@ export const lapData = {
   lapTimes: [],
   maxLaps: 3,
   passed: new Set([0]),
+  nextCheckpointIndex: 1,
   lap: 1,
 };
 
@@ -77,6 +82,8 @@ export const physicsRuntime = {
     surface: "asphalt",
     vForward: 0,
     vLateral: 0,
+    pivotX: track.cx,
+    pivotY: track.cy,
   },
   wheelLastPoints: null,
   prevForwardSpeed: null,

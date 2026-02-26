@@ -286,9 +286,22 @@ function drawTrack() {
 }
 
 function drawCar() {
+  const blinkActive = state.checkpointBlink.time > 0;
+  let blinkT = 0;
+  if (blinkActive) {
+    blinkT = state.checkpointBlink.time / Math.max(state.checkpointBlink.duration, 0.0001);
+  }
+
   ctx.save();
   ctx.translate(car.x, car.y);
   ctx.rotate(car.angle + Math.PI * 0.5);
+
+  if (blinkActive) {
+    const pulse = 0.5 + 0.5 * Math.sin((1 - blinkT) * Math.PI * 7);
+    const glowStrength = Math.max(0, Math.min(1, blinkT * 0.5 + pulse * 0.5));
+    ctx.shadowColor = `rgba(255, 255, 255, ${(0.9 * glowStrength).toFixed(3)})`;
+    ctx.shadowBlur = 18 + 24 * glowStrength;
+  }
 
   if (kartSpriteReady) {
     const spriteWidth = 30;
@@ -323,8 +336,8 @@ function drawDebugVectors() {
   const lateralWorldX = rightX * physicsRuntime.debug.vLateral;
   const lateralWorldY = rightY * physicsRuntime.debug.vLateral;
   const scale = 0.08;
-  const originX = car.x + forwardX * car.width * 0.38;
-  const originY = car.y + forwardY * car.width * 0.38;
+  const originX = physicsRuntime.debug.pivotX;
+  const originY = physicsRuntime.debug.pivotY;
 
   ctx.save();
   ctx.lineWidth = 3;
@@ -348,12 +361,13 @@ function drawDebugVectors() {
   ctx.stroke();
 
   ctx.fillStyle = "rgba(5, 8, 18, 0.84)";
-  ctx.fillRect(20, HEIGHT - 116, 310, 92);
+  ctx.fillRect(20, HEIGHT - 134, 330, 110);
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
-  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - 86);
-  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - 64);
-  ctx.fillText(`Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`, 34, HEIGHT - 42);
+  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, 34, HEIGHT - 104);
+  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, 34, HEIGHT - 82);
+  ctx.fillText(`Vf: ${physicsRuntime.debug.vForward.toFixed(1)} Vl: ${physicsRuntime.debug.vLateral.toFixed(1)}`, 34, HEIGHT - 60);
+  ctx.fillText(`CHECKPOINTS: ${lapData.passed.size}/${checkpoints.length}`, 34, HEIGHT - 38);
   ctx.restore();
 }
 

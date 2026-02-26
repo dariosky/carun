@@ -344,7 +344,6 @@ function onKeyDown(e) {
   if (
     key === "e" &&
     state.mode === "trackSelect" &&
-    physicsConfig.flags.DEBUG_VECTORS &&
     state.trackSelectIndex >= 0 &&
     state.trackSelectIndex < trackOptions.length
   ) {

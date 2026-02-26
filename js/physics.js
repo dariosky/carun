@@ -1,12 +1,44 @@
-import { physicsConfig, checkpoints, track } from "./parameters.js";
+import { CHECKPOINT_WIDTH_MULTIPLIER, physicsConfig, checkpoints, track } from "./parameters.js";
 import { car, keys, lapData, physicsRuntime, skidMarks, state } from "./state.js";
 import { clamp, moveTowards } from "./utils.js";
-import { pointOnCenterLine, resolveObjectCollisions, surfaceAt, trackProgressAtPoint } from "./track.js";
+import { pointOnCenterLine, resolveObjectCollisions, surfaceAt, trackFrameAtAngle } from "./track.js";
 
 function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
   const response = clamp((1 - smoothing) * dt * 60, 0, 1);
   return current + (target - current) * response;
+}
+
+function distanceToSegment(px, py, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abLenSq = Math.max(abx * abx + aby * aby, 1e-8);
+  const apx = px - ax;
+  const apy = py - ay;
+  const t = clamp((apx * abx + apy * aby) / abLenSq, 0, 1);
+  const cx = ax + abx * t;
+  const cy = ay + aby * t;
+  return Math.hypot(px - cx, py - cy);
+}
+
+function angularDistance(a, b) {
+  let d = Math.abs(a - b);
+  while (d > Math.PI * 2) d -= Math.PI * 2;
+  return Math.min(d, Math.PI * 2 - d);
+}
+
+function getStartCheckpointIndex() {
+  const startAngle = Math.PI * 0.5;
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  checkpoints.forEach((cp, idx) => {
+    const diff = angularDistance(cp.angle, startAngle);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = idx;
+    }
+  });
+  return bestIdx;
 }
 
 function wheelWorldPoints() {
@@ -81,14 +113,17 @@ export function resetRace() {
   state.finished = false;
   state.paused = false;
   state.pauseMenuIndex = 0;
+  const startCheckpointIndex = getStartCheckpointIndex();
   lapData.currentLapStart = 0;
   lapData.lapTimes = [];
-  lapData.passed = new Set([0]);
+  lapData.passed = new Set([startCheckpointIndex]);
+  lapData.nextCheckpointIndex = checkpoints.length > 0 ? (startCheckpointIndex + 1) % checkpoints.length : 0;
   lapData.lap = 1;
   state.startSequence.active = true;
   state.startSequence.elapsed = 0;
   state.startSequence.goTime = 3 + Math.random() * 2;
   state.startSequence.goFlash = 0;
+  state.checkpointBlink.time = 0;
   physicsRuntime.input.throttle = 0;
   physicsRuntime.input.brake = 0;
   physicsRuntime.input.steer = 0;
@@ -98,6 +133,8 @@ export function resetRace() {
   physicsRuntime.collisionGripTimer = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = { lateralGripMul: 1, longDragMul: 1, engineMul: 1, coastDecelMul: 1 };
+  physicsRuntime.debug.pivotX = car.x;
+  physicsRuntime.debug.pivotY = car.y;
   physicsRuntime.wheelLastPoints = null;
   physicsRuntime.prevForwardSpeed = null;
   skidMarks.length = 0;
@@ -135,6 +172,9 @@ export function updateRace(dt) {
 
   if (!state.finished) {
     state.raceTime += dt;
+  }
+  if (state.checkpointBlink.time > 0) {
+    state.checkpointBlink.time = Math.max(0, state.checkpointBlink.time - dt);
   }
 
   const surfaceName = surfaceAt(car.x, car.y);
@@ -187,6 +227,8 @@ export function updateRace(dt) {
       0,
       assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt,
     );
+    // Handbrake should induce slide, not unintended reverse creep.
+    if (forwardSpeed < 0) forwardSpeed = 0;
   }
   forwardSpeed *= Math.exp(-carCfg.longDrag * physicsRuntime.surface.longDragMul * dt);
 
@@ -286,7 +328,13 @@ export function updateRace(dt) {
 
   const headingRightX = -headingForwardY;
   const headingRightY = headingForwardX;
-  const rawHeadingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
+  let rawHeadingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
+  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05 && rawHeadingForwardSpeed < 0) {
+    // Remove only the backward longitudinal component, preserve lateral velocity for drift.
+    car.vx -= rawHeadingForwardSpeed * headingForwardX;
+    car.vy -= rawHeadingForwardSpeed * headingForwardY;
+    rawHeadingForwardSpeed = 0;
+  }
   const maxVectorSpeed =
     rawHeadingForwardSpeed >= 0 ? carCfg.maxSpeed : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
   const vectorSpeed = Math.hypot(car.vx, car.vy);
@@ -302,6 +350,8 @@ export function updateRace(dt) {
   physicsRuntime.debug.surface = surfaceName;
   physicsRuntime.debug.vForward = headingForwardSpeed;
   physicsRuntime.debug.vLateral = headingLateralSpeed;
+  physicsRuntime.debug.pivotX = car.x + headingForwardX * pivotOffset;
+  physicsRuntime.debug.pivotY = car.y + headingForwardY * pivotOffset;
   physicsRuntime.debug.slipAngle = Math.atan2(
     Math.abs(headingLateralSpeed),
     Math.abs(headingForwardSpeed) + 0.0001,
@@ -318,31 +368,42 @@ export function updateRace(dt) {
 }
 
 function checkCheckpoints() {
-  const progress = trackProgressAtPoint(car.x, car.y, track);
+  if (!checkpoints.length) return;
+  const startCheckpointIndex = getStartCheckpointIndex();
+  const targetIndex = lapData.nextCheckpointIndex % checkpoints.length;
+  const cp = checkpoints[targetIndex];
+  const frame = trackFrameAtAngle(cp.angle, track);
+  const checkpointSpan = frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
+  const halfSpan = checkpointSpan * 0.5;
+  const ax = frame.point.x - frame.normal.x * halfSpan;
+  const ay = frame.point.y - frame.normal.y * halfSpan;
+  const bx = frame.point.x + frame.normal.x * halfSpan;
+  const by = frame.point.y + frame.normal.y * halfSpan;
+  const triggerDistance = Math.max(15, car.width * 0.55);
+  const nearCheckpoint = distanceToSegment(car.x, car.y, ax, ay, bx, by) <= triggerDistance;
 
-  checkpoints.forEach((cp, idx) => {
-    const cpProgress = ((cp.angle % (Math.PI * 2)) + Math.PI * 2) / (Math.PI * 2);
-    let diff = Math.abs(progress - cpProgress);
-    diff = Math.min(diff, 1 - diff);
-    if (diff < 0.06) {
-      lapData.passed.add(idx);
-    }
-  });
+  if (!nearCheckpoint) return;
 
-  const startPoint = pointOnCenterLine(Math.PI * 0.5);
-  const nearStart = Math.hypot(car.x - startPoint.x, car.y - startPoint.y) < 38;
+  state.checkpointBlink.time = state.checkpointBlink.duration;
 
-  if (nearStart && lapData.passed.size === checkpoints.length && !state.finished) {
-    const lapTime = state.raceTime - lapData.currentLapStart;
-    if (lapTime > 2) {
-      lapData.lapTimes.push(lapTime);
-      lapData.currentLapStart = state.raceTime;
-      lapData.passed = new Set([0]);
-      lapData.lap += 1;
+  if (targetIndex !== startCheckpointIndex) {
+    lapData.passed.add(targetIndex);
+    lapData.nextCheckpointIndex = (targetIndex + 1) % checkpoints.length;
+    return;
+  }
 
-      if (lapData.lap > lapData.maxLaps) {
-        state.finished = true;
-      }
-    }
+  if (lapData.passed.size !== checkpoints.length || state.finished) return;
+
+  const lapTime = state.raceTime - lapData.currentLapStart;
+  if (lapTime <= 2) return;
+
+  lapData.lapTimes.push(lapTime);
+  lapData.currentLapStart = state.raceTime;
+  lapData.passed = new Set([startCheckpointIndex]);
+  lapData.nextCheckpointIndex = (startCheckpointIndex + 1) % checkpoints.length;
+  lapData.lap += 1;
+
+  if (lapData.lap > lapData.maxLaps) {
+    state.finished = true;
   }
 }

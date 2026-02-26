@@ -210,7 +210,7 @@ export const track = {
 
 export const checkpoints = activePreset.checkpoints.map((cp) => ({ ...cp }));
 
-export const CHECKPOINT_WIDTH_MULTIPLIER = 1.6;
+export const CHECKPOINT_WIDTH_MULTIPLIER = 2;
 
 export const worldObjects = activePreset.worldObjects.map((obj) => ({ ...obj }));
 
@@ -639,7 +639,7 @@ export const physicsConfig = {
     HANDBRAKE_MODE: true,
     SPEED_SENSITIVE_STEERING: true,
     SURFACE_BLENDING: true,
-    DEBUG_VECTORS: false,
+    DEBUG_VECTORS: true,
     ARCADE_COLLISION_PUSH: true,
   },
   constants: {
