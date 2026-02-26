@@ -300,11 +300,183 @@ function extractOutermostContour(splitLoop) {
   return walkContour(splitLoop, turnSign);
 }
 
+// ─── Step 4: decimate vertex clusters ───────────────────────────────────
+
+/**
+ * Collapse runs of vertices that are clustered within `radius` pixels of
+ * each other into single representative points.
+ *
+ * After edge-splitting and contour extraction, tight curves often produce
+ * clusters of 5–15 vertices within a few pixels.  These add no visual or
+ * physical detail — they just bloat the polygon and slow later operations.
+ *
+ * Algorithm (greedy, single-pass, O(n)):
+ *   Walk the polygon.  When the distance from the current "anchor" to the
+ *   next vertex is < radius, absorb it into the current cluster.  When the
+ *   next vertex is >= radius away, emit a single representative for the
+ *   cluster and start a new one.
+ *
+ * The representative is placed at the geometric centroid of the cluster
+ * vertices when the cluster is small (≤ 3 vertices) or nearly collinear.
+ * For larger clusters with significant turning, we keep the vertex that
+ * is farthest from the line between the cluster entry and exit points —
+ * this preserves corner sharpness while still decimating the noise.
+ *
+ * @param {Array<{x:number,y:number}>} loop
+ * @param {number} radius  - merge threshold in pixels (default 4)
+ * @param {number} minVertices - never reduce below this count (default 6)
+ * @returns {Array<{x:number,y:number}>}
+ */
+export function decimateClusteredVertices(loop, radius = 4, minVertices = 6) {
+  if (!Array.isArray(loop) || loop.length <= minVertices) {
+    return Array.isArray(loop) ? loop.map((p) => ({x: p.x, y: p.y})) : [];
+  }
+
+  const n = loop.length;
+  const radiusSq = radius * radius;
+
+  // ── Greedy clustering ──────────────────────────────────────────────
+  // Walk the polygon forward, starting a new cluster whenever a vertex
+  // is farther than `radius` from the current cluster's anchor.
+  const clusterOf = new Int32Array(n);
+  let clusterId = 0;
+  let anchorIdx = 0;
+
+  for (let i = 0; i < n; i++) {
+    const anchor = loop[anchorIdx];
+    const dx = loop[i].x - anchor.x;
+    const dy = loop[i].y - anchor.y;
+    if (dx * dx + dy * dy > radiusSq && i !== anchorIdx) {
+      clusterId++;
+      anchorIdx = i;
+    }
+    clusterOf[i] = clusterId;
+  }
+
+  // Handle wrap-around: if the last cluster's anchor is within radius
+  // of the first vertex, merge the tail into cluster 0.
+  let wrapMerged = false;
+  if (clusterId > 0) {
+    const firstAnchor = loop[0];
+    const lastAnchor = loop[anchorIdx];
+    const dx = lastAnchor.x - firstAnchor.x;
+    const dy = lastAnchor.y - firstAnchor.y;
+    if (dx * dx + dy * dy <= radiusSq) {
+      for (let i = anchorIdx; i < n; i++) {
+        clusterOf[i] = 0;
+      }
+      clusterId--;
+      wrapMerged = true;
+    }
+  }
+
+  const totalClusters = clusterId + 1;
+  if (totalClusters <= minVertices) {
+    return loop.map((p) => ({x: p.x, y: p.y}));
+  }
+
+  // ── Emit one representative per cluster ────────────────────────────
+  // If the wrap merged, rotate so that the merged cluster's boundary
+  // doesn't straddle the array edges.  Find the first index that
+  // belongs to cluster 1 (= first non-wrapped cluster).
+  let rotateBy = 0;
+  if (wrapMerged) {
+    for (let i = 0; i < n; i++) {
+      if (clusterOf[i] !== 0) {
+        rotateBy = i;
+        break;
+      }
+    }
+  }
+
+  const result = [];
+  let prevCid = -1;
+  let runStart = 0;
+
+  for (let step = 0; step <= n; step++) {
+    const i = (step + rotateBy) % n;
+    const cid = step < n ? clusterOf[i] : -2; // sentinel at end
+
+    if (cid !== prevCid) {
+      if (prevCid >= 0) {
+        // Emit a representative for the run [runStart .. step-1].
+        const runLen = step - runStart;
+        emitRepresentative(loop, n, rotateBy, runStart, runLen, result);
+      }
+      prevCid = cid;
+      runStart = step;
+    }
+  }
+
+  return result.length >= 3 ? result : loop.map((p) => ({x: p.x, y: p.y}));
+}
+
+/**
+ * Pick a single representative vertex for a cluster of `count` vertices
+ * starting at logical index `start` (with rotation offset applied).
+ */
+function emitRepresentative(loop, n, rotateBy, start, count, out) {
+  const idx = (i) => (i + rotateBy) % n;
+
+  if (count === 1) {
+    const p = loop[idx(start)];
+    out.push({x: p.x, y: p.y});
+    return;
+  }
+
+  if (count <= 3) {
+    // Small cluster → centroid.
+    let sx = 0, sy = 0;
+    for (let j = 0; j < count; j++) {
+      sx += loop[idx(start + j)].x;
+      sy += loop[idx(start + j)].y;
+    }
+    out.push({x: sx / count, y: sy / count});
+    return;
+  }
+
+  // Larger cluster → keep the vertex farthest from the entry→exit chord
+  // to preserve corner shape.
+  const entry = loop[idx(start)];
+  const exit = loop[idx(start + count - 1)];
+  const chordX = exit.x - entry.x;
+  const chordY = exit.y - entry.y;
+  const chordLen = Math.hypot(chordX, chordY);
+
+  if (chordLen < 1e-6) {
+    // Degenerate (entry ≈ exit) → centroid.
+    let sx = 0, sy = 0;
+    for (let j = 0; j < count; j++) {
+      sx += loop[idx(start + j)].x;
+      sy += loop[idx(start + j)].y;
+    }
+    out.push({x: sx / count, y: sy / count});
+    return;
+  }
+
+  // Find vertex with max perpendicular distance from chord.
+  let bestDist = -1;
+  let bestJ = 0;
+  for (let j = 0; j < count; j++) {
+    const p = loop[idx(start + j)];
+    const px = p.x - entry.x;
+    const py = p.y - entry.y;
+    const dist = Math.abs(px * chordY - py * chordX) / chordLen;
+    if (dist > bestDist) {
+      bestDist = dist;
+      bestJ = j;
+    }
+  }
+  const best = loop[idx(start + bestJ)];
+  out.push({x: best.x, y: best.y});
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────
 
 /**
  * Remove self-intersections from a closed polygon by detecting crossings,
  * splitting edges, and extracting only the outermost simple contour.
+ * Then decimate vertex clusters introduced by the edge-splitting.
  *
  * If the polygon has no self-intersections, it is returned unchanged
  * (with a fresh copy of each point).
@@ -319,24 +491,24 @@ export function cleanOffsetLoop(loop) {
 
   const intersections = findSelfIntersections(loop);
 
-  // Fast path: no crossings — just clone.
+  // Fast path: no crossings — just clone and decimate.
   if (!intersections.length) {
-    return loop.map((p) => ({x: p.x, y: p.y}));
+    return decimateClusteredVertices(loop);
   }
 
-  // Split, extract, return.
+  // Split, extract, decimate, return.
   const splitLoop = splitEdgesAtIntersections(loop, intersections);
-  const contour = extractOutermostContour(splitLoop);
+  let contour = extractOutermostContour(splitLoop);
 
   // Sanity: the outer contour must have the same winding as the input.
-  // If the winding flipped (shouldn't happen, but be safe), flip it back.
   const inputArea = signedLoopArea(loop);
   const outputArea = signedLoopArea(contour);
   if ((inputArea > 0) !== (outputArea > 0)) {
     contour.reverse();
   }
 
-  return contour;
+  // Decimate clusters left behind by the edge-splitting.
+  return decimateClusteredVertices(contour);
 }
 
 /**

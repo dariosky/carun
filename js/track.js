@@ -8,7 +8,7 @@ import {
   ctx,
 } from "./parameters.js";
 import {clamp, normalizeVec, signedAngleBetween} from "./utils.js";
-import {cleanOffsetLoop, hasSelfIntersections, intersectLines, signedLoopArea} from "./polygon-clean.js";
+import {cleanOffsetLoop, decimateClusteredVertices, hasSelfIntersections, intersectLines, signedLoopArea} from "./polygon-clean.js";
 
 export function ellipseRadiusAtAngle(angle, a, b) {
   const c = Math.cos(angle);
@@ -286,23 +286,27 @@ function simplifyOpenRunPath(points, tolerance = 1.8, minPoints = 4) {
  *   1. Remove self-intersections from the raw offset (extracts outermost contour).
  *   2. Simplify the clean polygon (vertex reduction via collinearity culling + RDP).
  *   3. Clean again — simplification can reintroduce crossings on tight corners.
+ *   4. Final cluster decimation — collapse any remaining groups of nearby vertices.
  *
  * This replaces the old projectInteriorVerticesToBorder heuristic with a
  * geometrically correct contour-extraction algorithm.
  */
 function simplifyOffsetClosedLoop(loop, simplifyParams) {
-  // Phase 1: clean raw offset self-intersections.
+  // Phase 1: clean raw offset self-intersections + decimate clusters.
   const cleaned = cleanOffsetLoop(loop);
 
   // Phase 2: simplify vertex count.
-  const simplified = simplifyClosedLoop(cleaned, simplifyParams);
+  let result = simplifyClosedLoop(cleaned, simplifyParams);
 
   // Phase 3: if simplification introduced new crossings, clean again.
-  if (hasSelfIntersections(simplified)) {
-    return cleanOffsetLoop(simplified);
+  if (hasSelfIntersections(result)) {
+    result = cleanOffsetLoop(result);
   }
 
-  return simplified;
+  // Phase 4: final cluster decimation — catches any tight vertex groups
+  // that survived collinearity culling and RDP (e.g. near sharp bends
+  // where the t-projection guard in shouldCullLoopVertex skips them).
+  return decimateClusteredVertices(result, simplifyParams.clusterRadius || 4);
 }
 
 function nearestDistanceAndProgressToLoop(x, y, loop) {
@@ -403,6 +407,7 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
       minEdgeLen: Math.max(1.2, halfWidth * 0.04),
       collinearTol: Math.max(1.6, halfWidth * 0.05),
       rdpTolerance: Math.max(2.2, halfWidth * 0.08),
+      clusterRadius: Math.max(4, halfWidth * 0.06),
       maxPasses: 6,
       minVertices: Math.max(14, Math.floor(sampledCenter.length * 0.08)),
     };
@@ -657,6 +662,7 @@ function buildFullCurbSegments() {
       minEdgeLen: Math.max(1.2, halfWidth * 0.035),
       collinearTol: Math.max(1.4, halfWidth * 0.045),
       rdpTolerance: Math.max(1.8, halfWidth * 0.07),
+      clusterRadius: Math.max(4, halfWidth * 0.06),
       maxPasses: 6,
       minVertices: Math.max(14, Math.floor(center.length * 0.08)),
     };
