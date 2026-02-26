@@ -759,7 +759,7 @@ export const physicsConfig = {
     ARCADE_COLLISION_PUSH: true,
   },
   constants: {
-    surfaceBlendTime: 0.05,
+    surfaceBlendTime: 0.1,
     driftSteerThreshold: 0.08,
     lowSpeedSteerAt: 120,
     pivotAtLowSpeedRatio: 0.5,

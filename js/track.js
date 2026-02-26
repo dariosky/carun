@@ -470,91 +470,123 @@ export function drawStripedCurb(
 ) {
   if (pathPoints.length < 2) return;
 
-  const cumulative = [0];
-  for (let i = 1; i < pathPoints.length; i++) {
-    const a = pathPoints[i - 1];
-    const b = pathPoints[i];
-    cumulative.push(cumulative[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  // ── Arc-length parameterisation ────────────────────────────────────
+  const nPts = pathPoints.length;
+  const cumulative = new Float64Array(nPts);
+  for (let i = 1; i < nPts; i++) {
+    const dx = pathPoints[i].x - pathPoints[i - 1].x;
+    const dy = pathPoints[i].y - pathPoints[i - 1].y;
+    cumulative[i] = cumulative[i - 1] + Math.hypot(dx, dy);
   }
-  const totalLen = cumulative[cumulative.length - 1];
+  const totalLen = cumulative[nPts - 1];
   if (totalLen <= 0) return;
 
-  const pointAtDistance = (distance, startIndex = 0) => {
-    let segIndex = startIndex;
-    while (segIndex < cumulative.length - 2 && cumulative[segIndex + 1] < distance) segIndex++;
+  // ── Width envelope ─────────────────────────────────────────────────
+  const fadeLen = Math.min(totalLen * 0.18, stripeLen * 4);
+  const smoothstep = (t) => t * t * (3 - 2 * t);
+  const widthAt = (d) => {
+    if (totalLen <= fadeLen * 2) {
+      return minWidth + (maxWidth - minWidth) * Math.sin(clamp(d / totalLen, 0, 1) * Math.PI);
+    }
+    if (d < fadeLen) return minWidth + (maxWidth - minWidth) * smoothstep(d / fadeLen);
+    if (d > totalLen - fadeLen) return minWidth + (maxWidth - minWidth) * smoothstep((totalLen - d) / fadeLen);
+    return maxWidth;
+  };
 
-    const segStart = cumulative[segIndex];
-    const segEnd = cumulative[segIndex + 1];
-    const span = Math.max(segEnd - segStart, 1e-6);
-    const t = clamp((distance - segStart) / span, 0, 1);
-    const a = pathPoints[segIndex];
-    const b = pathPoints[segIndex + 1];
+  // ── Per-vertex miter normals + outer edge ──────────────────────────
+  // Compute the outward normal at every path vertex by averaging the
+  // normals of the two adjacent edges (miter join).  Then offset by
+  // the width envelope at that vertex's arc-length position.
+  const outerPts = new Array(nPts);  // offset point per vertex
+
+  for (let i = 0; i < nPts; i++) {
+    let nx = 0, ny = 0;
+    if (i > 0) {
+      const dx = pathPoints[i].x - pathPoints[i - 1].x;
+      const dy = pathPoints[i].y - pathPoints[i - 1].y;
+      const len = Math.hypot(dx, dy) || 1;
+      nx -= dy / len;
+      ny += dx / len;
+    }
+    if (i < nPts - 1) {
+      const dx = pathPoints[i + 1].x - pathPoints[i].x;
+      const dy = pathPoints[i + 1].y - pathPoints[i].y;
+      const len = Math.hypot(dx, dy) || 1;
+      nx -= dy / len;
+      ny += dx / len;
+    }
+    const nlen = Math.hypot(nx, ny) || 1;
+    nx = (nx / nlen) * sideSign;
+    ny = (ny / nlen) * sideSign;
+
+    const w = widthAt(cumulative[i]);
+    outerPts[i] = {
+      x: pathPoints[i].x + nx * w,
+      y: pathPoints[i].y + ny * w,
+    };
+  }
+
+  // ── Helper: interpolate inner + outer points at a given arc distance
+  const pointAtDist = (d) => {
+    // Find the segment containing distance d.
+    let seg = 0;
+    while (seg < nPts - 2 && cumulative[seg + 1] < d) seg++;
+    const segStart = cumulative[seg];
+    const segEnd = cumulative[seg + 1];
+    const t = clamp((d - segStart) / Math.max(segEnd - segStart, 1e-6), 0, 1);
+
+    const pA = pathPoints[seg];
+    const pB = pathPoints[seg + 1];
+    const oA = outerPts[seg];
+    const oB = outerPts[seg + 1];
+
     return {
-      point: {
-        x: a.x + (b.x - a.x) * t,
-        y: a.y + (b.y - a.y) * t,
-      },
-      segIndex,
+      inner: {x: pA.x + (pB.x - pA.x) * t, y: pA.y + (pB.y - pA.y) * t},
+      outer: {x: oA.x + (oB.x - oA.x) * t, y: oA.y + (oB.y - oA.y) * t},
+      seg,
     };
   };
 
-  const buildSlice = (startDist, endDist, startSegHint = 0) => {
-    const startInfo = pointAtDistance(startDist, startSegHint);
-    const points = [startInfo.point];
-    let seg = startInfo.segIndex;
-
-    while (seg < cumulative.length - 1 && cumulative[seg + 1] < endDist) {
-      points.push(pathPoints[seg + 1]);
-      seg++;
-    }
-
-    const endInfo = pointAtDistance(endDist, seg);
-    points.push(endInfo.point);
-    return {points, segIndex: endInfo.segIndex};
-  };
-
-  const drawExtrudedSlice = (points, width, color) => {
-    if (points.length < 2) return;
-    for (let i = 1; i < points.length; i++) {
-      const a = points[i - 1];
-      const b = points[i];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy);
-      if (len <= 1e-6) continue;
-
-      const tx = dx / len;
-      const ty = dy / len;
-      const nx = -ty * sideSign;
-      const ny = tx * sideSign;
-
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(b.x + nx * width, b.y + ny * width);
-      ctx.lineTo(a.x + nx * width, a.y + ny * width);
-      ctx.closePath();
-      ctx.fill();
-    }
-  };
-
+  // ── Draw stripes as polygons between inner and outer edges ─────────
   ctx.save();
 
   let stripeIndex = 0;
-  let segHint = 0;
   for (let start = 0; start < totalLen; start += stripeLen) {
     const end = Math.min(totalLen, start + stripeLen);
-    const mid = (start + end) * 0.5;
-    const progress = clamp(mid / totalLen, 0, 1);
-    const taper = Math.sin(progress * Math.PI);
-    const width = minWidth + (maxWidth - minWidth) * taper;
-    const slice = buildSlice(start, end, segHint);
-    segHint = slice.segIndex;
-    if (slice.points.length < 2) continue;
 
+    // Collect inner-edge and outer-edge vertices for this stripe span.
+    const startPt = pointAtDist(start);
+    const innerVerts = [startPt.inner];
+    const outerVerts = [startPt.outer];
+    let seg = startPt.seg;
+
+    // Include all path vertices whose arc-length falls within (start, end).
+    while (seg < nPts - 1 && cumulative[seg + 1] < end) {
+      seg++;
+      innerVerts.push({x: pathPoints[seg].x, y: pathPoints[seg].y});
+      outerVerts.push({x: outerPts[seg].x, y: outerPts[seg].y});
+    }
+
+    const endPt = pointAtDist(end);
+    innerVerts.push(endPt.inner);
+    outerVerts.push(endPt.outer);
+
+    if (innerVerts.length < 2) { stripeIndex++; continue; }
+
+    // Draw as a single polygon: inner edge forward, outer edge reversed.
     const color = stripeIndex % 2 === 0 ? "#d22e2e" : "#ddd4be";
-    drawExtrudedSlice(slice.points, width, color);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(innerVerts[0].x, innerVerts[0].y);
+    for (let i = 1; i < innerVerts.length; i++) {
+      ctx.lineTo(innerVerts[i].x, innerVerts[i].y);
+    }
+    for (let i = outerVerts.length - 1; i >= 0; i--) {
+      ctx.lineTo(outerVerts[i].x, outerVerts[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+
     stripeIndex++;
   }
 
@@ -587,8 +619,12 @@ function buildCurbSegments() {
     }, segmentCount);
   }
 
-  const absCurvatures = [];
-  const turning = new Array(segmentCount).fill(false);
+  // ── Per-sample curvature analysis ──────────────────────────────────
+  // Compute signed curvature at each centerline sample.  Positive =
+  // turning left (outer side is convex, has more room for curbs), negative
+  // = turning right (inner side has more room).
+  const signedCurvatures = new Float64Array(segmentCount);
+  const absCurvatures = new Float64Array(segmentCount);
 
   for (let i = 0; i < segmentCount; i++) {
     const prev = center[(i - 1 + segmentCount) % segmentCount];
@@ -598,58 +634,186 @@ function buildCurbSegments() {
     const segIn = normalizeVec(curr.x - prev.x, curr.y - prev.y);
     const segOut = normalizeVec(next.x - curr.x, next.y - curr.y);
     const signedTurn = signedAngleBetween(segIn, segOut);
-    const ds = (Math.hypot(curr.x - prev.x, curr.y - prev.y) + Math.hypot(next.x - curr.x, next.y - curr.y)) * 0.5;
-    absCurvatures.push(Math.abs(signedTurn / Math.max(ds, 1)));
+    const ds = (Math.hypot(curr.x - prev.x, curr.y - prev.y) +
+                Math.hypot(next.x - curr.x, next.y - curr.y)) * 0.5;
+    const kappa = signedTurn / Math.max(ds, 1);
+    signedCurvatures[i] = kappa;
+    absCurvatures[i] = Math.abs(kappa);
   }
 
-  const sorted = [...absCurvatures].sort((a, b) => a - b);
-  const threshold = sorted[Math.floor(sorted.length * 0.62)] || 0.0022;
+  // ── Adaptive curvature threshold ───────────────────────────────────
+  const sortedAbs = Array.from(absCurvatures).sort((a, b) => a - b);
+  const curvatureThreshold = sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
+
+  // ── Per-sample available-space estimation ──────────────────────────
+  // For each centerline sample, measure the distance from the curb path
+  // (outer/inner) to the center.  On the inside of a tight turn, the
+  // curb path compresses toward the center → small distance → little
+  // room for a visible curb.
+  const outerSpace = new Float64Array(segmentCount);
+  const innerSpace = new Float64Array(segmentCount);
   for (let i = 0; i < segmentCount; i++) {
-    turning[i] = absCurvatures[i] >= threshold;
+    const c = center[i];
+    outerSpace[i] = Math.hypot(outer[i].x - c.x, outer[i].y - c.y);
+    innerSpace[i] = Math.hypot(inner[i].x - c.x, inner[i].y - c.y);
   }
 
-  const expanded = new Array(segmentCount).fill(false);
+  // Minimum space required for a curb to look good (must fit at least
+  // a few stripe widths without looking cramped).
+  const minCurbSpace = CURB_MAX_WIDTH * 1.5;
+
+  // ── Per-sample curb eligibility (separate per side) ────────────────
+  // A sample is eligible for a curb on a given side when:
+  //   1. The absolute curvature exceeds the threshold, AND
+  //   2. The available space on that side is large enough, AND
+  //   3. The curvature sign means this side is the OUTSIDE of the turn
+  //      (where curbs naturally sit and have room), OR the curvature is
+  //      very high (hairpin) where both sides get curbs if space allows.
+  const outerEligible = new Uint8Array(segmentCount);
+  const innerEligible = new Uint8Array(segmentCount);
+
+  // Higher threshold for "inside-of-turn" curbs (need stronger curvature
+  // to justify a curb on the compressed side).
+  const insideCurvatureBoost = 1.8;
+
+  for (let i = 0; i < segmentCount; i++) {
+    if (absCurvatures[i] < curvatureThreshold) continue;
+
+    // Positive signed curvature → turning left → outer side is convex
+    // (outside of turn), inner is concave (inside of turn).
+    const outerIsOutside = signedCurvatures[i] > 0;
+
+    // Outer side eligibility
+    if (outerSpace[i] >= minCurbSpace) {
+      if (outerIsOutside || absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) {
+        outerEligible[i] = 1;
+      }
+    }
+
+    // Inner side eligibility
+    if (innerSpace[i] >= minCurbSpace) {
+      if (!outerIsOutside || absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) {
+        innerEligible[i] = 1;
+      }
+    }
+  }
+
+  // ── Expand eligible regions slightly (smooth short gaps) ───────────
   const expandBy = 2;
-  for (let i = 0; i < segmentCount; i++) {
-    if (!turning[i]) continue;
-    for (let j = -expandBy; j <= expandBy; j++) {
-      expanded[(i + j + segmentCount) % segmentCount] = true;
+  const expandMask = (mask) => {
+    const expanded = new Uint8Array(segmentCount);
+    for (let i = 0; i < segmentCount; i++) {
+      if (!mask[i]) continue;
+      for (let j = -expandBy; j <= expandBy; j++) {
+        expanded[(i + j + segmentCount) % segmentCount] = 1;
+      }
     }
+    return expanded;
+  };
+
+  const outerExpanded = expandMask(outerEligible);
+  const innerExpanded = expandMask(innerEligible);
+
+  // Re-check space constraint after expansion (don't let expansion push
+  // curbs into cramped areas).
+  for (let i = 0; i < segmentCount; i++) {
+    if (outerExpanded[i] && outerSpace[i] < minCurbSpace) outerExpanded[i] = 0;
+    if (innerExpanded[i] && innerSpace[i] < minCurbSpace) innerExpanded[i] = 0;
   }
 
-  const collectRuns = (points) => {
+  // ── Collect contiguous runs and filter by minimum arc length ───────
+  const minRunArcLength = CURB_STRIPE_LENGTH * 3; // at least 3 stripes
+
+  // Compute the centroid of the centerline — used to determine the
+  // outward extrusion direction for each curb run.
+  let centroidX = 0, centroidY = 0;
+  for (let i = 0; i < segmentCount; i++) {
+    centroidX += center[i].x;
+    centroidY += center[i].y;
+  }
+  centroidX /= segmentCount;
+  centroidY /= segmentCount;
+
+  const collectRuns = (points, mask, isOuter) => {
     const runs = [];
-    const allTrue = expanded.every(Boolean);
-    if (allTrue) return [simplifyOpenRunPath([...points, points[0]], 1.8, 4)];
+    const allTrue = mask.every((v) => v);
+    if (allTrue) {
+      const simplified = simplifyOpenRunPath([...points, points[0]], 1.8, 4);
+      runs.push(simplified);
+    } else {
+      let current = null;
+      for (let i = 0; i < segmentCount; i++) {
+        if (mask[i]) {
+          if (!current) current = [];
+          current.push(points[i]);
+        } else if (current) {
+          current.push(points[i]); // closing point
+          runs.push(current);
+          current = null;
+        }
+      }
 
-    let current = null;
-    for (let i = 0; i < segmentCount; i++) {
-      if (expanded[i]) {
-        if (!current) current = [];
-        current.push(points[i]);
-      } else if (current) {
-        current.push(points[i]);
-        if (current.length >= 4) runs.push(current);
-        current = null;
+      // Handle wrap-around.
+      if (current) {
+        current.push(points[0]);
+        if (runs.length && mask[0]) {
+          const first = runs.shift();
+          runs.unshift([...current, ...first]);
+        } else {
+          runs.push(current);
+        }
       }
     }
 
-    if (current) {
-      current.push(points[0]);
-      if (runs.length && expanded[0]) {
-        const first = runs.shift();
-        runs.unshift([...current, ...first]);
-      } else if (current.length >= 4) {
-        runs.push(simplifyOpenRunPath(current, 1.8, 4));
+    // Filter by minimum arc length, simplify, and compute outward sign.
+    return runs.filter((run) => {
+      if (run.length < 4) return false;
+      let arcLen = 0;
+      for (let i = 1; i < run.length; i++) {
+        arcLen += Math.hypot(run[i].x - run[i - 1].x, run[i].y - run[i - 1].y);
       }
-    }
+      return arcLen >= minRunArcLength;
+    }).map((run) => {
+      const simplified = simplifyOpenRunPath(run, 1.8, 4);
 
-    return runs;
+      // Determine outward sign: the curb must extrude AWAY from the
+      // track surface.
+      //   - Outer curbs: away from centroid (outward from the track ring).
+      //   - Inner curbs: toward centroid (into the hole, away from road).
+      const midIdx = Math.floor(simplified.length / 2);
+      const pA = simplified[Math.max(0, midIdx - 1)];
+      const pB = simplified[Math.min(simplified.length - 1, midIdx)];
+      const tdx = pB.x - pA.x;
+      const tdy = pB.y - pA.y;
+      const tlen = Math.hypot(tdx, tdy) || 1;
+      const tx = tdx / tlen;
+      const ty = tdy / tlen;
+      // Normal for sideSign=+1: (-ty, tx)
+      const nxPos = -ty;
+      const nyPos = tx;
+      // Midpoint of this segment
+      const mx = (pA.x + pB.x) * 0.5;
+      const my = (pA.y + pB.y) * 0.5;
+      // Dot with vector from midpoint to centroid
+      const toCenterX = centroidX - mx;
+      const toCenterY = centroidY - my;
+      const dot = nxPos * toCenterX + nyPos * toCenterY;
+
+      // For outer curbs: extrude away from centroid.
+      //   dot > 0 means sideSign=+1 normal points toward centroid → need -1.
+      // For inner curbs: extrude toward centroid.
+      //   dot > 0 means sideSign=+1 normal points toward centroid → need +1.
+      const outwardSign = isOuter
+        ? (dot > 0 ? -1 : 1)
+        : (dot > 0 ? 1 : -1);
+
+      return {points: simplified, outwardSign};
+    });
   };
 
   return {
-    outer: collectRuns(outer),
-    inner: collectRuns(inner),
+    outer: collectRuns(outer, outerExpanded, true),
+    inner: collectRuns(inner, innerExpanded, false),
   };
 }
 
@@ -666,25 +830,50 @@ function buildFullCurbSegments() {
       maxPasses: 6,
       minVertices: Math.max(14, Math.floor(center.length * 0.08)),
     };
+    const outerLoop = simplifyOffsetClosedLoop(offsetLoop(center, curbOffset), simplifyParams);
+    const innerLoop = simplifyOffsetClosedLoop(offsetLoop(center, -curbOffset), simplifyParams);
+
+    // Compute outward signs using the centerline centroid.
+    // isOuter=true → extrude away from centroid; false → toward centroid.
+    const computeOutwardSign = (loop, isOuter) => {
+      const n = loop.length;
+      let cx = 0, cy = 0;
+      for (let i = 0; i < center.length; i++) { cx += center[i].x; cy += center[i].y; }
+      cx /= center.length; cy /= center.length;
+      const midIdx = Math.floor(n / 2);
+      const pA = loop[midIdx];
+      const pB = loop[(midIdx + 1) % n];
+      const dx = pB.x - pA.x, dy = pB.y - pA.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -(dy / len), ny = dx / len; // sideSign=+1 normal
+      const dot = nx * (cx - pA.x) + ny * (cy - pA.y);
+      return isOuter
+        ? (dot > 0 ? -1 : 1)
+        : (dot > 0 ? 1 : -1);
+    };
+
     return {
-      outer: [simplifyOffsetClosedLoop(offsetLoop(center, curbOffset), simplifyParams)],
-      inner: [simplifyOffsetClosedLoop(offsetLoop(center, -curbOffset), simplifyParams)],
+      outer: [{points: outerLoop, outwardSign: computeOutwardSign(outerLoop, true)}],
+      inner: [{points: innerLoop, outwardSign: computeOutwardSign(innerLoop, false)}],
     };
   }
 
+  // Elliptical track: outer curbs extrude outward (-1), inner extrude inward (+1).
   return {
-    outer: [
-      sampleClosedPath((a) => {
+    outer: [{
+      points: sampleClosedPath((a) => {
         const radii = trackRadiiAtAngle(a);
         return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
       }),
-    ],
-    inner: [
-      sampleClosedPath((a) => {
+      outwardSign: -1,
+    }],
+    inner: [{
+      points: sampleClosedPath((a) => {
         const radii = trackRadiiAtAngle(a);
         return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
       }),
-    ],
+      outwardSign: 1,
+    }],
   };
 }
 

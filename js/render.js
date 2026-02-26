@@ -45,6 +45,23 @@ import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
 
+function activeMenuTagline() {
+  const rotation = state.menuTagline;
+  if (!rotation || !rotation.list.length) return { text: "", alpha: 0 };
+
+  const text = rotation.list[rotation.index] || "";
+  const fadeStart = rotation.displaySeconds;
+  const fadeEnd = rotation.displaySeconds + rotation.fadeSeconds;
+  let alpha = 1;
+  if (rotation.elapsed > fadeStart) {
+    const fadeT = Math.min(1, (rotation.elapsed - fadeStart) / Math.max(rotation.fadeSeconds, 0.0001));
+    alpha = 1 - fadeT;
+  }
+  if (rotation.elapsed >= fadeEnd) alpha = 0;
+
+  return { text, alpha };
+}
+
 let pixelNoiseOverlay = null;
 let cachedTrackBoundaries = null;
 let cachedTrackSignature = null;
@@ -375,12 +392,16 @@ function drawTrack() {
 
   const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
   if (showCurbs) {
-    curbSegments.outer.forEach((segment) =>
-      drawStripedCurb(segment, -1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
-    );
-    curbSegments.inner.forEach((segment) =>
-      drawStripedCurb(segment, 1, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH),
-    );
+    curbSegments.outer.forEach((segment) => {
+      const pts = segment.points || segment;
+      const sign = segment.outwardSign ?? -1;
+      drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
+    });
+    curbSegments.inner.forEach((segment) => {
+      const pts = segment.points || segment;
+      const sign = segment.outwardSign ?? 1;
+      drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
+    });
   }
   if (state.mode === "editor" && !state.editor.showCurbs) {
     drawVertexAsterisks(outerPath);
@@ -821,16 +842,29 @@ function drawMenu() {
   ctx.font = "bold 118px Verdana";
   ctx.fillText("CARUN", WIDTH / 2 - 245, 250);
 
+  const menuTagline = activeMenuTagline();
+  if (menuTagline.text && menuTagline.alpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = menuTagline.alpha;
+    ctx.fillStyle = "#d8e8f7";
+    ctx.font = "italic 30px Verdana";
+    const taglineWidth = ctx.measureText(menuTagline.text).width;
+    ctx.fillText(menuTagline.text, WIDTH * 0.5 - taglineWidth * 0.5, 306);
+    ctx.restore();
+  }
+
   ctx.font = "bold 42px Verdana";
   menuItems.forEach((item, idx) => {
     const y = 360 + idx * 74;
     ctx.fillStyle = idx === state.menuIndex ? "#ffffff" : "#8aa4b8";
+    const textWidth = ctx.measureText(item).width;
+    const textX = WIDTH * 0.5 - textWidth * 0.5;
     if (idx === state.menuIndex) {
       ctx.fillStyle = "#ec4f4f";
       ctx.fillRect(WIDTH / 2 - 230, y - 43, 460, 56);
       ctx.fillStyle = "#ffffff";
     }
-    ctx.fillText(item, WIDTH / 2 - 145, y);
+    ctx.fillText(item, textX, y);
   });
 
   ctx.font = "22px Verdana";
@@ -1100,6 +1134,17 @@ function drawSettings() {
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 76px Verdana";
   ctx.fillText("SETTINGS", WIDTH / 2 - 210, 180);
+
+  const menuTagline = activeMenuTagline();
+  if (menuTagline.text && menuTagline.alpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = menuTagline.alpha;
+    ctx.fillStyle = "#d7e9f4";
+    ctx.font = "italic 28px Verdana";
+    const taglineWidth = ctx.measureText(menuTagline.text).width;
+    ctx.fillText(menuTagline.text, WIDTH * 0.5 - taglineWidth * 0.5, 248);
+    ctx.restore();
+  }
 
   ctx.font = "bold 35px Verdana";
   settingsItems.forEach((item, idx) => {

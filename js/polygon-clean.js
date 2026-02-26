@@ -307,7 +307,7 @@ function extractOutermostContour(splitLoop) {
  * each other into single representative points.
  *
  * After edge-splitting and contour extraction, tight curves often produce
- * clusters of 5–15 vertices within a few pixels.  These add no visual or
+ * clusters of 5–15 vertices within a few pixels.  These add no visual orc
  * physical detail — they just bloat the polygon and slow later operations.
  *
  * Algorithm (greedy, single-pass, O(n)):
