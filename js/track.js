@@ -593,8 +593,8 @@ export function drawStripedCurb(
   ctx.restore();
 }
 
-function buildCurbSegments() {
-  const base = trackBoundaryPaths(track, 280);
+function buildCurbSegments(trackDef = track) {
+  const base = trackBoundaryPaths(trackDef, 280);
   const center = base.center;
   const segmentCount = center.length;
   if (segmentCount < 6) {
@@ -603,19 +603,19 @@ function buildCurbSegments() {
 
   let outer;
   let inner;
-  if (isCenterlineTrack(track)) {
-    const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
-    const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
+  if (isCenterlineTrack(trackDef)) {
+    const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
+    const curbOffset = halfWidth - trackDef.borderSize + CURB_OUTSET;
     outer = offsetLoop(center, curbOffset);
     inner = offsetLoop(center, -curbOffset);
   } else {
     outer = sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a);
-      return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
+      const radii = trackRadiiAtAngle(a, trackDef);
+      return pointOnTrackRadius(a, radii.outer - trackDef.borderSize + CURB_OUTSET, trackDef);
     }, segmentCount);
     inner = sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a);
-      return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
+      const radii = trackRadiiAtAngle(a, trackDef);
+      return pointOnTrackRadius(a, radii.inner + trackDef.borderSize - CURB_OUTSET, trackDef);
     }, segmentCount);
   }
 
@@ -817,11 +817,11 @@ function buildCurbSegments() {
   };
 }
 
-function buildFullCurbSegments() {
-  if (isCenterlineTrack(track)) {
-    const center = trackBoundaryPaths(track, 420).center;
-    const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
-    const curbOffset = halfWidth - track.borderSize + CURB_OUTSET;
+function buildFullCurbSegments(trackDef = track) {
+  if (isCenterlineTrack(trackDef)) {
+    const center = trackBoundaryPaths(trackDef, 420).center;
+    const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
+    const curbOffset = halfWidth - trackDef.borderSize + CURB_OUTSET;
     const simplifyParams = {
       minEdgeLen: Math.max(1.2, halfWidth * 0.035),
       collinearTol: Math.max(1.4, halfWidth * 0.045),
@@ -862,27 +862,27 @@ function buildFullCurbSegments() {
   return {
     outer: [{
       points: sampleClosedPath((a) => {
-        const radii = trackRadiiAtAngle(a);
-        return pointOnTrackRadius(a, radii.outer - track.borderSize + CURB_OUTSET);
+        const radii = trackRadiiAtAngle(a, trackDef);
+        return pointOnTrackRadius(a, radii.outer - trackDef.borderSize + CURB_OUTSET, trackDef);
       }),
       outwardSign: -1,
     }],
     inner: [{
       points: sampleClosedPath((a) => {
-        const radii = trackRadiiAtAngle(a);
-        return pointOnTrackRadius(a, radii.inner + track.borderSize - CURB_OUTSET);
+        const radii = trackRadiiAtAngle(a, trackDef);
+        return pointOnTrackRadius(a, radii.inner + trackDef.borderSize - CURB_OUTSET, trackDef);
       }),
       outwardSign: 1,
     }],
   };
 }
 
-export function initCurbSegments() {
+export function initCurbSegments(trackDef = track) {
   try {
-    return buildCurbSegments();
+    return buildCurbSegments(trackDef);
   } catch (err) {
     console.error("Curb segment generation failed, falling back to full curbs.", err);
-    return buildFullCurbSegments();
+    return buildFullCurbSegments(trackDef);
   }
 }
 

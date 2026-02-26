@@ -33,6 +33,7 @@ import {
   blobRadius,
   drawPath,
   drawStripedCurb,
+  initCurbSegments,
   isCenterlineTrack,
   pointOnCenterLine,
   sampleClosedPath,
@@ -65,6 +66,7 @@ function activeMenuTagline() {
 let pixelNoiseOverlay = null;
 let cachedTrackBoundaries = null;
 let cachedTrackSignature = null;
+const previewTrackDataCache = new Map();
 
 function createTextureCanvas(width, height) {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
@@ -144,6 +146,18 @@ function getTrackBoundariesCached(trackDef, segments) {
   return cachedTrackBoundaries;
 }
 
+function getPreviewTrackData(preset) {
+  const cached = previewTrackDataCache.get(preset.id);
+  if (cached && cached.trackRef === preset.track) return cached.data;
+
+  const data = {
+    boundaries: trackBoundaryPaths(preset.track, TRACK_SEGMENTS),
+    curbs: initCurbSegments(preset.track),
+  };
+  previewTrackDataCache.set(preset.id, { trackRef: preset.track, data });
+  return data;
+}
+
 function drawPixelNoise() {
   const overlay = ensurePixelNoiseOverlay();
   ctx.save();
@@ -153,8 +167,8 @@ function drawPixelNoise() {
   ctx.restore();
 }
 
-function drawDecor() {
-  for (const obj of worldObjects) {
+function drawDecor(objects = worldObjects) {
+  for (const obj of objects) {
     if (obj.type === "tree") {
       ctx.fillStyle = "#4a2f1e";
       ctx.fillRect(obj.x - 4, obj.y + 8, 8, 16);
@@ -213,12 +227,12 @@ function drawDecor() {
   }
 }
 
-function drawRoadDetails() {
+function drawRoadDetails(trackDef = track) {
   ctx.strokeStyle = "rgba(235, 235, 235, 0.45)";
   ctx.lineWidth = 4;
   for (let i = 0; i < 32; i++) {
     const t = (i / 32) * Math.PI * 2;
-    const p = pointOnCenterLine(t);
+    const p = pointOnCenterLine(t, trackDef);
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
     ctx.stroke();
@@ -322,9 +336,9 @@ function drawCheckpointFlags() {
   }
 }
 
-function drawStartLine() {
-  const startAngle = trackStartAngle(track);
-  const frame = trackFrameAtAngle(startAngle, track);
+function drawStartLine(trackDef = track) {
+  const startAngle = trackStartAngle(trackDef);
+  const frame = trackFrameAtAngle(startAngle, trackDef);
   const center = frame.point;
   const span = frame.roadWidth;
   const thickness = 20;
@@ -351,19 +365,13 @@ function drawStartLine() {
   ctx.restore();
 }
 
-function drawTrack() {
-  ctx.fillStyle = "#2e8c42";
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  drawPixelNoise();
-
-  const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
+function drawTrackSurface(trackDef, boundaries, segments, showCurbs) {
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
-  const centerlineTrack = isCenterlineTrack(track);
+  const centerlineTrack = isCenterlineTrack(trackDef);
 
   if (centerlineTrack) {
-    const roadWidth = Math.max(24, track.centerlineHalfWidth || 90) * 2;
+    const roadWidth = Math.max(24, trackDef.centerlineHalfWidth || 90) * 2;
     if (boundaries.center.length) {
       const asphaltPattern = getAsphaltPattern(ctx);
       ctx.save();
@@ -390,22 +398,17 @@ function drawTrack() {
     ctx.restore();
   }
 
-  const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
   if (showCurbs) {
-    curbSegments.outer.forEach((segment) => {
+    segments.outer.forEach((segment) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? -1;
       drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
     });
-    curbSegments.inner.forEach((segment) => {
+    segments.inner.forEach((segment) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? 1;
       drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
     });
-  }
-  if (state.mode === "editor" && !state.editor.showCurbs) {
-    drawVertexAsterisks(outerPath);
-    drawVertexAsterisks(innerPath);
   }
 
   if (!centerlineTrack) {
@@ -414,11 +417,26 @@ function drawTrack() {
     drawPath(innerPath);
     ctx.fill();
   }
+}
+
+function drawTrack() {
+  ctx.fillStyle = "#2e8c42";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  drawPixelNoise();
+
+  const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
+  const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
+  drawTrackSurface(track, boundaries, curbSegments, showCurbs);
+  if (state.mode === "editor" && !state.editor.showCurbs) {
+    drawVertexAsterisks(boundaries.outer);
+    drawVertexAsterisks(boundaries.inner);
+  }
 
   drawDecor();
   drawSkidMarks();
-  drawRoadDetails();
-  drawStartLine();
+  drawRoadDetails(track);
+  drawStartLine(track);
   drawCheckpointFlags();
 }
 
@@ -855,7 +873,7 @@ function drawMenu() {
 
   ctx.font = "bold 42px Verdana";
   menuItems.forEach((item, idx) => {
-    const y = 360 + idx * 74;
+    const y = 386 + idx * 74;
     ctx.fillStyle = idx === state.menuIndex ? "#ffffff" : "#8aa4b8";
     const textWidth = ctx.measureText(item).width;
     const textX = WIDTH * 0.5 - textWidth * 0.5;
@@ -872,19 +890,9 @@ function drawMenu() {
   ctx.fillText("Use ↑ ↓ and Enter", WIDTH / 2 - 108, HEIGHT - 80);
 }
 
-function drawPreviewLoop(points, mapPoint) {
-  if (!points.length) return;
-  const first = mapPoint(points[0]);
-  ctx.moveTo(first.x, first.y);
-  for (let i = 1; i < points.length; i++) {
-    const p = mapPoint(points[i]);
-    ctx.lineTo(p.x, p.y);
-  }
-  ctx.closePath();
-}
-
 function drawTrackPreviewCard(x, y, size, selected, preset) {
   const trackDef = preset.track;
+  const { boundaries, curbs } = getPreviewTrackData(preset);
   ctx.save();
   ctx.fillStyle = selected ? "#244864" : "#1a3347";
   ctx.fillRect(x, y, size, size);
@@ -903,9 +911,7 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   ctx.fillStyle = "#2e8c42";
   ctx.fillRect(innerX, innerY, innerSize, innerSize);
 
-  const boundaries = trackBoundaryPaths(trackDef, 180);
   const outer = boundaries.outer;
-  const inner = boundaries.inner;
 
   let minX = Infinity;
   let minY = Infinity;
@@ -923,88 +929,15 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   const scale = Math.min(innerSize / (maxX - minX), innerSize / (maxY - minY));
   const cardCenterX = innerX + innerSize * 0.5;
   const cardCenterY = innerY + innerSize * 0.5;
-  const mapPoint = (p) => ({
-    x: cardCenterX + (p.x - centerX) * scale,
-    y: cardCenterY + (p.y - centerY) * scale,
-  });
-
-  ctx.fillStyle = "#787e86";
-  ctx.beginPath();
-  drawPreviewLoop(outer, mapPoint);
-  drawPreviewLoop([...inner].reverse(), mapPoint);
-  ctx.fill("evenodd");
-
-  ctx.fillStyle = "#247637";
-  ctx.beginPath();
-  drawPreviewLoop(inner, mapPoint);
-  ctx.fill();
-
-  for (const obj of preset.worldObjects || []) {
-    const center = mapPoint(obj);
-    if (obj.type === "pond") {
-      const rx = Math.max(2.5, (obj.rx || 0) * scale);
-      const ry = Math.max(2, (obj.ry || 0) * scale);
-      const waterPath = sampleClosedPath((a) => {
-        const radius = blobRadius(rx, ry, a, obj.seed || 0);
-        return {
-          x: center.x + Math.cos(a) * radius,
-          y: center.y + Math.sin(a) * radius,
-        };
-      }, 18);
-      ctx.fillStyle = "#7aa1c2";
-      ctx.beginPath();
-      drawPath(waterPath);
-      ctx.fill();
-      ctx.strokeStyle = "#8de2ff";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-
-    if (obj.type === "tree") {
-      const radius = Math.max(3, (obj.r || 0) * scale);
-      const trunkW = Math.max(1.2, radius * 0.28);
-      const trunkH = Math.max(2, radius * 0.6);
-      ctx.fillStyle = "#4a2f1e";
-      ctx.fillRect(center.x - trunkW * 0.5, center.y + radius * 0.2, trunkW, trunkH);
-      ctx.fillStyle = "#2f9c4a";
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#3dcf60";
-      ctx.beginPath();
-      ctx.arc(center.x - radius * 0.3, center.y - radius * 0.3, radius * 0.45, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    if (obj.type === "barrel") {
-      const radius = Math.max(2.2, (obj.r || 0) * scale);
-      ctx.fillStyle = "#d16f0d";
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#3a2a12";
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-    }
-  }
-
-  const startAngle = trackStartAngle(trackDef);
-  const startFrame = trackFrameAtAngle(startAngle, trackDef);
-  const halfRoad = startFrame.roadWidth * 0.5;
-  const startInner = mapPoint({
-    x: startFrame.point.x - startFrame.normal.x * halfRoad,
-    y: startFrame.point.y - startFrame.normal.y * halfRoad,
-  });
-  const startOuter = mapPoint({
-    x: startFrame.point.x + startFrame.normal.x * halfRoad,
-    y: startFrame.point.y + startFrame.normal.y * halfRoad,
-  });
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(startInner.x, startInner.y);
-  ctx.lineTo(startOuter.x, startOuter.y);
-  ctx.stroke();
+  ctx.save();
+  ctx.translate(cardCenterX, cardCenterY);
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
+  drawTrackSurface(trackDef, boundaries, curbs, true);
+  drawDecor(preset.worldObjects || []);
+  drawRoadDetails(trackDef);
+  drawStartLine(trackDef);
+  ctx.restore();
 
   ctx.restore();
 }
@@ -1047,7 +980,7 @@ function drawTrackSelection() {
   ctx.strokeRect(addX, cardY, cardSize, cardSize);
   ctx.fillStyle = addSelected ? "#ffffff" : "#b6cad9";
   ctx.font = "bold 102px Verdana";
-  ctx.fillText("+", addX + cardSize * 0.5 - 30, cardY + cardSize * 0.5 + 34);
+  ctx.fillText("+", addX + cardSize * 0.5 - 45, cardY + cardSize * 0.5 + 34);
   ctx.font = "bold 22px Verdana";
   const addLabel = "UPLOAD TRACK";
   const addLabelWidth = ctx.measureText(addLabel).width;
@@ -1148,7 +1081,7 @@ function drawSettings() {
 
   ctx.font = "bold 35px Verdana";
   settingsItems.forEach((item, idx) => {
-    const y = 305 + idx * 90;
+    const y = 338 + idx * 90;
     if (idx === state.settingsIndex) {
       ctx.fillStyle = "#3d7ec7";
       ctx.fillRect(WIDTH / 2 - 280, y - 42, 560, 56);

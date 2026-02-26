@@ -1,4 +1,7 @@
 import { loadPlayerName, track } from "./parameters.js";
+import { nextTaglineSet } from "./taglines.js";
+
+const initialTaglines = nextTaglineSet();
 
 export const state = {
   mode: "menu",
@@ -36,6 +39,13 @@ export const state = {
   },
   performance: {
     fps: 0,
+  },
+  menuTagline: {
+    list: initialTaglines,
+    index: 0,
+    elapsed: 0,
+    displaySeconds: 30,
+    fadeSeconds: 1,
   },
 };
 
