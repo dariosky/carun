@@ -8,6 +8,7 @@ import {
   menuItems,
   physicsConfig,
   sanitizePlayerName,
+  saveDebugMode,
   saveTrackPreset,
   savePlayerName,
   settingsItems,
@@ -145,6 +146,11 @@ function openTrackImportDialog() {
   input.click();
 }
 
+function toggleDebugMode() {
+  physicsConfig.flags.DEBUG_MODE = !physicsConfig.flags.DEBUG_MODE;
+  saveDebugMode(physicsConfig.flags.DEBUG_MODE);
+}
+
 function createEmptyTrackAndEdit() {
   const id = `track-${Date.now()}`;
   const newTrack = {
@@ -242,6 +248,9 @@ function activateSelection() {
       state.editingName = !state.editingName;
     }
     if (state.settingsIndex === 1) {
+      toggleDebugMode();
+    }
+    if (state.settingsIndex === 2) {
       state.mode = "menu";
       state.paused = false;
     }
@@ -343,6 +352,7 @@ function onKeyDown(e) {
 
   if (
     key === "e" &&
+    physicsConfig.flags.DEBUG_MODE &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex >= 0 &&
     state.trackSelectIndex < trackOptions.length
@@ -398,6 +408,9 @@ function onKeyDown(e) {
   }
   if (key === "arrowright" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
     state.trackSelectIndex = (state.trackSelectIndex + 1) % trackSelectCardCount();
+  }
+  if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings" && state.settingsIndex === 1) {
+    toggleDebugMode();
   }
   if (key === "enter") activateSelection();
 

@@ -7,6 +7,7 @@ export const WIDTH = canvas.width;
 export const HEIGHT = canvas.height;
 
 const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
+const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 
 export function sanitizePlayerName(raw) {
   if (typeof raw !== "string") return "PLAYER";
@@ -30,8 +31,27 @@ export function savePlayerName(name) {
   }
 }
 
+function loadDebugMode(defaultValue) {
+  try {
+    const raw = localStorage.getItem(DEBUG_MODE_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return defaultValue;
+}
+
+export function saveDebugMode(enabled) {
+  try {
+    localStorage.setItem(DEBUG_MODE_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
 export const menuItems = ["START", "SETTINGS"];
-export const settingsItems = ["PLAYER NAME", "BACK"];
+export const settingsItems = ["PLAYER NAME", "DEBUG MODE", "BACK"];
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 const TRACK_PRESETS = [
   {
@@ -639,7 +659,7 @@ export const physicsConfig = {
     HANDBRAKE_MODE: true,
     SPEED_SENSITIVE_STEERING: true,
     SURFACE_BLENDING: true,
-    DEBUG_VECTORS: true,
+    DEBUG_MODE: loadDebugMode(false),
     ARCADE_COLLISION_PUSH: true,
   },
   constants: {

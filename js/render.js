@@ -139,6 +139,7 @@ function drawSkidMarks() {
 }
 
 function drawCheckpointFlags() {
+  const CHECKPOINT_PIN_WIDTH_MULTIPLIER = 1.2;
   for (const cp of checkpoints) {
     const a = cp.angle;
     const frame = trackFrameAtAngle(a, track);
@@ -147,16 +148,17 @@ function drawCheckpointFlags() {
     const tangent = frame.tangent;
     const roadWidth = frame.roadWidth;
     const checkpointSpan = roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
-    const posts = [-checkpointSpan * 0.5, checkpointSpan * 0.5];
+    const pinSpan = roadWidth * CHECKPOINT_PIN_WIDTH_MULTIPLIER;
+    const posts = [-pinSpan * 0.5, pinSpan * 0.5];
 
-    if (physicsConfig.flags.DEBUG_VECTORS) {
+    if (physicsConfig.flags.DEBUG_MODE) {
       const innerPin = {
-        x: center.x + normal.x * posts[0],
-        y: center.y + normal.y * posts[0],
+        x: center.x + normal.x * (checkpointSpan * -0.5),
+        y: center.y + normal.y * (checkpointSpan * -0.5),
       };
       const outerPin = {
-        x: center.x + normal.x * posts[1],
-        y: center.y + normal.y * posts[1],
+        x: center.x + normal.x * (checkpointSpan * 0.5),
+        y: center.y + normal.y * (checkpointSpan * 0.5),
       };
       ctx.save();
       ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
@@ -324,7 +326,7 @@ function drawCar() {
 }
 
 function drawDebugVectors() {
-  if (!physicsConfig.flags.DEBUG_VECTORS || state.mode !== "racing") return;
+  if (!physicsConfig.flags.DEBUG_MODE || state.mode !== "racing") return;
 
   const forwardX = Math.cos(car.angle);
   const forwardY = Math.sin(car.angle);
@@ -763,7 +765,7 @@ function drawTrackSelection() {
   ctx.fillStyle = "#c3d9ec";
   ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
   ctx.fillText("+ card imports a JSON track file", WIDTH * 0.5 - 172, HEIGHT - 42);
-  if (physicsConfig.flags.DEBUG_VECTORS) {
+  if (physicsConfig.flags.DEBUG_MODE) {
     ctx.fillText("Press E to edit selected track", WIDTH * 0.5 - 150, HEIGHT - 14);
   }
 }
@@ -844,6 +846,8 @@ function drawSettings() {
     if (item === "PLAYER NAME") {
       const suffix = state.editingName ? "_" : "";
       ctx.fillText(`${item}: ${state.playerName}${suffix}`, WIDTH / 2 - 250, y);
+    } else if (item === "DEBUG MODE") {
+      ctx.fillText(`${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`, WIDTH / 2 - 250, y);
     } else {
       ctx.fillText(item, WIDTH / 2 - 250, y);
     }

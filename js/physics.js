@@ -227,8 +227,6 @@ export function updateRace(dt) {
       0,
       assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt,
     );
-    // Handbrake should induce slide, not unintended reverse creep.
-    if (forwardSpeed < 0) forwardSpeed = 0;
   }
   forwardSpeed *= Math.exp(-carCfg.longDrag * physicsRuntime.surface.longDragMul * dt);
 
@@ -329,7 +327,12 @@ export function updateRace(dt) {
   const headingRightX = -headingForwardY;
   const headingRightY = headingForwardX;
   let rawHeadingForwardSpeed = car.vx * headingForwardX + car.vy * headingForwardY;
-  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05 && rawHeadingForwardSpeed < 0) {
+  if (
+    flags.HANDBRAKE_MODE &&
+    physicsRuntime.input.handbrake > 0.05 &&
+    rawHeadingForwardSpeed < 0 &&
+    forwardSpeed >= 0
+  ) {
     // Remove only the backward longitudinal component, preserve lateral velocity for drift.
     car.vx -= rawHeadingForwardSpeed * headingForwardX;
     car.vy -= rawHeadingForwardSpeed * headingForwardY;
