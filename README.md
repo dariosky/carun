@@ -6,6 +6,10 @@
 
 CaRun is an HTML5 arcade racing game prototype with a static canvas frontend and a FastAPI backend for auth, leaderboard, and track sharing.
 
+## Live
+
+Play it here: https://carun.dariosky.it
+
 ## Monorepo Layout
 
 - `frontend/`: static game client (HTML/CSS/JS/assets/tracks)
