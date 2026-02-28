@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy CaRun to Opalstack.
+"""Deploy CaRun
 
 Flow:
 1. Read `.env.prod`
@@ -18,6 +18,7 @@ REQUIRED_KEYS = [
     "WEBSERVER",
     "SSH_USER",
     "SSH_PORT",
+    "UV_REMOTE_PATH",
     "APP_DIR",
     "RESTART_CMD",
     "HEALTHCHECK_URL",
@@ -42,7 +43,7 @@ def run(cmd: list[str], dry_run: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Deploy CaRun to Opalstack")
+    parser = argparse.ArgumentParser(description="Deploy CaRun")
     parser.add_argument("--env-file", default=".env.prod", help="Path to production env file")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-migrate", action="store_true")
@@ -61,6 +62,7 @@ def main() -> None:
     host = env["WEBSERVER"]
     user = env["SSH_USER"]
     port = env["SSH_PORT"]
+    uv_remote_path = env["UV_REMOTE_PATH"]
     app_dir = env["APP_DIR"]
     restart_cmd = env["RESTART_CMD"]
     health_url = env["HEALTHCHECK_URL"]
@@ -81,11 +83,13 @@ def main() -> None:
     remote_steps = [
         f"cd {shlex.quote(app_dir)}",
         "git pull",
-        "uv sync --locked",
+        f"{shlex.quote(uv_remote_path)} sync --locked",
     ]
 
     if not args.skip_migrate:
-        remote_steps.append("uv run alembic -c backend/alembic.ini upgrade head")
+        remote_steps.append(
+            f"{shlex.quote(uv_remote_path)} run alembic -c backend/alembic.ini upgrade head"
+        )
 
     if not args.skip_restart:
         remote_steps.append(restart_cmd)

@@ -10,7 +10,7 @@ CaRun is an HTML5 arcade racing game prototype with a static canvas frontend and
 
 - `frontend/`: static game client (HTML/CSS/JS/assets/tracks)
 - `backend/`: FastAPI app, SQLModel models, Alembic migrations
-- `scripts/deploy.py`: deployment helper for Opalstack
+- `scripts/deploy.py`: deployment helper
 - `.env.example`, `.env.prod.example`: env templates
 
 ## Local Setup
@@ -62,7 +62,7 @@ uv run uvicorn app.main:app --app-dir backend --reload --port 8000
 - `GET /api/leaderboard/{track_id}`
 - `POST /api/laps`
 
-## Deployment (Opalstack)
+## Deployment
 
 1. Create `.env.prod` from template and fill secrets.
 2. Run deploy script:
