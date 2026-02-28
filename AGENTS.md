@@ -97,4 +97,4 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - Multiple track presets with irregular handcrafted layouts
 - Better collision boundaries for non-circular props
 - Simple AI opponent prototype
-- Persisted best laps and player settings
+- Persist the best laps and player settings

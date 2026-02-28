@@ -1,112 +1,81 @@
 <p align="center">
-  <img src="assets/carun.svg" alt="Carun logo" width="220" />
+  <img src="frontend/assets/carun.svg" alt="Carun logo" width="220" />
 </p>
 
 # CaRun
 
-CaRun is an HTML5 arcade racing game prototype inspired by colorful 90s pixel-era racers.
+CaRun is an HTML5 arcade racing game prototype with a static canvas frontend and a FastAPI backend for auth, leaderboard, and track sharing.
 
-## Vision
+## Monorepo Layout
 
-Build a fun-first, indie-style top-down racing game where:
+- `frontend/`: static game client (HTML/CSS/JS/assets/tracks)
+- `backend/`: FastAPI app, SQLModel models, Alembic migrations
+- `scripts/deploy.py`: deployment helper
+- `.env.example`, `.env.prod.example`: env templates
 
-- Cars are small, expressive sprites with sharp/pixel-ish presentation.
-- Tracks are fully visible on screen (no camera scroll).
-- Surfaces and world details have gameplay impact.
-- Physics prioritize arcade handling and satisfying drift over strict realism.
+## Local Setup
 
-## Current POC Features
-
-- Main menu with keyboard navigation (`ArrowUp`/`ArrowDown` + `Enter`)
-- Game title screen: `Carun`
-- Settings screen with editable player name
-- Single fully visible irregular oval track
-- Multiple surfaces with different behavior:
-- `asphalt` (default drive surface)
-- `curb` red/white border (higher grip)
-- `grass` (slower, less grip)
-- `pond` (very slow, slippery)
-- Decorative and collidable world objects (trees, barrels)
-- Collision response against obstacles
-- Arcade-style drift behavior (lateral slip and grip blending)
-- Start/finish line and 4 checkpoints
-- Lap tracking with checkpoint validation
-- 3-lap race test flow
-- HUD with:
-- current lap time
-- per-lap history
-- finish screen and total time
-- Car spawns tangent to the track direction at race start
-
-## Controls
-
-### Menu / Settings
-
-- `ArrowUp` / `ArrowDown`: move selection
-- `Enter`: select/activate
-- In player-name edit mode:
-- type letters/numbers/space
-- `Backspace`: delete
-- `Enter`: confirm
-- `Esc`: cancel edit mode
-
-### Racing
-
-- `W` or `ArrowUp`: accelerate
-- `S` or `ArrowDown`: brake/reverse
-- `A` or `ArrowLeft`: steer left
-- `D` or `ArrowRight`: steer right
-- `Space`: handbrake
-- `P`: pause/resume (shows controls modal and freezes race timers)
-- `Esc`: return to menu
-
-## Run Locally
-
-This is a static HTML/CSS/JS project.
-
-1. Open `index.html` directly in your browser, or
-2. Serve the folder with a simple static server (recommended), for example:
+1. Create local env file:
 
 ```bash
-npx serve .
+cp .env.example .env
 ```
 
-Then open the local URL shown by the server.
+2. Install backend dependencies:
 
-## Screenshots
+```bash
+uv sync
+```
 
-### Current build
+3. Run migrations:
 
-![CaRun gameplay screenshot](screenshots/Screenshot%202026-02-26%20at%2000.38.18.png)
+```bash
+uv run alembic -c backend/alembic.ini upgrade head
+```
 
-## Project Structure
+4. Start API + static serving:
 
-- `index.html`: canvas app shell
-- `styles.css`: full-screen presentation and responsive layout
-- `js/main.js`: startup wiring
-- `js/parameters.js`: constants/config/static parameters
-- `js/state.js`: mutable runtime state
-- `js/menus.js`: menu/settings flow + keyboard handlers
-- `js/physics.js`: car physics + race progression
-- `js/track.js`: track geometry, surfaces, and collision helpers
-- `js/render.js`: world/UI rendering
-- `js/game-loop.js`: frame loop timing
-- `js/utils.js`: shared helpers
+```bash
+uv run uvicorn app.main:app --app-dir backend --reload --port 8000
+```
 
-## Next Roadmap
+5. Open `http://localhost:8000`.
 
-- Selectable cars with different handling profiles
-- More track themes and handcrafted irregular layouts
-- Better sprite art pipeline (cars, props, UI)
-- AI opponents
-- Local multiplayer modes
-- Online multiplayer architecture
-- Audio (engine, skid, collisions, UI SFX, music)
-- Save/load settings and best lap records
+## Backend Stack
 
-## Design Principles
+- FastAPI
+- SQLModel (DB models)
+- Pydantic (API request/response schemas)
+- Alembic (schema migrations)
+- PostgreSQL
 
-- Keep gameplay readable and instantly fun.
-- Favor responsiveness over simulation realism.
-- Make every visual detail potentially meaningful for driving.
-- Preserve retro-inspired look while keeping code modular for expansion.
+## API Surface (MVP)
+
+- `GET /api/health`
+- `GET /api/auth/me`
+- `GET /api/auth/google/login`
+- `GET /api/auth/google/callback`
+- `POST /api/auth/logout`
+- `GET /api/tracks`
+- `POST /api/tracks`
+- `GET /api/tracks/share/{share_token}`
+- `GET /api/leaderboard/{track_id}`
+- `POST /api/laps`
+
+## Deployment
+
+1. Create `.env.prod` from template and fill secrets.
+2. Run deploy script:
+
+```bash
+python scripts/deploy.py
+```
+
+Useful flags:
+
+- `--dry-run`
+- `--skip-migrate`
+- `--skip-restart`
+- `--env-file /path/to/.env.prod`
+
+The deploy script uploads `.env.prod` to `${APP_DIR}/.env`, then runs remote `git pull`, `uv sync`, Alembic migrations via `uv run`, restarts service, and checks health URL.
