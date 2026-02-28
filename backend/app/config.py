@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_name: str = "CaRun API"
     app_env: str = "local"
     debug: bool = False
+    webserver_port: int = 8080
 
     database_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/carun")
     session_secret: str = "dev-session-secret"

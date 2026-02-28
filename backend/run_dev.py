@@ -3,7 +3,7 @@
 import setproctitle
 import uvicorn
 
-setproctitle.setproctitle("Carun DEV API")
+setproctitle.setproctitle("Carun DEV")
 if __name__ == "__main__":  # pragma: no cover
     uvicorn.run(
         "app.main:create_app",
