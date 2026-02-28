@@ -16,6 +16,7 @@ dependencies = [
     "sqlmodel>=0.0.37",
     "uvicorn[standard]>=0.41.0",
     "greenlet==3.2.4", # for opalstack compatibility
+    "uv>=0.10.7",
 ]
 
 [dependency-groups]
