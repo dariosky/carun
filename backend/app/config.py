@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
 
     frontend_dir: Path = ROOT_DIR / "frontend"
+    frontend_build_id: str = "dev"
+    frontend_build_label: str = "v.dev"
 
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",

@@ -83,6 +83,18 @@ def main() -> None:
     remote_steps = [
         f"cd {shlex.quote(app_dir)}",
         "git pull",
+        "export BUILD_ID=$(git rev-parse --short=12 HEAD)",
+        "export BUILD_LABEL=v$(git show -s --date=format:%Y.%m.%d --format=%cd HEAD)",
+        "python3 -c "
+        + shlex.quote(
+            "from pathlib import Path; import os; "
+            "p = Path('.env'); "
+            "raw = p.read_text(encoding='utf-8') if p.exists() else ''; "
+            "lines = [line for line in raw.splitlines() if not line.startswith('FRONTEND_BUILD_ID=') and not line.startswith('FRONTEND_BUILD_LABEL=')]; "
+            "lines.append('FRONTEND_BUILD_ID=' + os.environ['BUILD_ID']); "
+            "lines.append('FRONTEND_BUILD_LABEL=' + os.environ['BUILD_LABEL']); "
+            "p.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')"
+        ),
         f"{shlex.quote(uv_remote_path)} sync --locked",
     ]
 

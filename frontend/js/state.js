@@ -2,6 +2,10 @@ import { loadPlayerName, track } from "./parameters.js";
 import { nextTaglineSet } from "./taglines.js";
 
 const initialTaglines = nextTaglineSet();
+const buildLabelFromWindow =
+  typeof window !== "undefined" && typeof window.__CARUN_BUILD_LABEL__ === "string"
+    ? window.__CARUN_BUILD_LABEL__
+    : "v.dev";
 
 export const state = {
   mode: "menu",
@@ -37,9 +41,21 @@ export const state = {
     text: "",
     time: 0,
   },
+  modal: {
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Yes",
+    cancelLabel: "No",
+    danger: false,
+    selectedAction: "cancel",
+    onConfirm: null,
+    onCancel: null,
+  },
   performance: {
     fps: 0,
   },
+  buildLabel: buildLabelFromWindow,
   menuTagline: {
     list: initialTaglines,
     index: 0,

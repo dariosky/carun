@@ -30,3 +30,24 @@ def get_current_user(request: Request, session: Session = Depends(get_session)) 
         )
 
     return user
+
+
+def get_optional_current_user(
+    request: Request, session: Session = Depends(get_session)
+) -> User | None:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+
+    try:
+        parsed_user_id = UUID(user_id)
+    except ValueError:
+        request.session.clear()
+        return None
+
+    user = session.exec(select(User).where(User.id == parsed_user_id)).first()
+    if not user:
+        request.session.pop("user_id", None)
+        return None
+
+    return user

@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="__STATIC_BASE__" />
     <title>Carun</title>
     <meta
       name="description"
@@ -33,6 +34,9 @@
     <main class="app">
       <canvas id="game" width="1280" height="720" aria-label="Carun game canvas"></canvas>
     </main>
+    <script>
+      window.__CARUN_BUILD_LABEL__ = "__BUILD_LABEL__";
+    </script>
     <script src="js/main.js" type="module"></script>
   </body>
 </html>

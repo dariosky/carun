@@ -1,10 +1,12 @@
 import {
   applyTrackPreset,
   canvas,
-  exportTrackPresetData,
+  deleteOwnTrackFromApi,
   getTrackPreset,
   importTrackPresetData,
+  removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
+  saveTrackPresetToDb,
   menuItems,
   physicsConfig,
   sanitizePlayerName,
@@ -19,6 +21,48 @@ import { clearRaceInputs, resetRace } from "./physics.js";
 import { initCurbSegments } from "./track.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
+
+function setTrackInUrl(trackId) {
+  const cleanTrackId = typeof trackId === "string" ? trackId.trim() : "";
+  if (!cleanTrackId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("track", cleanTrackId);
+  window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+}
+
+function clearTrackInUrl(trackId) {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("track") !== trackId) return;
+  url.searchParams.delete("track");
+  const query = url.searchParams.toString();
+  window.history.replaceState({}, "", `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
+}
+
+function openConfirmModal({ title, message, confirmLabel = "Yes", cancelLabel = "No", danger = false, onConfirm }) {
+  state.modal.open = true;
+  state.modal.title = title || "Confirm";
+  state.modal.message = message || "";
+  state.modal.confirmLabel = confirmLabel;
+  state.modal.cancelLabel = cancelLabel;
+  state.modal.danger = danger;
+  state.modal.selectedAction = "cancel";
+  state.modal.onConfirm = typeof onConfirm === "function" ? onConfirm : null;
+  state.modal.onCancel = null;
+}
+
+function closeModal({ runCancel = false } = {}) {
+  const onCancel = state.modal.onCancel;
+  state.modal.open = false;
+  state.modal.title = "";
+  state.modal.message = "";
+  state.modal.confirmLabel = "Yes";
+  state.modal.cancelLabel = "No";
+  state.modal.danger = false;
+  state.modal.selectedAction = "cancel";
+  state.modal.onConfirm = null;
+  state.modal.onCancel = null;
+  if (runCancel && typeof onCancel === "function") onCancel();
+}
 
 function returnToTrackSelect() {
   if (trackOptions.length > 0) {
@@ -110,53 +154,41 @@ function showSnackbar(text, seconds = 1.4) {
 }
 
 function trackSelectCardCount() {
-  return trackOptions.length + 1; // Track cards + plus card.
+  return trackOptions.length; // Track cards only.
 }
 
 function trackSelectBackIndex() {
   return trackSelectCardCount();
 }
 
-function saveEditorTrack() {
+async function saveEditorTrack() {
   const trackIndex = state.editor.trackIndex;
+  const previousPreset = getTrackPreset(trackIndex);
+  const previousId = previousPreset.id;
+  const shouldReplacePrevious = !previousPreset.fromDb && previousPreset.source !== "system";
   saveTrackPreset(trackIndex);
-  const exportData = exportTrackPresetData(trackIndex);
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `carun-track-${exportData.id}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-  showSnackbar("Saved");
-}
-
-function openTrackImportDialog() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".json,application/json";
-  input.addEventListener("change", async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    try {
-      const raw = await file.text();
-      const parsed = JSON.parse(raw);
-      const imported = importTrackPresetData(parsed, { persist: true });
-      if (!imported) {
-        showSnackbar("Invalid track file", 2);
-        return;
-      }
-      const importedIndex = trackOptions.findIndex((opt) => opt.id === imported.id);
-      if (importedIndex >= 0) {
-        state.selectedTrackIndex = importedIndex;
-        state.trackSelectIndex = importedIndex;
-      }
-      showSnackbar("Imported", 1.6);
-    } catch {
-      showSnackbar("Import failed", 2);
+  try {
+    const imported = await saveTrackPresetToDb(trackIndex);
+    if (!imported) {
+      showSnackbar("Save failed", 2);
+      return;
     }
-  });
-  input.click();
+    if (shouldReplacePrevious && previousId !== imported.id) {
+      removeTrackPresetById(previousId, { removePersisted: true });
+    }
+    const importedIndex = trackOptions.findIndex((opt) => opt.id === imported.id);
+    if (importedIndex >= 0) {
+      state.editor.trackIndex = importedIndex;
+      state.selectedTrackIndex = importedIndex;
+      state.trackSelectIndex = importedIndex;
+      setTrackInUrl(imported.id);
+    }
+    showSnackbar("Saved to DB");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Save failed";
+    if (message.toLowerCase().includes("authentication required")) showSnackbar("Login required", 2);
+    else showSnackbar(message, 2);
+  }
 }
 
 function toggleDebugMode() {
@@ -217,6 +249,8 @@ function enterEditor(trackIndex) {
   state.editor.trackIndex = trackIndex;
   state.editor.drawing = false;
   state.editor.activeStroke = [];
+  const preset = getTrackPreset(trackIndex);
+  if (preset) setTrackInUrl(preset.id);
 }
 
 function activateSelection() {
@@ -239,19 +273,18 @@ function activateSelection() {
   }
 
   if (state.mode === "trackSelect") {
-    const addIndex = trackOptions.length;
     const backIndex = trackSelectBackIndex();
     if (state.trackSelectIndex === backIndex) {
       state.mode = "menu";
       state.menuIndex = 0;
-    } else if (state.trackSelectIndex === addIndex) {
-      openTrackImportDialog();
     } else {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
       setCurbSegments(initCurbSegments());
       state.mode = "racing";
       resetRace();
+      const selected = trackOptions[state.selectedTrackIndex];
+      if (selected) setTrackInUrl(selected.id);
     }
     return;
   }
@@ -283,6 +316,29 @@ function onKeyDown(e) {
 
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) {
     e.preventDefault();
+  }
+
+  if (state.modal.open) {
+    if (["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)) {
+      state.modal.selectedAction = state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
+      return;
+    }
+    if (key === "escape") {
+      closeModal({ runCancel: true });
+      return;
+    }
+    if (key === "enter") {
+      const shouldConfirm = state.modal.selectedAction === "confirm";
+      const onConfirm = state.modal.onConfirm;
+      closeModal();
+      if (shouldConfirm && typeof onConfirm === "function") {
+        Promise.resolve(onConfirm()).catch(() => {
+          showSnackbar("Action failed", 2);
+        });
+      }
+      return;
+    }
+    return;
   }
 
   if (state.mode === "settings" && state.editingName) {
@@ -384,6 +440,44 @@ function onKeyDown(e) {
     createEmptyTrackAndEdit();
     return;
   }
+  if (
+    (key === "delete" || key === "del") &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= 0 &&
+    state.trackSelectIndex < trackOptions.length
+  ) {
+    const preset = getTrackPreset(state.trackSelectIndex);
+    if (!preset || !preset.canDelete) {
+      showSnackbar("Only your DB tracks can be deleted", 1.8);
+      return;
+    }
+    openConfirmModal({
+      title: "Delete Track",
+      message: `Are you sure you want to cancel the ${preset.name}?`,
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await deleteOwnTrackFromApi(preset.id);
+          removeTrackPresetById(preset.id, { removePersisted: true });
+          if (trackOptions.length > 0) {
+            state.trackSelectIndex = Math.max(0, Math.min(state.trackSelectIndex, trackOptions.length - 1));
+            state.selectedTrackIndex = state.trackSelectIndex;
+          } else {
+            state.trackSelectIndex = 0;
+            state.selectedTrackIndex = 0;
+          }
+          clearTrackInUrl(preset.id);
+          showSnackbar("Track deleted", 1.8);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Delete failed";
+          showSnackbar(message, 2);
+        }
+      },
+    });
+    return;
+  }
 
   if (state.mode === "editor") {
     if (key === "c") {
@@ -400,6 +494,8 @@ function onKeyDown(e) {
       setCurbSegments(initCurbSegments());
       state.mode = "racing";
       resetRace();
+      const selected = trackOptions[state.selectedTrackIndex];
+      if (selected) setTrackInUrl(selected.id);
       return;
     }
     if (key === "s") {

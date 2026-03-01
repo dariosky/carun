@@ -774,7 +774,7 @@ function drawEditorTitleBar() {
     "T/W/B add",
     "R race",
     "Space build",
-    "S save",
+    "S save DB",
     "Backspace undo",
     "Esc back",
   ].join("   ");
@@ -888,6 +888,15 @@ function drawMenu() {
   ctx.font = "22px Verdana";
   ctx.fillStyle = "#bfd8f7";
   ctx.fillText("Use ↑ ↓ and Enter", WIDTH / 2 - 108, HEIGHT - 80);
+
+  if (state.buildLabel) {
+    ctx.save();
+    ctx.font = "14px Verdana";
+    ctx.fillStyle = "rgba(235, 245, 255, 0.75)";
+    const w = ctx.measureText(state.buildLabel).width;
+    ctx.fillText(state.buildLabel, WIDTH - w - 18, HEIGHT - 20);
+    ctx.restore();
+  }
 }
 
 function drawTrackPreviewCard(x, y, size, selected, preset) {
@@ -954,7 +963,7 @@ function drawTrackSelection() {
   const cardSize = 220;
   const gap = 40;
   const cardY = 198;
-  const cardCount = trackOptions.length + 1;
+  const cardCount = trackOptions.length;
   const totalWidth = cardCount * cardSize + Math.max(0, cardCount - 1) * gap;
   const startX = WIDTH * 0.5 - totalWidth * 0.5;
 
@@ -968,26 +977,17 @@ function drawTrackSelection() {
     const label = trackOptions[i].name;
     const labelWidth = ctx.measureText(label).width;
     ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
+    if (trackOptions[i].canDelete) {
+      ctx.fillStyle = "#ffd66d";
+      ctx.font = "bold 14px Verdana";
+      const ownerLabel = "OWNED";
+      const ownerWidth = ctx.measureText(ownerLabel).width;
+      ctx.fillText(ownerLabel, cardX + cardSize * 0.5 - ownerWidth * 0.5, cardY + cardSize + 52);
+    }
   }
 
-  const addIndex = trackOptions.length;
-  const addX = startX + addIndex * (cardSize + gap);
-  const addSelected = state.trackSelectIndex === addIndex;
-  ctx.fillStyle = addSelected ? "#244864" : "#1a3347";
-  ctx.fillRect(addX, cardY, cardSize, cardSize);
-  ctx.strokeStyle = addSelected ? "#f2d26c" : "#6c879b";
-  ctx.lineWidth = addSelected ? 5 : 3;
-  ctx.strokeRect(addX, cardY, cardSize, cardSize);
-  ctx.fillStyle = addSelected ? "#ffffff" : "#b6cad9";
-  ctx.font = "bold 102px Verdana";
-  ctx.fillText("+", addX + cardSize * 0.5 - 45, cardY + cardSize * 0.5 + 34);
-  ctx.font = "bold 22px Verdana";
-  const addLabel = "UPLOAD TRACK";
-  const addLabelWidth = ctx.measureText(addLabel).width;
-  ctx.fillText(addLabel, addX + cardSize * 0.5 - addLabelWidth * 0.5, cardY + cardSize + 34);
-
   const backY = cardY + cardSize + 106;
-  const backIndex = trackOptions.length + 1;
+  const backIndex = trackOptions.length;
   const backSelected = state.trackSelectIndex === backIndex;
   if (backSelected) {
     ctx.fillStyle = "#ec4f4f";
@@ -1000,7 +1000,7 @@ function drawTrackSelection() {
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#c3d9ec";
   ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
-  ctx.fillText("+ card imports a JSON track file", WIDTH * 0.5 - 172, HEIGHT - 42);
+  ctx.fillText("DEL deletes your selected DB track", WIDTH * 0.5 - 170, HEIGHT - 42);
   if (physicsConfig.flags.DEBUG_MODE) {
     ctx.fillText("Press E to edit selected track", WIDTH * 0.5 - 150, HEIGHT - 14);
   }
@@ -1127,6 +1127,84 @@ function drawSnackbar() {
   ctx.restore();
 }
 
+function drawWrappedText(text, x, y, maxWidth, lineHeight) {
+  const words = String(text || "").split(/\s+/);
+  let line = "";
+  let lineIndex = 0;
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidth) {
+      line = next;
+      continue;
+    }
+    if (line) {
+      ctx.fillText(line, x, y + lineIndex * lineHeight);
+      lineIndex += 1;
+    }
+    line = word;
+  }
+  if (line) {
+    ctx.fillText(line, x, y + lineIndex * lineHeight);
+    lineIndex += 1;
+  }
+  return lineIndex;
+}
+
+function drawModal() {
+  if (!state.modal.open) return;
+
+  const panelW = 620;
+  const panelH = 270;
+  const x = WIDTH * 0.5 - panelW * 0.5;
+  const y = HEIGHT * 0.5 - panelH * 0.5;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.fillStyle = "#102132";
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = "#d5e4f1";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 38px Verdana";
+  ctx.fillText(state.modal.title || "Confirm", x + 34, y + 58);
+
+  ctx.fillStyle = "#c7d8e8";
+  ctx.font = "24px Verdana";
+  drawWrappedText(state.modal.message || "", x + 34, y + 108, panelW - 68, 34);
+
+  const noSelected = state.modal.selectedAction === "cancel";
+  const yesSelected = state.modal.selectedAction === "confirm";
+  const buttonY = y + panelH - 84;
+  const noX = x + panelW - 312;
+  const yesX = x + panelW - 168;
+
+  ctx.fillStyle = noSelected ? "#2f4b61" : "#21394d";
+  ctx.fillRect(noX, buttonY, 112, 48);
+  ctx.strokeStyle = noSelected ? "#ffffff" : "#8aa8bf";
+  ctx.lineWidth = noSelected ? 3 : 2;
+  ctx.strokeRect(noX, buttonY, 112, 48);
+  ctx.fillStyle = "#f0f7ff";
+  ctx.font = "bold 24px Verdana";
+  ctx.fillText(state.modal.cancelLabel || "No", noX + 38, buttonY + 33);
+
+  ctx.fillStyle = state.modal.danger ? "#c32727" : "#2f7e45";
+  ctx.fillRect(yesX, buttonY, 112, 48);
+  ctx.strokeStyle = yesSelected ? "#ffffff" : "#e6bcbc";
+  ctx.lineWidth = yesSelected ? 3 : 2;
+  ctx.strokeRect(yesX, buttonY, 112, 48);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(state.modal.confirmLabel || "Yes", yesX + 35, buttonY + 33);
+
+  ctx.fillStyle = "#b7cce0";
+  ctx.font = "18px Verdana";
+  ctx.fillText("Use \u2190/\u2192 and Enter. No is default.", x + 34, buttonY + 33);
+  ctx.restore();
+}
+
 export function render() {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
@@ -1150,5 +1228,6 @@ export function render() {
     drawPauseOverlay();
   }
 
+  drawModal();
   drawSnackbar();
 }
