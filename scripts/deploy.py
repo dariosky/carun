@@ -48,6 +48,18 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-migrate", action="store_true")
     parser.add_argument("--skip-restart", action="store_true")
+    parser.add_argument(
+        "--health-retries",
+        type=int,
+        default=30,
+        help="Number of health check retries after restart (default: 30)",
+    )
+    parser.add_argument(
+        "--health-retry-delay",
+        type=int,
+        default=2,
+        help="Seconds between health check retries (default: 2)",
+    )
     args = parser.parse_args()
 
     env_path = Path(args.env_file)
@@ -84,7 +96,7 @@ def main() -> None:
         f"cd {shlex.quote(app_dir)}",
         "git pull",
         "export BUILD_ID=$(git rev-parse --short=12 HEAD)",
-        "export BUILD_LABEL=v$(git show -s --date=format:%Y.%m.%d --format=%cd HEAD)",
+        "export BUILD_LABEL=v$(git show -s --date=short --format=%cd HEAD | tr '-' '.')",
         "python3 -c "
         + shlex.quote(
             "from pathlib import Path; import os; "
@@ -106,7 +118,21 @@ def main() -> None:
     if not args.skip_restart:
         remote_steps.append(restart_cmd)
 
-    remote_steps.append(f"curl -fsS {shlex.quote(health_url)}")
+    health_retries = max(1, args.health_retries)
+    health_delay = max(1, args.health_retry_delay)
+    remote_steps.append(
+        "for i in $(seq 1 {retries}); do "
+        "curl -fsS {url} && exit 0; "
+        "echo \"health check attempt $i/{retries} failed, retrying in {delay}s...\"; "
+        "sleep {delay}; "
+        "done; "
+        "echo \"health check failed after {retries} attempts\"; "
+        "exit 1".format(
+            retries=health_retries,
+            delay=health_delay,
+            url=shlex.quote(health_url),
+        )
+    )
 
     run(["ssh", "-p", port, remote, " && ".join(remote_steps)], args.dry_run)
 
