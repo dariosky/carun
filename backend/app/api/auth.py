@@ -2,9 +2,16 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
-from ..auth_utils import build_google_login_url, exchange_code_for_userinfo, upsert_user_from_google
+from ..auth_utils import (
+    build_google_login_url,
+    exchange_code_for_userinfo,
+    update_user_display_name,
+    upsert_user_from_google,
+)
 from ..db import get_session
-from ..schemas import AuthMeResponse
+from ..deps import get_current_user
+from ..models import User
+from ..schemas import AuthDisplayNameUpdateRequest, AuthMeResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -44,3 +51,19 @@ async def google_callback(
 def logout(request: Request):
     request.session.clear()
     return {"ok": True}
+
+
+@router.patch("/display-name", response_model=AuthMeResponse)
+def set_display_name(
+    payload: AuthDisplayNameUpdateRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    updated_user = update_user_display_name(session, current_user, payload.display_name)
+    request.session["display_name"] = updated_user.display_name
+    return AuthMeResponse(
+        authenticated=True,
+        user_id=str(updated_user.id),
+        display_name=updated_user.display_name,
+    )

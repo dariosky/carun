@@ -52,8 +52,13 @@ export function saveDebugMode(enabled) {
   }
 }
 
-export const menuItems = ["START", "SETTINGS"];
-export const settingsItems = ["PLAYER NAME", "DEBUG MODE", "BACK"];
+export function getMenuItems(authenticated) {
+  return authenticated ? ["RACE", "SETTINGS"] : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
+}
+
+export function getSettingsItems(authenticated) {
+  return authenticated ? ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"] : ["PLAYER NAME", "DEBUG MODE", "BACK"];
+}
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 const TRACK_PRESETS = [
   {

@@ -29,6 +29,30 @@ export async function fetchAuthMe() {
   return payload;
 }
 
+export async function updateAuthDisplayName(displayName) {
+  const response = await request("/api/auth/display-name", {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Update failed";
+    throw new Error(message);
+  }
+  if (!isObject(payload)) throw new Error("Update failed");
+  return payload;
+}
+
+export async function logoutAuth() {
+  const response = await request("/api/auth/logout", { method: "POST" });
+  if (!response.ok) {
+    const payload = await parseJsonSafe(response);
+    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Logout failed";
+    throw new Error(message);
+  }
+  return { ok: true };
+}
+
 export async function saveTrackToDb(name, trackPayload) {
   const response = await request("/api/tracks", {
     method: "POST",

@@ -16,6 +16,11 @@ export const state = {
   selectedTrackIndex: 0,
   settingsIndex: 0,
   playerName: loadPlayerName(),
+  auth: {
+    authenticated: false,
+    userId: null,
+    displayName: null,
+  },
   editingName: false,
   raceTime: 0,
   finished: false,

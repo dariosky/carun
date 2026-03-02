@@ -1,11 +1,12 @@
 import { startGameLoop } from "./game-loop.js";
 import { initInputHandlers } from "./menus.js";
-import { loadOwnTracksFromApi, loadTrackPresetFromApi, loadTracksFromFolder, trackOptions } from "./parameters.js";
+import { loadOwnTracksFromApi, loadTrackPresetFromApi, loadTracksFromFolder, sanitizePlayerName, trackOptions } from "./parameters.js";
 import { updateRace } from "./physics.js";
 import { render } from "./render.js";
 import { setCurbSegments, state } from "./state.js";
 import { nextTaglineSet } from "./taglines.js";
 import { initCurbSegments } from "./track.js";
+import { fetchAuthMe } from "./api.js";
 
 function updateMenuTagline(dt) {
   const rotation = state.menuTagline;
@@ -22,6 +23,35 @@ function updateMenuTagline(dt) {
       rotation.index = 0;
     }
   }
+}
+
+const appUrl = new URL(window.location.href);
+const authResult = appUrl.searchParams.get("auth");
+if (authResult === "ok") {
+  state.snackbar.text = "Logged in";
+  state.snackbar.time = 1.8;
+}
+if (authResult === "failed") {
+  state.snackbar.text = "Login failed";
+  state.snackbar.time = 1.8;
+}
+if (authResult) {
+  appUrl.searchParams.delete("auth");
+  const query = appUrl.searchParams.toString();
+  window.history.replaceState({}, "", `${appUrl.pathname}${query ? `?${query}` : ""}${appUrl.hash}`);
+}
+
+try {
+  const me = await fetchAuthMe();
+  if (me && me.authenticated) {
+    const displayName = sanitizePlayerName(me.display_name || "");
+    state.auth.authenticated = true;
+    state.auth.userId = typeof me.user_id === "string" ? me.user_id : null;
+    state.auth.displayName = displayName;
+    state.playerName = displayName;
+  }
+} catch {
+  // Ignore auth probe failures and continue in anonymous mode.
 }
 
 await loadTracksFromFolder();

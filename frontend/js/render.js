@@ -9,9 +9,7 @@ import {
   checkpoints,
   getConnectedCenterlinePoints,
   getTrackPreset,
-  menuItems,
   physicsConfig,
-  settingsItems,
   track,
   trackOptions,
   worldObjects,
@@ -28,6 +26,7 @@ import {
   skidMarks,
   state,
 } from "./state.js";
+import { getMainMenuRenderModel, getSettingsHeaderRenderModel, getSettingsRenderLayout } from "./menus.js";
 import { formatTime } from "./utils.js";
 import {
   blobRadius,
@@ -872,14 +871,16 @@ function drawMenu() {
   }
 
   ctx.font = "bold 42px Verdana";
+  const { menuItems, selectedMenuIndex, highlightWidth } = getMainMenuRenderModel((text) => ctx.measureText(text).width);
+  const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   menuItems.forEach((item, idx) => {
     const y = 386 + idx * 74;
-    ctx.fillStyle = idx === state.menuIndex ? "#ffffff" : "#8aa4b8";
+    ctx.fillStyle = idx === selectedMenuIndex ? "#ffffff" : "#8aa4b8";
     const textWidth = ctx.measureText(item).width;
     const textX = WIDTH * 0.5 - textWidth * 0.5;
-    if (idx === state.menuIndex) {
+    if (idx === selectedMenuIndex) {
       ctx.fillStyle = "#ec4f4f";
-      ctx.fillRect(WIDTH / 2 - 230, y - 43, 460, 56);
+      ctx.fillRect(highlightX, y - 43, highlightWidth, 56);
       ctx.fillStyle = "#ffffff";
     }
     ctx.fillText(item, textX, y);
@@ -888,6 +889,16 @@ function drawMenu() {
   ctx.font = "22px Verdana";
   ctx.fillStyle = "#bfd8f7";
   ctx.fillText("Use ↑ ↓ and Enter", WIDTH / 2 - 108, HEIGHT - 80);
+
+  if (state.auth.authenticated && state.auth.displayName) {
+    ctx.save();
+    ctx.font = "16px Verdana";
+    ctx.fillStyle = "rgba(235, 245, 255, 0.82)";
+    const authLabel = `SIGNED IN: ${state.auth.displayName}`;
+    const labelWidth = ctx.measureText(authLabel).width;
+    ctx.fillText(authLabel, WIDTH - labelWidth - 18, HEIGHT - 40);
+    ctx.restore();
+  }
 
   if (state.buildLabel) {
     ctx.save();
@@ -1066,7 +1077,11 @@ function drawSettings() {
 
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 76px Verdana";
-  ctx.fillText("SETTINGS", WIDTH / 2 - 210, 180);
+  const settingsHeader = getSettingsHeaderRenderModel();
+  ctx.save();
+  ctx.textAlign = settingsHeader.textAlign;
+  ctx.fillText(settingsHeader.text, WIDTH * settingsHeader.xRatio, settingsHeader.y);
+  ctx.restore();
 
   const menuTagline = activeMenuTagline();
   if (menuTagline.text && menuTagline.alpha > 0) {
@@ -1080,24 +1095,21 @@ function drawSettings() {
   }
 
   ctx.font = "bold 35px Verdana";
-  settingsItems.forEach((item, idx) => {
-    const y = 338 + idx * 90;
-    if (idx === state.settingsIndex) {
+  const { settingsItems, selectedSettingsIndex, rowLabels, rowGap, startY, highlightWidth } = getSettingsRenderLayout(
+    (text) => ctx.measureText(text).width,
+  );
+  const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
+  const textX = highlightX + 30;
+  settingsItems.forEach((_, idx) => {
+    const y = startY + idx * rowGap;
+    if (idx === selectedSettingsIndex) {
       ctx.fillStyle = "#3d7ec7";
-      ctx.fillRect(WIDTH / 2 - 280, y - 42, 560, 56);
+      ctx.fillRect(highlightX, y - 42, highlightWidth, 56);
       ctx.fillStyle = "#ffffff";
     } else {
       ctx.fillStyle = "#9db6c7";
     }
-
-    if (item === "PLAYER NAME") {
-      const suffix = state.editingName ? "_" : "";
-      ctx.fillText(`${item}: ${state.playerName}${suffix}`, WIDTH / 2 - 250, y);
-    } else if (item === "DEBUG MODE") {
-      ctx.fillText(`${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`, WIDTH / 2 - 250, y);
-    } else {
-      ctx.fillText(item, WIDTH / 2 - 250, y);
-    }
+    ctx.fillText(rowLabels[idx], textX, y);
   });
 
   ctx.font = "20px Verdana";

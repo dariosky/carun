@@ -2,25 +2,100 @@ import {
   applyTrackPreset,
   canvas,
   deleteOwnTrackFromApi,
+  getMenuItems,
   getTrackPreset,
+  getSettingsItems,
   importTrackPresetData,
   removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
   saveTrackPresetToDb,
-  menuItems,
   physicsConfig,
   sanitizePlayerName,
   saveDebugMode,
   saveTrackPreset,
   savePlayerName,
-  settingsItems,
   trackOptions,
 } from "./parameters.js";
 import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 import { initCurbSegments } from "./track.js";
+import { logoutAuth, updateAuthDisplayName } from "./api.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
+
+function currentMenuItems() {
+  return getMenuItems(state.auth.authenticated);
+}
+
+function currentSettingsItems() {
+  return getSettingsItems(state.auth.authenticated);
+}
+
+export function getMainMenuRenderModel(measureTextWidth) {
+  const menuItems = currentMenuItems();
+  const selectedMenuIndex = Math.max(0, Math.min(state.menuIndex, menuItems.length - 1));
+  let maxMenuLabelWidth = 0;
+  for (const item of menuItems) {
+    maxMenuLabelWidth = Math.max(maxMenuLabelWidth, measureTextWidth(item));
+  }
+  const highlightWidth = Math.max(460, maxMenuLabelWidth + 96);
+  return { menuItems, selectedMenuIndex, highlightWidth };
+}
+
+export function getSettingsRenderLayout(measureTextWidth) {
+  const settingsItems = currentSettingsItems();
+  const selectedSettingsIndex = Math.max(0, Math.min(state.settingsIndex, settingsItems.length - 1));
+  const rowGap = 74;
+  const startY = 338;
+
+  const rowLabels = settingsItems.map((item) => {
+    if (item === "PLAYER NAME") {
+      const suffix = state.editingName ? "_" : "";
+      return `${item}: ${state.playerName}${suffix}`;
+    }
+    if (item === "DEBUG MODE") {
+      return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
+    }
+    return item;
+  });
+
+  let maxWidth = 0;
+  for (const label of rowLabels) {
+    maxWidth = Math.max(maxWidth, measureTextWidth(label));
+  }
+  const highlightWidth = Math.max(560, maxWidth + 92);
+
+  return {
+    settingsItems,
+    selectedSettingsIndex,
+    rowLabels,
+    rowGap,
+    startY,
+    highlightWidth,
+  };
+}
+
+export function getSettingsHeaderRenderModel() {
+  return {
+    text: "SETTINGS",
+    xRatio: 0.5,
+    y: 180,
+    textAlign: "center",
+  };
+}
+
+function settingsMenuIndex() {
+  const idx = currentMenuItems().indexOf("SETTINGS");
+  return idx >= 0 ? idx : 0;
+}
+
+function raceMenuIndex() {
+  const items = currentMenuItems();
+  const idx = items.indexOf("RACE");
+  if (idx >= 0) return idx;
+  const anonymousIdx = items.indexOf("RACE ANONYMOUSLY");
+  return anonymousIdx >= 0 ? anonymousIdx : 0;
+}
 
 function setTrackInUrl(trackId) {
   const cleanTrackId = typeof trackId === "string" ? trackId.trim() : "";
@@ -254,8 +329,16 @@ function enterEditor(trackIndex) {
 }
 
 function activateSelection() {
+  state.menuIndex = Math.max(0, Math.min(state.menuIndex, currentMenuItems().length - 1));
+  state.settingsIndex = Math.max(0, Math.min(state.settingsIndex, currentSettingsItems().length - 1));
+
   if (state.mode === "menu") {
-    if (state.menuIndex === 0) {
+    const selectedItem = currentMenuItems()[state.menuIndex];
+    if (selectedItem === "LOGIN") {
+      window.location.assign("/api/auth/google/login");
+      return;
+    }
+    if (selectedItem === "RACE" || selectedItem === "RACE ANONYMOUSLY") {
       if (trackOptions.length > 0) {
         state.selectedTrackIndex = Math.max(0, Math.min(state.selectedTrackIndex, trackOptions.length - 1));
       } else {
@@ -263,11 +346,13 @@ function activateSelection() {
       }
       state.mode = "trackSelect";
       state.trackSelectIndex = state.selectedTrackIndex;
+      return;
     }
-    if (state.menuIndex === 1) {
+    if (selectedItem === "SETTINGS") {
       state.mode = "settings";
       state.settingsIndex = 0;
       state.editingName = false;
+      return;
     }
     return;
   }
@@ -276,7 +361,7 @@ function activateSelection() {
     const backIndex = trackSelectBackIndex();
     if (state.trackSelectIndex === backIndex) {
       state.mode = "menu";
-      state.menuIndex = 0;
+      state.menuIndex = raceMenuIndex();
     } else {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
@@ -290,16 +375,40 @@ function activateSelection() {
   }
 
   if (state.mode === "settings") {
-    if (state.settingsIndex === 0) {
+    const selectedSetting = currentSettingsItems()[state.settingsIndex];
+    if (selectedSetting === "PLAYER NAME") {
       state.editingName = !state.editingName;
+      return;
     }
-    if (state.settingsIndex === 1) {
+    if (selectedSetting === "DEBUG MODE") {
       toggleDebugMode();
+      return;
     }
-    if (state.settingsIndex === 2) {
+    if (selectedSetting === "LOGOUT") {
+      Promise.resolve(logoutAuth())
+        .then(() => {
+          state.auth.authenticated = false;
+          state.auth.userId = null;
+          state.auth.displayName = null;
+          state.playerName = sanitizePlayerName(state.playerName);
+          state.mode = "menu";
+          state.menuIndex = 0;
+          state.settingsIndex = 0;
+          state.editingName = false;
+          state.paused = false;
+          showSnackbar("Logged out", 1.8);
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "Logout failed";
+          showSnackbar(message, 2);
+        });
+      return;
+    }
+    if (selectedSetting === "BACK") {
       state.mode = "menu";
-      state.menuIndex = 1;
+      state.menuIndex = settingsMenuIndex();
       state.paused = false;
+      return;
     }
     return;
   }
@@ -349,6 +458,19 @@ function onKeyDown(e) {
     if (key === "enter") {
       if (state.playerName.trim().length > 0) {
         state.playerName = sanitizePlayerName(state.playerName);
+        if (state.auth.authenticated) {
+          Promise.resolve(updateAuthDisplayName(state.playerName))
+            .then((payload) => {
+              const nextName = sanitizePlayerName(payload.display_name || state.playerName);
+              state.playerName = nextName;
+              state.auth.displayName = nextName;
+              showSnackbar("Display name updated", 1.8);
+            })
+            .catch((error) => {
+              const message = error instanceof Error ? error.message : "Update failed";
+              showSnackbar(message, 2);
+            });
+        }
         savePlayerName(state.playerName);
         state.editingName = false;
       }
@@ -406,12 +528,12 @@ function onKeyDown(e) {
 
   if (state.mode === "trackSelect" && key === "escape") {
     state.mode = "menu";
-    state.menuIndex = 0;
+    state.menuIndex = raceMenuIndex();
     return;
   }
   if (state.mode === "settings" && key === "escape") {
     state.mode = "menu";
-    state.menuIndex = 1;
+    state.menuIndex = settingsMenuIndex();
     state.paused = false;
     return;
   }
@@ -513,9 +635,13 @@ function onKeyDown(e) {
   }
 
   if (key === "arrowup") {
-    if (state.mode === "menu") state.menuIndex = (state.menuIndex + menuItems.length - 1) % menuItems.length;
+    if (state.mode === "menu") {
+      const items = currentMenuItems();
+      state.menuIndex = (state.menuIndex + items.length - 1) % items.length;
+    }
     if (state.mode === "settings") {
-      state.settingsIndex = (state.settingsIndex + settingsItems.length - 1) % settingsItems.length;
+      const items = currentSettingsItems();
+      state.settingsIndex = (state.settingsIndex + items.length - 1) % items.length;
     }
     if (state.mode === "trackSelect") {
       if (state.trackSelectIndex === trackSelectBackIndex()) {
@@ -525,8 +651,14 @@ function onKeyDown(e) {
     keys.up = true;
   }
   if (key === "arrowdown") {
-    if (state.mode === "menu") state.menuIndex = (state.menuIndex + 1) % menuItems.length;
-    if (state.mode === "settings") state.settingsIndex = (state.settingsIndex + 1) % settingsItems.length;
+    if (state.mode === "menu") {
+      const items = currentMenuItems();
+      state.menuIndex = (state.menuIndex + 1) % items.length;
+    }
+    if (state.mode === "settings") {
+      const items = currentSettingsItems();
+      state.settingsIndex = (state.settingsIndex + 1) % items.length;
+    }
     if (state.mode === "trackSelect") {
       state.trackSelectIndex = trackSelectBackIndex();
     }
@@ -538,8 +670,9 @@ function onKeyDown(e) {
   if (key === "arrowright" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
     state.trackSelectIndex = (state.trackSelectIndex + 1) % trackSelectCardCount();
   }
-  if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings" && state.settingsIndex === 1) {
-    toggleDebugMode();
+  if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings") {
+    const selected = currentSettingsItems()[state.settingsIndex];
+    if (selected === "DEBUG MODE") toggleDebugMode();
   }
   if (key === "enter") activateSelection();
 
