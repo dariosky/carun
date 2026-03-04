@@ -125,7 +125,12 @@ export function getTrackSelectRenderModel() {
   const totalCount = trackOptions.length;
   const maxOffset = Math.max(0, totalCount - visibleCount);
   const viewOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
-  const visibleTracks = trackOptions.slice(viewOffset, viewOffset + visibleCount);
+  const visibleTracks = trackOptions.slice(viewOffset, viewOffset + visibleCount).map((track) => ({
+    ...track,
+    showAdminBadge: Boolean(
+      state.auth.isAdmin && track.fromDb && track.ownerUserId && track.ownerUserId !== state.auth.userId,
+    ),
+  }));
   const selectedTrack = selectedTrackPreset();
 
   return {

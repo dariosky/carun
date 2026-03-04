@@ -996,6 +996,13 @@ function drawTrackSelection() {
     const label = trackOption.name;
     const labelWidth = ctx.measureText(label).width;
     ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
+    if (trackOption.showAdminBadge) {
+      ctx.fillStyle = "#5bc0eb";
+      ctx.fillRect(cardX + 10, cardY + 10, 76, 26);
+      ctx.fillStyle = "#0f2434";
+      ctx.font = "bold 12px Verdana";
+      ctx.fillText("ADMIN", cardX + 22, cardY + 28);
+    }
     if (trackOption.ownerUserId === state.auth.userId) {
       ctx.fillStyle = "#ffd66d";
       ctx.font = "bold 14px Verdana";

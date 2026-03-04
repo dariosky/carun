@@ -184,6 +184,8 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.showRightHint, false);
   assert.equal(model.selectedTrackCanPublish, true);
   assert.equal(model.selectedTrackCanDelete, false);
+  assert.equal(model.visibleTracks[0].showAdminBadge, true);
+  assert.equal(model.visibleTracks[1].showAdminBadge, false);
 
   for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
 });
