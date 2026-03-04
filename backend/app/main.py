@@ -80,19 +80,19 @@ def create_app() -> FastAPI:
                 "__BUILD_LABEL__", build_label
             )
 
-        @app.get("/", include_in_schema=False)
-        def frontend_index():
+        def index_response():
             return HTMLResponse(
                 content=render_index_html(),
                 headers={"Cache-Control": "no-cache, must-revalidate"},
             )
 
-        @app.get("/index.html", include_in_schema=False)
+        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        def frontend_index():
+            return index_response()
+
+        @app.api_route("/index.html", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend_index_file():
-            return HTMLResponse(
-                content=render_index_html(),
-                headers={"Cache-Control": "no-cache, must-revalidate"},
-            )
+            return index_response()
 
         app.mount(
             static_mount,
