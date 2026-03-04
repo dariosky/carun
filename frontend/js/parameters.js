@@ -1,4 +1,4 @@
-import { deleteTrackById, fetchAuthMe, fetchMyTracks, fetchTrackById, saveTrackToDb } from "./api.js";
+import { deleteTrackById, fetchSharedTrack, fetchTrackById, fetchTracks, saveTrackToDb } from "./api.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -121,6 +121,8 @@ function clonePresetData(preset) {
     name: preset.name,
     source: preset.source || "local",
     ownerUserId: typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
+    isPublished: Boolean(preset.isPublished),
+    shareToken: typeof preset.shareToken === "string" ? preset.shareToken : null,
     canDelete: Boolean(preset.canDelete),
     fromDb: Boolean(preset.fromDb),
     track: cloneTrackData(preset.track),
@@ -168,6 +170,13 @@ function normalizeTrackPresetData(raw) {
         ? raw.ownerUserId
         : typeof raw.owner_user_id === "string"
           ? raw.owner_user_id
+          : null,
+    isPublished: Boolean(raw.isPublished ?? raw.is_published ?? false),
+    shareToken:
+      typeof raw.shareToken === "string"
+        ? raw.shareToken
+        : typeof raw.share_token === "string"
+          ? raw.share_token
           : null,
     canDelete: Boolean(raw.canDelete ?? raw.can_delete ?? false),
     fromDb: Boolean(raw.fromDb ?? raw.from_db ?? false),
@@ -227,7 +236,17 @@ export const trackOptions = [];
 
 function rebuildTrackOptions() {
   trackOptions.length = 0;
-  trackOptions.push(...TRACK_PRESETS.map(({ id, name, canDelete }) => ({ id, name, canDelete: Boolean(canDelete) })));
+  trackOptions.push(
+    ...TRACK_PRESETS.map(({ id, name, canDelete, isPublished, ownerUserId, fromDb, shareToken }) => ({
+      id,
+      name,
+      canDelete: Boolean(canDelete),
+      isPublished: Boolean(isPublished),
+      ownerUserId: typeof ownerUserId === "string" ? ownerUserId : null,
+      fromDb: Boolean(fromDb),
+      shareToken: typeof shareToken === "string" ? shareToken : null,
+    })),
+  );
 }
 
 function upsertTrackPreset(data) {
@@ -260,6 +279,32 @@ export function getTrackPreset(index) {
 
 export function getTrackPresetById(id) {
   return TRACK_PRESETS.find((preset) => preset.id === id) || null;
+}
+
+export function canDeleteTrackPreset(preset, currentUserId) {
+  if (!preset || !preset.fromDb) return false;
+  if (!currentUserId || preset.ownerUserId !== currentUserId) return false;
+  return !preset.isPublished;
+}
+
+function updateTrackDeleteCapabilities(currentUserId) {
+  for (const preset of TRACK_PRESETS) {
+    preset.canDelete = canDeleteTrackPreset(preset, currentUserId);
+  }
+  rebuildTrackOptions();
+}
+
+export function setTrackPresetMetadata(trackId, updates, { currentUserId = null } = {}) {
+  const preset = getTrackPresetById(trackId);
+  if (!preset) return null;
+  if (typeof updates.name === "string" && updates.name.trim()) preset.name = updates.name.trim().slice(0, 36);
+  if (typeof updates.ownerUserId === "string" || updates.ownerUserId === null) preset.ownerUserId = updates.ownerUserId;
+  if (typeof updates.isPublished === "boolean") preset.isPublished = updates.isPublished;
+  if (typeof updates.shareToken === "string" || updates.shareToken === null) preset.shareToken = updates.shareToken;
+  if (typeof updates.fromDb === "boolean") preset.fromDb = updates.fromDb;
+  preset.canDelete = canDeleteTrackPreset(preset, currentUserId);
+  rebuildTrackOptions();
+  return clonePresetData(preset);
 }
 
 export function applyTrackPreset(index) {
@@ -306,7 +351,7 @@ function appendBridge(points, from, to, spacing = 10) {
 
 // Tunable cleanup amount applied when converting drawn centerline strokes
 // into the final closed loop. Higher values remove more jitter and corners.
-const CENTERLINE_SMOOTHING_COEFFICIENT = 0.3;
+const CENTERLINE_SMOOTHING_COEFFICIENT = 0.1;
 
 function chaikinSmoothClosed(points, iterations = 2) {
   if (!Array.isArray(points) || points.length < 3) return points || [];
@@ -852,39 +897,33 @@ function buildPresetFromApiTrack(raw) {
     name: typeof raw.name === "string" ? raw.name : payload.name,
     source: typeof raw.source === "string" ? raw.source : "user",
     ownerUserId: typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
-    canDelete: typeof raw.owner_user_id === "string",
+    isPublished: Boolean(raw.is_published),
+    shareToken: typeof raw.share_token === "string" ? raw.share_token : null,
+    canDelete: false,
     fromDb: true,
   };
 }
 
-export async function loadOwnTracksFromApi() {
-  let me;
-  try {
-    me = await fetchAuthMe();
-  } catch {
-    return { authenticated: false, loaded: 0 };
-  }
-  if (!me || !me.authenticated) {
-    return { authenticated: false, loaded: 0 };
-  }
-
+export async function loadVisibleTracksFromApi({ currentUserId = null } = {}) {
   let tracks = [];
   try {
-    tracks = await fetchMyTracks();
+    tracks = await fetchTracks();
   } catch {
-    return { authenticated: true, loaded: 0 };
+    return { loaded: 0 };
   }
 
   let loaded = 0;
   for (const rawTrack of tracks) {
+    if (rawTrack && rawTrack.source === "system") continue;
     const preset = buildPresetFromApiTrack(rawTrack);
     if (!preset) continue;
     if (importTrackPresetData(preset, { persist: false })) loaded += 1;
   }
-  return { authenticated: true, loaded };
+  updateTrackDeleteCapabilities(currentUserId);
+  return { loaded };
 }
 
-export async function loadTrackPresetFromApi(trackId) {
+export async function loadTrackPresetFromApi(trackId, { currentUserId = null } = {}) {
   const cleanId = normalizePresetId(trackId);
   if (!cleanId) return null;
   const existing = getTrackPresetById(cleanId);
@@ -893,10 +932,12 @@ export async function loadTrackPresetFromApi(trackId) {
   const rawTrack = await fetchTrackById(cleanId);
   const preset = buildPresetFromApiTrack(rawTrack);
   if (!preset) return null;
-  return importTrackPresetData(preset, { persist: false });
+  const imported = importTrackPresetData(preset, { persist: false });
+  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  return imported;
 }
 
-export async function saveTrackPresetToDb(index) {
+export async function saveTrackPresetToDb(index, { currentUserId = null } = {}) {
   const presetData = exportTrackPresetData(index);
   const name =
     typeof presetData.name === "string" && presetData.name.trim() ? presetData.name.trim() : `Track ${Date.now()}`;
@@ -907,10 +948,29 @@ export async function saveTrackPresetToDb(index) {
     name: createdTrack.name,
     source: createdTrack.source || "user",
     ownerUserId: createdTrack.owner_user_id || null,
+    isPublished: Boolean(createdTrack.is_published),
+    shareToken: createdTrack.share_token || null,
     canDelete: true,
     fromDb: true,
   };
-  return importTrackPresetData(mergedPreset, { persist: false });
+  const imported = importTrackPresetData(mergedPreset, { persist: false });
+  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  return imported;
+}
+
+export async function loadSharedTrackFromApi(shareToken, { currentUserId = null } = {}) {
+  const rawTrack = await fetchSharedTrack(shareToken);
+  const preset = buildPresetFromApiTrack({
+    ...rawTrack,
+    is_published: false,
+    owner_user_id: null,
+    share_token: shareToken,
+  });
+  if (!preset) return null;
+  preset.canDelete = false;
+  const imported = importTrackPresetData(preset, { persist: false });
+  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  return imported;
 }
 
 export async function deleteOwnTrackFromApi(trackId) {

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..deps import get_current_user
+from ..deps import get_current_user, get_optional_current_user
 from ..models import BestLap, LapEvent, Track, User
 from ..schemas import LapSubmitRequest, LapSubmitResponse, LeaderboardEntry, LeaderboardResponse
 
@@ -19,10 +19,25 @@ def parse_track_id(track_id: str) -> UUID:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid track_id")
 
 
+def can_access_track(track: Track, current_user: User | None) -> bool:
+    if track.source == "system" or track.is_published:
+        return True
+    if not current_user:
+        return False
+    return bool(current_user.is_admin or track.owner_user_id == current_user.id)
+
+
 @router.get("/leaderboard/{track_id}", response_model=LeaderboardResponse)
-def get_leaderboard(track_id: str, limit: int = 50, session: Session = Depends(get_session)):
+def get_leaderboard(
+    track_id: str,
+    limit: int = 50,
+    session: Session = Depends(get_session),
+    current_user: User | None = Depends(get_optional_current_user),
+):
     track = session.get(Track, parse_track_id(track_id))
     if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+    if not can_access_track(track, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
     stmt = (

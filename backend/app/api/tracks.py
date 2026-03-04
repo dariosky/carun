@@ -9,7 +9,13 @@ from sqlmodel import Session, or_, select
 from ..db import get_session
 from ..deps import get_current_user, get_optional_current_user
 from ..models import Track, User
-from ..schemas import TrackCreateRequest, TrackDetailResponse, TrackResponse, TrackShareResponse
+from ..schemas import (
+    TrackCreateRequest,
+    TrackDetailResponse,
+    TrackPublishRequest,
+    TrackResponse,
+    TrackShareResponse,
+)
 
 router = APIRouter(prefix="/api/tracks", tags=["tracks"])
 
@@ -48,16 +54,27 @@ def _to_track_detail_response(track: Track) -> TrackDetailResponse:
     )
 
 
+def _can_access_track(track: Track, current_user: User | None) -> bool:
+    if track.source == "system" or track.is_published:
+        return True
+    if not current_user:
+        return False
+    return bool(current_user.is_admin or track.owner_user_id == current_user.id)
+
+
 @router.get("", response_model=list[TrackResponse])
 def list_tracks(
     session: Session = Depends(get_session),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    visibility = (Track.is_published) | (Track.source == "system")
-    if current_user:
-        visibility = or_(visibility, Track.owner_user_id == current_user.id)
+    if current_user and current_user.is_admin:
+        query = select(Track).order_by(Track.created_at.desc())
+    else:
+        visibility = (Track.is_published) | (Track.source == "system")
+        if current_user:
+            visibility = or_(visibility, Track.owner_user_id == current_user.id)
+        query = select(Track).where(visibility).order_by(Track.created_at.desc())
 
-    query = select(Track).where(visibility).order_by(Track.created_at.desc())
     tracks = session.exec(query).all()
     return [_to_track_response(track) for track in tracks]
 
@@ -72,11 +89,34 @@ def create_track(
         name=payload.name,
         source="user",
         owner_user_id=current_user.id,
-        is_published=True,
+        is_published=False,
         share_token=secrets.token_urlsafe(16),
         track_payload_json=payload.track_payload_json,
         updated_at=datetime.utcnow(),
     )
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+
+    return _to_track_response(track)
+
+
+@router.patch("/{track_id}/publish", response_model=TrackResponse)
+def set_track_publish_state(
+    track_id: str,
+    payload: TrackPublishRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin required")
+
+    track = session.get(Track, _parse_track_id(track_id))
+    if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+
+    track.is_published = payload.is_published
+    track.updated_at = datetime.utcnow()
     session.add(track)
     session.commit()
     session.refresh(track)
@@ -98,6 +138,20 @@ def list_my_tracks(
     return [_to_track_detail_response(track) for track in tracks]
 
 
+@router.get("/share/{share_token}", response_model=TrackShareResponse)
+def get_shared_track(share_token: str, session: Session = Depends(get_session)):
+    track = session.exec(select(Track).where(Track.share_token == share_token)).first()
+    if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+
+    return TrackShareResponse(
+        id=str(track.id),
+        name=track.name,
+        source=track.source,
+        track_payload_json=track.track_payload_json,
+    )
+
+
 @router.get("/{track_id}", response_model=TrackDetailResponse)
 def get_track_by_id(
     track_id: str,
@@ -108,10 +162,8 @@ def get_track_by_id(
     if not track:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
-    if track.source != "system" and not track.is_published:
-        owner_user_id = str(track.owner_user_id) if track.owner_user_id else None
-        if not current_user or str(current_user.id) != owner_user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+    if not _can_access_track(track, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
     return _to_track_detail_response(track)
 
@@ -127,6 +179,11 @@ def delete_track(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
     if track.owner_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if track.is_published:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Published tracks cannot be deleted",
+        )
 
     session.delete(track)
     try:
@@ -137,17 +194,3 @@ def delete_track(
             status_code=status.HTTP_409_CONFLICT,
             detail="Track cannot be deleted because it has related race data",
         )
-
-
-@router.get("/share/{share_token}", response_model=TrackShareResponse)
-def get_shared_track(share_token: str, session: Session = Depends(get_session)):
-    track = session.exec(select(Track).where(Track.share_token == share_token)).first()
-    if not track:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
-
-    return TrackShareResponse(
-        id=str(track.id),
-        name=track.name,
-        source=track.source,
-        track_payload_json=track.track_payload_json,
-    )

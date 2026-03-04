@@ -11,5 +11,6 @@ class User(SQLModel, table=True):
     google_sub: str = Field(index=True, unique=True)
     display_name: str = Field(index=True, unique=True)
     email: str | None = None
+    is_admin: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

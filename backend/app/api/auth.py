@@ -20,9 +20,15 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 def me(request: Request):
     user_id = request.session.get("user_id")
     display_name = request.session.get("display_name")
+    is_admin = bool(request.session.get("is_admin"))
     if not user_id:
         return AuthMeResponse(authenticated=False)
-    return AuthMeResponse(authenticated=True, user_id=str(user_id), display_name=display_name)
+    return AuthMeResponse(
+        authenticated=True,
+        user_id=str(user_id),
+        display_name=display_name,
+        is_admin=is_admin,
+    )
 
 
 @router.get("/google/login")
@@ -44,6 +50,7 @@ async def google_callback(
 
     request.session["user_id"] = str(user.id)
     request.session["display_name"] = user.display_name
+    request.session["is_admin"] = user.is_admin
     return RedirectResponse("/?auth=ok", status_code=302)
 
 
@@ -66,4 +73,5 @@ def set_display_name(
         authenticated=True,
         user_id=str(updated_user.id),
         display_name=updated_user.display_name,
+        is_admin=updated_user.is_admin,
     )

@@ -1,6 +1,13 @@
 import { startGameLoop } from "./game-loop.js";
 import { initInputHandlers } from "./menus.js";
-import { loadOwnTracksFromApi, loadTrackPresetFromApi, loadTracksFromFolder, sanitizePlayerName, trackOptions } from "./parameters.js";
+import {
+  loadSharedTrackFromApi,
+  loadTrackPresetFromApi,
+  loadTracksFromFolder,
+  loadVisibleTracksFromApi,
+  sanitizePlayerName,
+  trackOptions,
+} from "./parameters.js";
 import { updateRace } from "./physics.js";
 import { render } from "./render.js";
 import { setCurbSegments, state } from "./state.js";
@@ -48,6 +55,7 @@ try {
     state.auth.authenticated = true;
     state.auth.userId = typeof me.user_id === "string" ? me.user_id : null;
     state.auth.displayName = displayName;
+    state.auth.isAdmin = Boolean(me.is_admin);
     state.playerName = displayName;
   }
 } catch {
@@ -55,20 +63,35 @@ try {
 }
 
 await loadTracksFromFolder();
-await loadOwnTracksFromApi();
-const trackFromUrl = new URL(window.location.href).searchParams.get("track");
-if (trackFromUrl) {
+await loadVisibleTracksFromApi({ currentUserId: state.auth.userId });
+const currentUrl = new URL(window.location.href);
+const shareFromUrl = currentUrl.searchParams.get("share");
+const trackFromUrl = currentUrl.searchParams.get("track");
+if (shareFromUrl) {
   try {
-    await loadTrackPresetFromApi(trackFromUrl);
+    await loadSharedTrackFromApi(shareFromUrl, { currentUserId: state.auth.userId });
+  } catch {
+    state.snackbar.text = "Track not found";
+    state.snackbar.time = 1.8;
+  }
+} else if (trackFromUrl) {
+  try {
+    await loadTrackPresetFromApi(trackFromUrl, { currentUserId: state.auth.userId });
   } catch {
     state.snackbar.text = "Track not found";
     state.snackbar.time = 1.8;
   }
 }
 if (trackOptions.length > 0) {
-  const targetIndex = trackFromUrl ? trackOptions.findIndex((opt) => opt.id === trackFromUrl.toLowerCase()) : -1;
+  const targetTrackId = shareFromUrl
+    ? trackOptions[trackOptions.length - 1]?.id || ""
+    : trackFromUrl
+      ? trackFromUrl.toLowerCase()
+      : "";
+  const targetIndex = targetTrackId ? trackOptions.findIndex((opt) => opt.id === targetTrackId) : -1;
   state.selectedTrackIndex = targetIndex >= 0 ? targetIndex : 0;
   state.trackSelectIndex = state.selectedTrackIndex;
+  state.trackSelectViewOffset = Math.max(0, Math.min(state.selectedTrackIndex, Math.max(0, trackOptions.length - 4)));
 }
 setCurbSegments(initCurbSegments());
 

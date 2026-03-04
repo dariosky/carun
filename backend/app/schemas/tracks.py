@@ -8,6 +8,10 @@ class TrackCreateRequest(BaseModel):
     track_payload_json: dict
 
 
+class TrackPublishRequest(BaseModel):
+    is_published: bool
+
+
 class TrackResponse(BaseModel):
     id: str
     slug: str | None = None

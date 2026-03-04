@@ -61,11 +61,14 @@ function setupDomStubs() {
 setupDomStubs();
 
 const { state } = await import("../js/state.js");
-const { physicsConfig } = await import("../js/parameters.js");
+const { canDeleteTrackPreset, importTrackPresetData, physicsConfig, removeTrackPresetById, trackOptions } = await import(
+  "../js/parameters.js"
+);
 const {
   getMainMenuRenderModel,
   getSettingsRenderLayout,
   getSettingsHeaderRenderModel,
+  getTrackSelectRenderModel,
 } = await import("../js/menus.js");
 
 test("main menu model switches items by auth state", () => {
@@ -115,4 +118,72 @@ test("settings header model defines centered title", () => {
   assert.equal(header.text, "SETTINGS");
   assert.equal(header.textAlign, "center");
   assert.equal(header.xRatio, 0.5);
+});
+
+test("canDeleteTrackPreset only allows owned unpublished db tracks", () => {
+  const currentUserId = "user-1";
+  assert.equal(
+    canDeleteTrackPreset({ fromDb: true, ownerUserId: currentUserId, isPublished: false }, currentUserId),
+    true,
+  );
+  assert.equal(
+    canDeleteTrackPreset({ fromDb: true, ownerUserId: currentUserId, isPublished: true }, currentUserId),
+    false,
+  );
+  assert.equal(
+    canDeleteTrackPreset({ fromDb: true, ownerUserId: "user-2", isPublished: false }, currentUserId),
+    false,
+  );
+  assert.equal(
+    canDeleteTrackPreset({ fromDb: false, ownerUserId: currentUserId, isPublished: false }, currentUserId),
+    false,
+  );
+});
+
+test("track selector render model windows large catalogs and exposes admin actions", () => {
+  const addedIds = [];
+  for (let i = 0; i < 5; i++) {
+    const imported = importTrackPresetData({
+      id: `selector-${i}`,
+      name: `SELECTOR ${i}`,
+      source: "user",
+      ownerUserId: i === 2 ? "admin-1" : "user-2",
+      isPublished: i !== 2,
+      canDelete: false,
+      fromDb: true,
+      track: {
+        cx: 640,
+        cy: 360,
+        outerA: 480,
+        outerB: 250,
+        innerA: 320,
+        innerB: 150,
+        warpOuter: [],
+        warpInner: [],
+        borderSize: 22,
+      },
+      checkpoints: [],
+      worldObjects: [],
+      centerlineStrokes: [],
+      editStack: [],
+    });
+    addedIds.push(imported.id);
+  }
+
+  state.auth.userId = "admin-1";
+  state.auth.isAdmin = true;
+  state.trackSelectIndex = trackOptions.findIndex((track) => track.id === "selector-4");
+  state.trackSelectViewOffset = 2;
+
+  const model = getTrackSelectRenderModel();
+
+  assert.equal(model.visibleTracks.length, 4);
+  assert.equal(model.visibleTracks[0].id, "selector-1");
+  assert.equal(model.visibleTracks[3].id, "selector-4");
+  assert.equal(model.showLeftHint, true);
+  assert.equal(model.showRightHint, false);
+  assert.equal(model.selectedTrackCanPublish, true);
+  assert.equal(model.selectedTrackCanDelete, false);
+
+  for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
 });

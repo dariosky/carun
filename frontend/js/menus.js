@@ -1,5 +1,6 @@
 import {
   applyTrackPreset,
+  canDeleteTrackPreset,
   canvas,
   deleteOwnTrackFromApi,
   getMenuItems,
@@ -9,6 +10,7 @@ import {
   removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
   saveTrackPresetToDb,
+  setTrackPresetMetadata,
   physicsConfig,
   sanitizePlayerName,
   saveDebugMode,
@@ -19,9 +21,10 @@ import {
 import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 import { initCurbSegments } from "./track.js";
-import { logoutAuth, updateAuthDisplayName } from "./api.js";
+import { logoutAuth, setTrackPublished, updateAuthDisplayName } from "./api.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
+const TRACK_SELECT_VISIBLE_CARDS = 4;
 
 function currentMenuItems() {
   return getMenuItems(state.auth.authenticated);
@@ -81,6 +84,60 @@ export function getSettingsHeaderRenderModel() {
     xRatio: 0.5,
     y: 180,
     textAlign: "center",
+  };
+}
+
+function trackSelectVisibleCount() {
+  return Math.min(TRACK_SELECT_VISIBLE_CARDS, Math.max(1, trackOptions.length));
+}
+
+function syncTrackSelectWindow() {
+  const cardCount = trackSelectCardCount();
+  const visibleCount = trackSelectVisibleCount();
+  const maxOffset = Math.max(0, cardCount - visibleCount);
+  if (state.trackSelectIndex >= cardCount) {
+    state.trackSelectViewOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
+    return;
+  }
+
+  let nextOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
+  if (state.trackSelectIndex < nextOffset) nextOffset = state.trackSelectIndex;
+  if (state.trackSelectIndex >= nextOffset + visibleCount) nextOffset = state.trackSelectIndex - visibleCount + 1;
+  state.trackSelectViewOffset = Math.max(0, Math.min(nextOffset, maxOffset));
+}
+
+function selectedTrackPreset() {
+  if (state.trackSelectIndex < 0 || state.trackSelectIndex >= trackOptions.length) return null;
+  return getTrackPreset(state.trackSelectIndex);
+}
+
+function selectedTrackCanDelete() {
+  return canDeleteTrackPreset(selectedTrackPreset(), state.auth.userId);
+}
+
+function selectedTrackCanPublish() {
+  const preset = selectedTrackPreset();
+  return Boolean(state.auth.isAdmin && preset && preset.fromDb);
+}
+
+export function getTrackSelectRenderModel() {
+  const visibleCount = trackSelectVisibleCount();
+  const totalCount = trackOptions.length;
+  const maxOffset = Math.max(0, totalCount - visibleCount);
+  const viewOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
+  const visibleTracks = trackOptions.slice(viewOffset, viewOffset + visibleCount);
+  const selectedTrack = selectedTrackPreset();
+
+  return {
+    visibleTracks,
+    viewOffset,
+    visibleCount,
+    totalCount,
+    showLeftHint: viewOffset > 0,
+    showRightHint: viewOffset + visibleCount < totalCount,
+    selectedTrackCanDelete: selectedTrackCanDelete(),
+    selectedTrackCanPublish: selectedTrackCanPublish(),
+    selectedTrackIsPublished: Boolean(selectedTrack?.isPublished),
   };
 }
 
@@ -147,6 +204,7 @@ function returnToTrackSelect() {
   }
   state.mode = "trackSelect";
   state.trackSelectIndex = state.selectedTrackIndex;
+  syncTrackSelectWindow();
   state.paused = false;
   state.pauseMenuIndex = 0;
 }
@@ -243,7 +301,7 @@ async function saveEditorTrack() {
   const shouldReplacePrevious = !previousPreset.fromDb && previousPreset.source !== "system";
   saveTrackPreset(trackIndex);
   try {
-    const imported = await saveTrackPresetToDb(trackIndex);
+    const imported = await saveTrackPresetToDb(trackIndex, { currentUserId: state.auth.userId });
     if (!imported) {
       showSnackbar("Save failed", 2);
       return;
@@ -256,6 +314,7 @@ async function saveEditorTrack() {
       state.editor.trackIndex = importedIndex;
       state.selectedTrackIndex = importedIndex;
       state.trackSelectIndex = importedIndex;
+      syncTrackSelectWindow();
       setTrackInUrl(imported.id);
     }
     showSnackbar("Saved to DB");
@@ -312,6 +371,7 @@ function createEmptyTrackAndEdit() {
   }
   state.selectedTrackIndex = idx;
   state.trackSelectIndex = idx;
+  syncTrackSelectWindow();
   showSnackbar("New track created", 1.6);
   enterEditor(idx);
 }
@@ -346,6 +406,7 @@ function activateSelection() {
       }
       state.mode = "trackSelect";
       state.trackSelectIndex = state.selectedTrackIndex;
+      syncTrackSelectWindow();
       return;
     }
     if (selectedItem === "SETTINGS") {
@@ -390,6 +451,7 @@ function activateSelection() {
           state.auth.authenticated = false;
           state.auth.userId = null;
           state.auth.displayName = null;
+          state.auth.isAdmin = false;
           state.playerName = sanitizePlayerName(state.playerName);
           state.mode = "menu";
           state.menuIndex = 0;
@@ -550,6 +612,37 @@ function onKeyDown(e) {
   }
 
   if (
+    key === "p" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= 0 &&
+    state.trackSelectIndex < trackOptions.length
+  ) {
+    const preset = selectedTrackPreset();
+    if (!selectedTrackCanPublish() || !preset) return;
+    Promise.resolve(setTrackPublished(preset.id, !preset.isPublished))
+      .then((updatedTrack) => {
+        const updatedPreset = setTrackPresetMetadata(
+          updatedTrack.id,
+          {
+            name: updatedTrack.name,
+            ownerUserId: updatedTrack.owner_user_id || null,
+            isPublished: Boolean(updatedTrack.is_published),
+            shareToken: updatedTrack.share_token || null,
+            fromDb: true,
+          },
+          { currentUserId: state.auth.userId },
+        );
+        if (!updatedPreset) return;
+        showSnackbar(updatedPreset.isPublished ? "Track published" : "Track unpublished", 1.8);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "Publish update failed";
+        showSnackbar(message, 2);
+      });
+    return;
+  }
+
+  if (
     key === "e" &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex >= 0 &&
@@ -569,8 +662,8 @@ function onKeyDown(e) {
     state.trackSelectIndex < trackOptions.length
   ) {
     const preset = getTrackPreset(state.trackSelectIndex);
-    if (!preset || !preset.canDelete) {
-      showSnackbar("Only your DB tracks can be deleted", 1.8);
+    if (!preset || !canDeleteTrackPreset(preset, state.auth.userId)) {
+      showSnackbar("Only your unpublished tracks can be deleted", 1.8);
       return;
     }
     openConfirmModal({
@@ -586,9 +679,11 @@ function onKeyDown(e) {
           if (trackOptions.length > 0) {
             state.trackSelectIndex = Math.max(0, Math.min(state.trackSelectIndex, trackOptions.length - 1));
             state.selectedTrackIndex = state.trackSelectIndex;
+            syncTrackSelectWindow();
           } else {
             state.trackSelectIndex = 0;
             state.selectedTrackIndex = 0;
+            state.trackSelectViewOffset = 0;
           }
           clearTrackInUrl(preset.id);
           showSnackbar("Track deleted", 1.8);
@@ -646,6 +741,7 @@ function onKeyDown(e) {
     if (state.mode === "trackSelect") {
       if (state.trackSelectIndex === trackSelectBackIndex()) {
         state.trackSelectIndex = state.selectedTrackIndex;
+        syncTrackSelectWindow();
       }
     }
     keys.up = true;
@@ -666,9 +762,11 @@ function onKeyDown(e) {
   }
   if (key === "arrowleft" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
     state.trackSelectIndex = (state.trackSelectIndex + trackSelectCardCount() - 1) % trackSelectCardCount();
+    syncTrackSelectWindow();
   }
   if (key === "arrowright" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
     state.trackSelectIndex = (state.trackSelectIndex + 1) % trackSelectCardCount();
+    syncTrackSelectWindow();
   }
   if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings") {
     const selected = currentSettingsItems()[state.settingsIndex];

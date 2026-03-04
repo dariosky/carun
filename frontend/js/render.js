@@ -26,7 +26,12 @@ import {
   skidMarks,
   state,
 } from "./state.js";
-import { getMainMenuRenderModel, getSettingsHeaderRenderModel, getSettingsRenderLayout } from "./menus.js";
+import {
+  getMainMenuRenderModel,
+  getSettingsHeaderRenderModel,
+  getSettingsRenderLayout,
+  getTrackSelectRenderModel,
+} from "./menus.js";
 import { formatTime } from "./utils.js";
 import {
   blobRadius,
@@ -974,27 +979,46 @@ function drawTrackSelection() {
   const cardSize = 220;
   const gap = 40;
   const cardY = 198;
-  const cardCount = trackOptions.length;
+  const model = getTrackSelectRenderModel();
+  const cardCount = model.visibleTracks.length;
   const totalWidth = cardCount * cardSize + Math.max(0, cardCount - 1) * gap;
   const startX = WIDTH * 0.5 - totalWidth * 0.5;
 
-  for (let i = 0; i < trackOptions.length; i++) {
+  for (let i = 0; i < cardCount; i++) {
+    const trackIndex = model.viewOffset + i;
     const cardX = startX + i * (cardSize + gap);
-    const selected = state.trackSelectIndex === i;
-    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(i));
+    const selected = state.trackSelectIndex === trackIndex;
+    const trackOption = model.visibleTracks[i];
+    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(trackIndex));
 
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
     ctx.font = "bold 24px Verdana";
-    const label = trackOptions[i].name;
+    const label = trackOption.name;
     const labelWidth = ctx.measureText(label).width;
     ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
-    if (trackOptions[i].canDelete) {
+    if (trackOption.ownerUserId === state.auth.userId) {
       ctx.fillStyle = "#ffd66d";
       ctx.font = "bold 14px Verdana";
       const ownerLabel = "OWNED";
       const ownerWidth = ctx.measureText(ownerLabel).width;
       ctx.fillText(ownerLabel, cardX + cardSize * 0.5 - ownerWidth * 0.5, cardY + cardSize + 52);
     }
+    ctx.fillStyle = trackOption.isPublished ? "#9fe870" : "#ff9f5a";
+    ctx.font = "bold 14px Verdana";
+    const statusLabel = trackOption.isPublished ? "PUBLISHED" : "DRAFT";
+    const statusWidth = ctx.measureText(statusLabel).width;
+    ctx.fillText(statusLabel, cardX + cardSize * 0.5 - statusWidth * 0.5, cardY + cardSize + 70);
+  }
+
+  if (model.showLeftHint) {
+    ctx.fillStyle = "#ffd25e";
+    ctx.font = "bold 34px Verdana";
+    ctx.fillText("\u2039", startX - 36, cardY + cardSize * 0.5 + 10);
+  }
+  if (model.showRightHint) {
+    ctx.fillStyle = "#ffd25e";
+    ctx.font = "bold 34px Verdana";
+    ctx.fillText("\u203a", startX + totalWidth + 12, cardY + cardSize * 0.5 + 10);
   }
 
   const backY = cardY + cardSize + 106;
@@ -1011,9 +1035,14 @@ function drawTrackSelection() {
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#c3d9ec";
   ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
-  ctx.fillText("DEL deletes your selected DB track", WIDTH * 0.5 - 170, HEIGHT - 42);
-  if (physicsConfig.flags.DEBUG_MODE) {
-    ctx.fillText("Press E to edit selected track", WIDTH * 0.5 - 150, HEIGHT - 14);
+  const helpLines = [];
+  if (model.selectedTrackCanDelete) helpLines.push("DEL deletes your selected draft track");
+  if (model.selectedTrackCanPublish) {
+    helpLines.push(model.selectedTrackIsPublished ? "Press P to unpublish selected track" : "Press P to publish selected track");
+  }
+  if (physicsConfig.flags.DEBUG_MODE) helpLines.push("Press E to edit selected track");
+  for (let i = 0; i < helpLines.length; i++) {
+    ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, HEIGHT - 42 + i * 28);
   }
 }
 

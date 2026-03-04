@@ -29,6 +29,17 @@ export async function fetchAuthMe() {
   return payload;
 }
 
+export async function fetchTracks() {
+  const response = await request("/api/tracks", { method: "GET" });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Could not load tracks";
+    throw new Error(message);
+  }
+  return Array.isArray(payload) ? payload : [];
+}
+
 export async function updateAuthDisplayName(displayName) {
   const response = await request("/api/auth/display-name", {
     method: "PATCH",
@@ -87,6 +98,31 @@ export async function fetchMyTracks() {
     throw new Error(message);
   }
   return Array.isArray(payload) ? payload : [];
+}
+
+export async function fetchSharedTrack(shareToken) {
+  const response = await request(`/api/tracks/share/${encodeURIComponent(shareToken)}`, { method: "GET" });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Track not found";
+    throw new Error(message);
+  }
+  return payload;
+}
+
+export async function setTrackPublished(trackId, isPublished) {
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}/publish`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_published: Boolean(isPublished) }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Publish update failed";
+    throw new Error(message);
+  }
+  if (!isObject(payload)) throw new Error("Publish update failed");
+  return payload;
 }
 
 export async function deleteTrackById(trackId) {
