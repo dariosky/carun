@@ -15,7 +15,8 @@ function hashNoise2D(x, y, seed = 0) {
 }
 
 function createMaterialCanvas(width, height) {
-  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
+  if (typeof OffscreenCanvas !== "undefined")
+    return new OffscreenCanvas(width, height);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -25,7 +26,10 @@ function createMaterialCanvas(width, height) {
 function buildAsphaltMaterial() {
   const materialCanvas = createMaterialCanvas(256, 256);
   const materialCtx = materialCanvas.getContext("2d");
-  const imageData = materialCtx.createImageData(materialCanvas.width, materialCanvas.height);
+  const imageData = materialCtx.createImageData(
+    materialCanvas.width,
+    materialCanvas.height,
+  );
   const pixels = imageData.data;
   const width = materialCanvas.width;
   const height = materialCanvas.height;
@@ -38,7 +42,8 @@ function buildAsphaltMaterial() {
       const outerBias = laneT - 0.5;
       const baseTone = 112 + edgeLift * 16 + outerBias * 8;
       const grain = (hashNoise2D(x, y, 17) - 0.5) * 24;
-      const speckle = hashNoise2D(x, y, 71) > 0.92 ? (hashNoise2D(x, y, 113) - 0.5) * 18 : 0;
+      const speckle =
+        hashNoise2D(x, y, 71) > 0.92 ? (hashNoise2D(x, y, 113) - 0.5) * 18 : 0;
       const shade = clampByte(baseTone + grain + speckle);
 
       pixels[px] = shade;

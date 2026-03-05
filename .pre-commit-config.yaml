@@ -1,13 +1,4 @@
 repos:
-  - repo: local
-    hooks:
-      - id: sanitize-locks
-        name: sanitize uv.lock
-        entry: python scripts/sanitize_locks.py
-        language: system
-        pass_filenames: false
-        files: ^(uv\.lock|pyproject\.toml)$
-
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10
     hooks:
@@ -18,3 +9,35 @@ repos:
       - id: ruff-format
         name: backend format
         files: ^backend/
+  - repo: local
+    hooks:
+      - id: sanitize-locks
+        name: sanitize uv.lock
+        entry: python scripts/sanitize_locks.py
+        language: system
+        pass_filenames: false
+        files: ^(uv\.lock|pyproject\.toml)$
+      - id: prettier
+        name: frontend format
+        entry: bash -c 'cd frontend && npm run format'
+        language: system
+        files: ^frontend/.*\.(js|jsx|ts|tsx|json|css|html)$
+        pass_filenames: false
+      - id: frontend-lint
+        name: frontend lint
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        files: ^frontend/.*\.(js|jsx|ts|tsx)$
+        pass_filenames: false
+      - id: backend-tests
+        name: backend tests
+        entry: bash -c 'source .venv/bin/activate && cd backend && python -m pytest'
+        language: system
+        files: ^backend/
+        pass_filenames: false
+      - id: frontend-tests
+        name: frontend tests
+        entry: bash -c 'cd frontend && npm run test'
+        language: system
+        files: ^frontend/
+        pass_filenames: false

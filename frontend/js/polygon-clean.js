@@ -73,8 +73,10 @@ function segSegIntersection(a1, a2, b1, b2, endpointMargin = 1e-4) {
   const u = (oax * day - oay * dax) / denom;
 
   if (
-    t < endpointMargin || t > 1 - endpointMargin ||
-    u < endpointMargin || u > 1 - endpointMargin
+    t < endpointMargin ||
+    t > 1 - endpointMargin ||
+    u < endpointMargin ||
+    u > 1 - endpointMargin
   ) {
     return null;
   }
@@ -107,7 +109,7 @@ function findSelfIntersections(loop) {
       const b2 = loop[(j + 1) % n];
       const hit = segSegIntersection(a1, a2, b1, b2);
       if (hit) {
-        hits.push({edgeA: i, edgeB: j, ...hit});
+        hits.push({ edgeA: i, edgeB: j, ...hit });
       }
     }
   }
@@ -135,19 +137,19 @@ function splitEdgesAtIntersections(loop, intersections) {
   let xid = 0;
   for (const hit of intersections) {
     const id = xid++;
-    edgeSplits[hit.edgeA].push({param: hit.t, x: hit.x, y: hit.y, id});
-    edgeSplits[hit.edgeB].push({param: hit.u, x: hit.x, y: hit.y, id});
+    edgeSplits[hit.edgeA].push({ param: hit.t, x: hit.x, y: hit.y, id });
+    edgeSplits[hit.edgeB].push({ param: hit.u, x: hit.x, y: hit.y, id });
   }
 
   // Sort each edge's splits by parameter and build the output array.
   const result = [];
   for (let i = 0; i < n; i++) {
-    result.push({x: loop[i].x, y: loop[i].y, origIdx: i, xid: -1});
+    result.push({ x: loop[i].x, y: loop[i].y, origIdx: i, xid: -1 });
     const splits = edgeSplits[i];
     if (splits.length) {
       splits.sort((a, b) => a.param - b.param);
       for (const sp of splits) {
-        result.push({x: sp.x, y: sp.y, origIdx: -1, xid: sp.id});
+        result.push({ x: sp.x, y: sp.y, origIdx: -1, xid: sp.id });
       }
     }
   }
@@ -167,7 +169,7 @@ function splitEdgesAtIntersections(loop, intersections) {
  */
 function walkContour(splitLoop, turnSign) {
   const n = splitLoop.length;
-  if (n < 3) return splitLoop.map((p) => ({x: p.x, y: p.y}));
+  if (n < 3) return splitLoop.map((p) => ({ x: p.x, y: p.y }));
 
   // ── Build graph ────────────────────────────────────────────────────
   // Merge coincident intersection vertices into single graph nodes.
@@ -188,7 +190,7 @@ function walkContour(splitLoop, turnSign) {
       vertexNode[i] = nodeMap.get(key);
     } else {
       const idx = nodes.length;
-      nodes.push({x: splitLoop[i].x, y: splitLoop[i].y, adj: []});
+      nodes.push({ x: splitLoop[i].x, y: splitLoop[i].y, adj: [] });
       nodeMap.set(key, idx);
       vertexNode[i] = idx;
     }
@@ -202,7 +204,7 @@ function walkContour(splitLoop, turnSign) {
     if (from === to) continue;
     const dx = nodes[to].x - nodes[from].x;
     const dy = nodes[to].y - nodes[from].y;
-    nodes[from].adj.push({to, dx, dy});
+    nodes[from].adj.push({ to, dx, dy });
     edgeUsed.set(`${from},${to}`, 0);
   }
 
@@ -233,7 +235,7 @@ function walkContour(splitLoop, turnSign) {
   const MAX_STEPS = n * 2 + 10;
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    contour.push({x: nodes[current].x, y: nodes[current].y});
+    contour.push({ x: nodes[current].x, y: nodes[current].y });
 
     const adj = nodes[current].adj;
     if (!adj.length) break;
@@ -280,7 +282,9 @@ function walkContour(splitLoop, turnSign) {
     if (current === startNode) break;
   }
 
-  return contour.length >= 3 ? contour : splitLoop.map((p) => ({x: p.x, y: p.y}));
+  return contour.length >= 3
+    ? contour
+    : splitLoop.map((p) => ({ x: p.x, y: p.y }));
 }
 
 /**
@@ -329,7 +333,7 @@ function extractOutermostContour(splitLoop) {
  */
 export function decimateClusteredVertices(loop, radius = 4, minVertices = 6) {
   if (!Array.isArray(loop) || loop.length <= minVertices) {
-    return Array.isArray(loop) ? loop.map((p) => ({x: p.x, y: p.y})) : [];
+    return Array.isArray(loop) ? loop.map((p) => ({ x: p.x, y: p.y })) : [];
   }
 
   const n = loop.length;
@@ -372,7 +376,7 @@ export function decimateClusteredVertices(loop, radius = 4, minVertices = 6) {
 
   const totalClusters = clusterId + 1;
   if (totalClusters <= minVertices) {
-    return loop.map((p) => ({x: p.x, y: p.y}));
+    return loop.map((p) => ({ x: p.x, y: p.y }));
   }
 
   // ── Emit one representative per cluster ────────────────────────────
@@ -408,7 +412,7 @@ export function decimateClusteredVertices(loop, radius = 4, minVertices = 6) {
     }
   }
 
-  return result.length >= 3 ? result : loop.map((p) => ({x: p.x, y: p.y}));
+  return result.length >= 3 ? result : loop.map((p) => ({ x: p.x, y: p.y }));
 }
 
 /**
@@ -420,18 +424,19 @@ function emitRepresentative(loop, n, rotateBy, start, count, out) {
 
   if (count === 1) {
     const p = loop[idx(start)];
-    out.push({x: p.x, y: p.y});
+    out.push({ x: p.x, y: p.y });
     return;
   }
 
   if (count <= 3) {
     // Small cluster → centroid.
-    let sx = 0, sy = 0;
+    let sx = 0,
+      sy = 0;
     for (let j = 0; j < count; j++) {
       sx += loop[idx(start + j)].x;
       sy += loop[idx(start + j)].y;
     }
-    out.push({x: sx / count, y: sy / count});
+    out.push({ x: sx / count, y: sy / count });
     return;
   }
 
@@ -445,12 +450,13 @@ function emitRepresentative(loop, n, rotateBy, start, count, out) {
 
   if (chordLen < 1e-6) {
     // Degenerate (entry ≈ exit) → centroid.
-    let sx = 0, sy = 0;
+    let sx = 0,
+      sy = 0;
     for (let j = 0; j < count; j++) {
       sx += loop[idx(start + j)].x;
       sy += loop[idx(start + j)].y;
     }
-    out.push({x: sx / count, y: sy / count});
+    out.push({ x: sx / count, y: sy / count });
     return;
   }
 
@@ -468,7 +474,7 @@ function emitRepresentative(loop, n, rotateBy, start, count, out) {
     }
   }
   const best = loop[idx(start + bestJ)];
-  out.push({x: best.x, y: best.y});
+  out.push({ x: best.x, y: best.y });
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────
@@ -486,7 +492,7 @@ function emitRepresentative(loop, n, rotateBy, start, count, out) {
  */
 export function cleanOffsetLoop(loop) {
   if (!Array.isArray(loop) || loop.length < 3) {
-    return Array.isArray(loop) ? loop.map((p) => ({x: p.x, y: p.y})) : [];
+    return Array.isArray(loop) ? loop.map((p) => ({ x: p.x, y: p.y })) : [];
   }
 
   const intersections = findSelfIntersections(loop);
@@ -503,7 +509,7 @@ export function cleanOffsetLoop(loop) {
   // Sanity: the outer contour must have the same winding as the input.
   const inputArea = signedLoopArea(loop);
   const outputArea = signedLoopArea(contour);
-  if ((inputArea > 0) !== (outputArea > 0)) {
+  if (inputArea > 0 !== outputArea > 0) {
     contour.reverse();
   }
 
@@ -518,4 +524,3 @@ export function hasSelfIntersections(loop) {
   if (!Array.isArray(loop) || loop.length < 4) return false;
   return findSelfIntersections(loop).length > 0;
 }
-

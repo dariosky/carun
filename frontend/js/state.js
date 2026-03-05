@@ -3,7 +3,8 @@ import { nextTaglineSet } from "./taglines.js";
 
 const initialTaglines = nextTaglineSet();
 const buildLabelFromWindow =
-  typeof window !== "undefined" && typeof window.__CARUN_BUILD_LABEL__ === "string"
+  typeof window !== "undefined" &&
+  typeof window.__CARUN_BUILD_LABEL__ === "string"
     ? window.__CARUN_BUILD_LABEL__
     : "v.dev";
 
@@ -161,6 +162,8 @@ facebookLogo.addEventListener("load", () => {
   facebookLogoReady = true;
 });
 facebookLogo.addEventListener("error", () => {
-  console.warn("Failed to load facebook logo at assets/facebook-svgrepo-com.svg");
+  console.warn(
+    "Failed to load facebook logo at assets/facebook-svgrepo-com.svg",
+  );
 });
 facebookLogo.src = "assets/facebook-svgrepo-com.svg";

@@ -41,7 +41,10 @@ function currentLoginProviderItems() {
 
 export function getMainMenuRenderModel(measureTextWidth) {
   const menuItems = currentMenuItems();
-  const selectedMenuIndex = Math.max(0, Math.min(state.menuIndex, menuItems.length - 1));
+  const selectedMenuIndex = Math.max(
+    0,
+    Math.min(state.menuIndex, menuItems.length - 1),
+  );
   let maxMenuLabelWidth = 0;
   for (const item of menuItems) {
     maxMenuLabelWidth = Math.max(maxMenuLabelWidth, measureTextWidth(item));
@@ -52,7 +55,10 @@ export function getMainMenuRenderModel(measureTextWidth) {
 
 export function getLoginProviderRenderModel(measureTextWidth) {
   const loginItems = currentLoginProviderItems();
-  const selectedLoginIndex = Math.max(0, Math.min(state.loginProviderIndex, loginItems.length - 1));
+  const selectedLoginIndex = Math.max(
+    0,
+    Math.min(state.loginProviderIndex, loginItems.length - 1),
+  );
   let maxLabelWidth = 0;
   for (const item of loginItems) {
     maxLabelWidth = Math.max(maxLabelWidth, measureTextWidth(item));
@@ -63,7 +69,10 @@ export function getLoginProviderRenderModel(measureTextWidth) {
 
 export function getSettingsRenderLayout(measureTextWidth) {
   const settingsItems = currentSettingsItems();
-  const selectedSettingsIndex = Math.max(0, Math.min(state.settingsIndex, settingsItems.length - 1));
+  const selectedSettingsIndex = Math.max(
+    0,
+    Math.min(state.settingsIndex, settingsItems.length - 1),
+  );
   const rowGap = 74;
   const startY = 338;
 
@@ -112,18 +121,29 @@ function syncTrackSelectWindow() {
   const visibleCount = trackSelectVisibleCount();
   const maxOffset = Math.max(0, cardCount - visibleCount);
   if (state.trackSelectIndex >= cardCount) {
-    state.trackSelectViewOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
+    state.trackSelectViewOffset = Math.max(
+      0,
+      Math.min(state.trackSelectViewOffset, maxOffset),
+    );
     return;
   }
 
-  let nextOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
+  let nextOffset = Math.max(
+    0,
+    Math.min(state.trackSelectViewOffset, maxOffset),
+  );
   if (state.trackSelectIndex < nextOffset) nextOffset = state.trackSelectIndex;
-  if (state.trackSelectIndex >= nextOffset + visibleCount) nextOffset = state.trackSelectIndex - visibleCount + 1;
+  if (state.trackSelectIndex >= nextOffset + visibleCount)
+    nextOffset = state.trackSelectIndex - visibleCount + 1;
   state.trackSelectViewOffset = Math.max(0, Math.min(nextOffset, maxOffset));
 }
 
 function selectedTrackPreset() {
-  if (state.trackSelectIndex < 0 || state.trackSelectIndex >= trackOptions.length) return null;
+  if (
+    state.trackSelectIndex < 0 ||
+    state.trackSelectIndex >= trackOptions.length
+  )
+    return null;
   return getTrackPreset(state.trackSelectIndex);
 }
 
@@ -140,13 +160,21 @@ export function getTrackSelectRenderModel() {
   const visibleCount = trackSelectVisibleCount();
   const totalCount = trackOptions.length;
   const maxOffset = Math.max(0, totalCount - visibleCount);
-  const viewOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxOffset));
-  const visibleTracks = trackOptions.slice(viewOffset, viewOffset + visibleCount).map((track) => ({
-    ...track,
-    showAdminBadge: Boolean(
-      state.auth.isAdmin && track.fromDb && track.ownerUserId && track.ownerUserId !== state.auth.userId,
-    ),
-  }));
+  const viewOffset = Math.max(
+    0,
+    Math.min(state.trackSelectViewOffset, maxOffset),
+  );
+  const visibleTracks = trackOptions
+    .slice(viewOffset, viewOffset + visibleCount)
+    .map((track) => ({
+      ...track,
+      showAdminBadge: Boolean(
+        state.auth.isAdmin &&
+        track.fromDb &&
+        track.ownerUserId &&
+        track.ownerUserId !== state.auth.userId,
+      ),
+    }));
   const selectedTrack = selectedTrackPreset();
 
   return {
@@ -185,7 +213,11 @@ function setTrackInUrl(trackId) {
   if (!cleanTrackId) return;
   const url = new URL(window.location.href);
   url.searchParams.set("track", cleanTrackId);
-  window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+  window.history.replaceState(
+    {},
+    "",
+    `${url.pathname}?${url.searchParams.toString()}${url.hash}`,
+  );
 }
 
 function clearTrackInUrl(trackId) {
@@ -193,10 +225,21 @@ function clearTrackInUrl(trackId) {
   if (url.searchParams.get("track") !== trackId) return;
   url.searchParams.delete("track");
   const query = url.searchParams.toString();
-  window.history.replaceState({}, "", `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
+  window.history.replaceState(
+    {},
+    "",
+    `${url.pathname}${query ? `?${query}` : ""}${url.hash}`,
+  );
 }
 
-function openConfirmModal({ title, message, confirmLabel = "Yes", cancelLabel = "No", danger = false, onConfirm }) {
+function openConfirmModal({
+  title,
+  message,
+  confirmLabel = "Yes",
+  cancelLabel = "No",
+  danger = false,
+  onConfirm,
+}) {
   state.modal.open = true;
   state.modal.title = title || "Confirm";
   state.modal.message = message || "";
@@ -224,7 +267,10 @@ function closeModal({ runCancel = false } = {}) {
 
 function returnToTrackSelect() {
   if (trackOptions.length > 0) {
-    state.selectedTrackIndex = Math.max(0, Math.min(state.selectedTrackIndex, trackOptions.length - 1));
+    state.selectedTrackIndex = Math.max(
+      0,
+      Math.min(state.selectedTrackIndex, trackOptions.length - 1),
+    );
   } else {
     state.selectedTrackIndex = 0;
   }
@@ -240,7 +286,8 @@ function updateEditorCursorFromEvent(event) {
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   state.editor.cursorX = (event.clientX - rect.left) * scaleX;
-  state.editor.cursorY = (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
+  state.editor.cursorY =
+    (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
 }
 
 function placeEditorObject(type) {
@@ -324,10 +371,13 @@ async function saveEditorTrack() {
   const trackIndex = state.editor.trackIndex;
   const previousPreset = getTrackPreset(trackIndex);
   const previousId = previousPreset.id;
-  const shouldReplacePrevious = !previousPreset.fromDb && previousPreset.source !== "system";
+  const shouldReplacePrevious =
+    !previousPreset.fromDb && previousPreset.source !== "system";
   saveTrackPreset(trackIndex);
   try {
-    const imported = await saveTrackPresetToDb(trackIndex, { currentUserId: state.auth.userId });
+    const imported = await saveTrackPresetToDb(trackIndex, {
+      currentUserId: state.auth.userId,
+    });
     if (!imported) {
       showSnackbar("Save failed", 2);
       return;
@@ -335,7 +385,9 @@ async function saveEditorTrack() {
     if (shouldReplacePrevious && previousId !== imported.id) {
       removeTrackPresetById(previousId, { removePersisted: true });
     }
-    const importedIndex = trackOptions.findIndex((opt) => opt.id === imported.id);
+    const importedIndex = trackOptions.findIndex(
+      (opt) => opt.id === imported.id,
+    );
     if (importedIndex >= 0) {
       state.editor.trackIndex = importedIndex;
       state.selectedTrackIndex = importedIndex;
@@ -346,7 +398,8 @@ async function saveEditorTrack() {
     showSnackbar("Saved to DB");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Save failed";
-    if (message.toLowerCase().includes("authentication required")) showSnackbar("Login required", 2);
+    if (message.toLowerCase().includes("authentication required"))
+      showSnackbar("Login required", 2);
     else showSnackbar(message, 2);
   }
 }
@@ -415,12 +468,18 @@ function enterEditor(trackIndex) {
 }
 
 function activateSelection() {
-  state.menuIndex = Math.max(0, Math.min(state.menuIndex, currentMenuItems().length - 1));
+  state.menuIndex = Math.max(
+    0,
+    Math.min(state.menuIndex, currentMenuItems().length - 1),
+  );
   state.loginProviderIndex = Math.max(
     0,
     Math.min(state.loginProviderIndex, currentLoginProviderItems().length - 1),
   );
-  state.settingsIndex = Math.max(0, Math.min(state.settingsIndex, currentSettingsItems().length - 1));
+  state.settingsIndex = Math.max(
+    0,
+    Math.min(state.settingsIndex, currentSettingsItems().length - 1),
+  );
 
   if (state.mode === "menu") {
     const selectedItem = currentMenuItems()[state.menuIndex];
@@ -431,7 +490,10 @@ function activateSelection() {
     }
     if (selectedItem === "RACE" || selectedItem === "RACE ANONYMOUSLY") {
       if (trackOptions.length > 0) {
-        state.selectedTrackIndex = Math.max(0, Math.min(state.selectedTrackIndex, trackOptions.length - 1));
+        state.selectedTrackIndex = Math.max(
+          0,
+          Math.min(state.selectedTrackIndex, trackOptions.length - 1),
+        );
       } else {
         state.selectedTrackIndex = 0;
       }
@@ -510,7 +572,8 @@ function activateSelection() {
           showSnackbar("Logged out", 1.8);
         })
         .catch((error) => {
-          const message = error instanceof Error ? error.message : "Logout failed";
+          const message =
+            error instanceof Error ? error.message : "Logout failed";
           showSnackbar(message, 2);
         });
       return;
@@ -539,8 +602,11 @@ function onKeyDown(e) {
   }
 
   if (state.modal.open) {
-    if (["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)) {
-      state.modal.selectedAction = state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
+    if (
+      ["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)
+    ) {
+      state.modal.selectedAction =
+        state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
       return;
     }
     if (key === "escape") {
@@ -572,13 +638,16 @@ function onKeyDown(e) {
         if (state.auth.authenticated) {
           Promise.resolve(updateAuthDisplayName(state.playerName))
             .then((payload) => {
-              const nextName = sanitizePlayerName(payload.display_name || state.playerName);
+              const nextName = sanitizePlayerName(
+                payload.display_name || state.playerName,
+              );
               state.playerName = nextName;
               state.auth.displayName = nextName;
               showSnackbar("Display name updated", 1.8);
             })
             .catch((error) => {
-              const message = error instanceof Error ? error.message : "Update failed";
+              const message =
+                error instanceof Error ? error.message : "Update failed";
               showSnackbar(message, 2);
             });
         }
@@ -687,10 +756,14 @@ function onKeyDown(e) {
           { currentUserId: state.auth.userId },
         );
         if (!updatedPreset) return;
-        showSnackbar(updatedPreset.isPublished ? "Track published" : "Track unpublished", 1.8);
+        showSnackbar(
+          updatedPreset.isPublished ? "Track published" : "Track unpublished",
+          1.8,
+        );
       })
       .catch((error) => {
-        const message = error instanceof Error ? error.message : "Publish update failed";
+        const message =
+          error instanceof Error ? error.message : "Publish update failed";
         showSnackbar(message, 2);
       });
     return;
@@ -731,7 +804,10 @@ function onKeyDown(e) {
           await deleteOwnTrackFromApi(preset.id);
           removeTrackPresetById(preset.id, { removePersisted: true });
           if (trackOptions.length > 0) {
-            state.trackSelectIndex = Math.max(0, Math.min(state.trackSelectIndex, trackOptions.length - 1));
+            state.trackSelectIndex = Math.max(
+              0,
+              Math.min(state.trackSelectIndex, trackOptions.length - 1),
+            );
             state.selectedTrackIndex = state.trackSelectIndex;
             syncTrackSelectWindow();
           } else {
@@ -742,7 +818,8 @@ function onKeyDown(e) {
           clearTrackInUrl(preset.id);
           showSnackbar("Track deleted", 1.8);
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Delete failed";
+          const message =
+            error instanceof Error ? error.message : "Delete failed";
           showSnackbar(message, 2);
         }
       },
@@ -774,7 +851,9 @@ function onKeyDown(e) {
       return;
     }
     if (key === " ") {
-      const generated = regenerateTrackFromCenterlineStrokes(state.editor.trackIndex);
+      const generated = regenerateTrackFromCenterlineStrokes(
+        state.editor.trackIndex,
+      );
       if (generated) {
         applyTrackPreset(state.editor.trackIndex);
         setCurbSegments(initCurbSegments());
@@ -790,11 +869,13 @@ function onKeyDown(e) {
     }
     if (state.mode === "settings") {
       const items = currentSettingsItems();
-      state.settingsIndex = (state.settingsIndex + items.length - 1) % items.length;
+      state.settingsIndex =
+        (state.settingsIndex + items.length - 1) % items.length;
     }
     if (state.mode === "loginProviders") {
       const items = currentLoginProviderItems();
-      state.loginProviderIndex = (state.loginProviderIndex + items.length - 1) % items.length;
+      state.loginProviderIndex =
+        (state.loginProviderIndex + items.length - 1) % items.length;
     }
     if (state.mode === "trackSelect") {
       if (state.trackSelectIndex === trackSelectBackIndex()) {
@@ -822,15 +903,29 @@ function onKeyDown(e) {
     }
     keys.down = true;
   }
-  if (key === "arrowleft" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
-    state.trackSelectIndex = (state.trackSelectIndex + trackSelectCardCount() - 1) % trackSelectCardCount();
+  if (
+    key === "arrowleft" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex < trackSelectCardCount()
+  ) {
+    state.trackSelectIndex =
+      (state.trackSelectIndex + trackSelectCardCount() - 1) %
+      trackSelectCardCount();
     syncTrackSelectWindow();
   }
-  if (key === "arrowright" && state.mode === "trackSelect" && state.trackSelectIndex < trackSelectCardCount()) {
-    state.trackSelectIndex = (state.trackSelectIndex + 1) % trackSelectCardCount();
+  if (
+    key === "arrowright" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex < trackSelectCardCount()
+  ) {
+    state.trackSelectIndex =
+      (state.trackSelectIndex + 1) % trackSelectCardCount();
     syncTrackSelectWindow();
   }
-  if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings") {
+  if (
+    (key === "arrowleft" || key === "arrowright") &&
+    state.mode === "settings"
+  ) {
     const selected = currentSettingsItems()[state.settingsIndex];
     if (selected === "DEBUG MODE") toggleDebugMode();
   }
@@ -879,7 +974,9 @@ export function initInputHandlers() {
     updateEditorCursorFromEvent(event);
     if (state.editor.cursorY < 0) return;
     state.editor.drawing = true;
-    state.editor.activeStroke = [{ x: state.editor.cursorX, y: state.editor.cursorY }];
+    state.editor.activeStroke = [
+      { x: state.editor.cursorX, y: state.editor.cursorY },
+    ];
   });
   window.addEventListener("mouseup", (event) => {
     if (state.mode !== "editor" || event.button !== 0) return;

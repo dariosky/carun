@@ -34,7 +34,9 @@ export async function fetchTracks() {
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Could not load tracks";
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Could not load tracks";
     throw new Error(message);
   }
   return Array.isArray(payload) ? payload : [];
@@ -47,7 +49,10 @@ export async function updateAuthDisplayName(displayName) {
   });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Update failed";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Update failed";
     throw new Error(message);
   }
   if (!isObject(payload)) throw new Error("Update failed");
@@ -58,7 +63,10 @@ export async function logoutAuth() {
   const response = await request("/api/auth/logout", { method: "POST" });
   if (!response.ok) {
     const payload = await parseJsonSafe(response);
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Logout failed";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Logout failed";
     throw new Error(message);
   }
   return { ok: true };
@@ -74,17 +82,25 @@ export async function saveTrackToDb(name, trackPayload) {
   });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Save failed";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Save failed";
     throw new Error(message);
   }
   return payload;
 }
 
 export async function fetchTrackById(trackId) {
-  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, { method: "GET" });
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
+    method: "GET",
+  });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Track not found";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Track not found";
     throw new Error(message);
   }
   return payload;
@@ -94,31 +110,45 @@ export async function fetchMyTracks() {
   const response = await request("/api/tracks/mine", { method: "GET" });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Could not load tracks";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Could not load tracks";
     throw new Error(message);
   }
   return Array.isArray(payload) ? payload : [];
 }
 
 export async function fetchSharedTrack(shareToken) {
-  const response = await request(`/api/tracks/share/${encodeURIComponent(shareToken)}`, { method: "GET" });
+  const response = await request(
+    `/api/tracks/share/${encodeURIComponent(shareToken)}`,
+    { method: "GET" },
+  );
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Track not found";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Track not found";
     throw new Error(message);
   }
   return payload;
 }
 
 export async function setTrackPublished(trackId, isPublished) {
-  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}/publish`, {
-    method: "PATCH",
-    body: JSON.stringify({ is_published: Boolean(isPublished) }),
-  });
+  const response = await request(
+    `/api/tracks/${encodeURIComponent(trackId)}/publish`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ is_published: Boolean(isPublished) }),
+    },
+  );
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Publish update failed";
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Publish update failed";
     throw new Error(message);
   }
   if (!isObject(payload)) throw new Error("Publish update failed");
@@ -126,10 +156,15 @@ export async function setTrackPublished(trackId, isPublished) {
 }
 
 export async function deleteTrackById(trackId) {
-  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, { method: "DELETE" });
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
+    method: "DELETE",
+  });
   if (!response.ok) {
     const payload = await parseJsonSafe(response);
-    const message = isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Delete failed";
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Delete failed";
     throw new Error(message);
   }
 }

@@ -62,7 +62,10 @@ function activeMenuTagline() {
   const fadeEnd = rotation.displaySeconds + rotation.fadeSeconds;
   let alpha = 1;
   if (rotation.elapsed > fadeStart) {
-    const fadeT = Math.min(1, (rotation.elapsed - fadeStart) / Math.max(rotation.fadeSeconds, 0.0001));
+    const fadeT = Math.min(
+      1,
+      (rotation.elapsed - fadeStart) / Math.max(rotation.fadeSeconds, 0.0001),
+    );
     alpha = 1 - fadeT;
   }
   if (rotation.elapsed >= fadeEnd) alpha = 0;
@@ -76,7 +79,8 @@ let cachedTrackSignature = null;
 const previewTrackDataCache = new Map();
 
 function createTextureCanvas(width, height) {
-  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
+  if (typeof OffscreenCanvas !== "undefined")
+    return new OffscreenCanvas(width, height);
   const canvasEl = document.createElement("canvas");
   canvasEl.width = width;
   canvasEl.height = height;
@@ -121,7 +125,9 @@ function trackSignature(trackDef, segments) {
     warpOuterSig: warpProfileSignature(trackDef.warpOuter || []),
     warpInnerSig: warpProfileSignature(trackDef.warpInner || []),
     centerlineLoopRef: trackDef.centerlineLoop,
-    centerlineLoopLength: trackDef.centerlineLoop ? trackDef.centerlineLoop.length : 0,
+    centerlineLoopLength: trackDef.centerlineLoop
+      ? trackDef.centerlineLoop.length
+      : 0,
   };
 }
 
@@ -183,7 +189,9 @@ function drawDecor(objects = worldObjects) {
       const canopy = sampleClosedPath((a) => {
         const radius =
           obj.r *
-          (1 + 0.2 * Math.sin(a * 3 + obj.x * 0.02) + 0.12 * Math.sin(a * 5 + obj.y * 0.02));
+          (1 +
+            0.2 * Math.sin(a * 3 + obj.x * 0.02) +
+            0.12 * Math.sin(a * 5 + obj.y * 0.02));
         return {
           x: obj.x + Math.cos(a) * radius,
           y: obj.y + Math.sin(a) * radius,
@@ -194,7 +202,8 @@ function drawDecor(objects = worldObjects) {
       ctx.fill();
       ctx.fillStyle = "#3dcf60";
       const highlight = sampleClosedPath((a) => {
-        const radius = obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08));
+        const radius =
+          obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08));
         return {
           x: obj.x - 8 + Math.cos(a) * radius,
           y: obj.y - 6 + Math.sin(a) * radius,
@@ -262,7 +271,11 @@ function drawSkidMarks() {
   ctx.restore();
 }
 
-function drawVertexAsterisks(points, size = 3.2, color = "rgba(255, 245, 120, 0.95)") {
+function drawVertexAsterisks(
+  points,
+  size = 3.2,
+  color = "rgba(255, 245, 120, 0.95)",
+) {
   if (!Array.isArray(points) || !points.length) return;
   const d = size * 0.72;
   ctx.save();
@@ -362,7 +375,12 @@ function drawStartLine(trackDef = track) {
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
       ctx.fillStyle = (c + r) % 2 ? "#ffffff" : "#111111";
-      ctx.fillRect(-span * 0.5 + c * cellW, -thickness * 0.5 + r * cellH, cellW, cellH);
+      ctx.fillRect(
+        -span * 0.5 + c * cellW,
+        -thickness * 0.5 + r * cellH,
+        cellW,
+        cellH,
+      );
     }
   }
 
@@ -409,12 +427,24 @@ function drawTrackSurface(trackDef, boundaries, segments, showCurbs) {
     segments.outer.forEach((segment) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? -1;
-      drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
+      drawStripedCurb(
+        pts,
+        sign,
+        CURB_MIN_WIDTH,
+        CURB_MAX_WIDTH,
+        CURB_STRIPE_LENGTH,
+      );
     });
     segments.inner.forEach((segment) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? 1;
-      drawStripedCurb(pts, sign, CURB_MIN_WIDTH, CURB_MAX_WIDTH, CURB_STRIPE_LENGTH);
+      drawStripedCurb(
+        pts,
+        sign,
+        CURB_MIN_WIDTH,
+        CURB_MAX_WIDTH,
+        CURB_STRIPE_LENGTH,
+      );
     });
   }
 
@@ -451,7 +481,9 @@ function drawCar() {
   const blinkActive = state.checkpointBlink.time > 0;
   let blinkT = 0;
   if (blinkActive) {
-    blinkT = state.checkpointBlink.time / Math.max(state.checkpointBlink.duration, 0.0001);
+    blinkT =
+      state.checkpointBlink.time /
+      Math.max(state.checkpointBlink.duration, 0.0001);
   }
 
   ctx.save();
@@ -538,8 +570,16 @@ function drawDebugVectors() {
   ctx.fillRect(panelX, panelY, panelW, panelH);
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
-  ctx.fillText(`SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`, lineX, firstLineY);
-  ctx.fillText(`SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`, lineX, firstLineY + lineStep);
+  ctx.fillText(
+    `SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`,
+    lineX,
+    firstLineY,
+  );
+  ctx.fillText(
+    `SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`,
+    lineX,
+    firstLineY + lineStep,
+  );
   ctx.fillText(
     `Vf: ${toStableInt(physicsRuntime.debug.vForward)} Vl: ${toStableInt(physicsRuntime.debug.vLateral)}`,
     lineX,
@@ -570,7 +610,11 @@ function drawStartSequenceOverlay() {
     const readyFadeEnd = 1.8;
     let readyAlpha = 0;
     if (seq.elapsed < readyHold) readyAlpha = 1;
-    else readyAlpha = Math.max(0, Math.min(1, 1 - (seq.elapsed - readyHold) / (readyFadeEnd - readyHold)));
+    else
+      readyAlpha = Math.max(
+        0,
+        Math.min(1, 1 - (seq.elapsed - readyHold) / (readyFadeEnd - readyHold)),
+      );
 
     if (readyAlpha > 0) {
       const pulse = 1 + Math.sin(seq.elapsed * 9) * 0.06;
@@ -593,7 +637,12 @@ function drawStartSequenceOverlay() {
     const plateH = 112;
 
     ctx.save();
-    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
+    const plateGradient = ctx.createLinearGradient(
+      plateX,
+      plateY,
+      plateX,
+      plateY + plateH,
+    );
     plateGradient.addColorStop(0, "#707985");
     plateGradient.addColorStop(1, "#2b3138");
     ctx.fillStyle = plateGradient;
@@ -644,7 +693,12 @@ function drawStartSequenceOverlay() {
     const plateY = cy - 18;
     const plateW = 292;
     const plateH = 112;
-    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
+    const plateGradient = ctx.createLinearGradient(
+      plateX,
+      plateY,
+      plateX,
+      plateY + plateH,
+    );
     plateGradient.addColorStop(0, "#707985");
     plateGradient.addColorStop(1, "#2b3138");
     ctx.globalAlpha = Math.min(1, a + 0.2);
@@ -727,7 +781,10 @@ function drawTitleBar() {
     : state.raceTime - lapData.currentLapStart;
   const fastestIndex =
     lapData.lapTimes.length > 0
-      ? lapData.lapTimes.reduce((bestIdx, t, idx, arr) => (t < arr[bestIdx] ? idx : bestIdx), 0)
+      ? lapData.lapTimes.reduce(
+          (bestIdx, t, idx, arr) => (t < arr[bestIdx] ? idx : bestIdx),
+          0,
+        )
       : -1;
 
   ctx.font = "16px Verdana";
@@ -739,7 +796,10 @@ function drawTitleBar() {
     else if (isCompleted && i === fastestIndex) ctx.fillStyle = "#ffe167";
     else if (isCompleted) ctx.fillStyle = "#8b98a7";
     else ctx.fillStyle = "rgba(180, 194, 208, 0.45)";
-    const label = value !== undefined ? `L${i + 1} ${formatTime(value)}` : `L${i + 1} --:--.---`;
+    const label =
+      value !== undefined
+        ? `L${i + 1} ${formatTime(value)}`
+        : `L${i + 1} --:--.---`;
     ctx.fillText(label, x, 38);
     x += ctx.measureText(label).width + 14;
   }
@@ -801,8 +861,16 @@ function drawFinishOverlay() {
   ctx.fillStyle = "#ffffff";
   const total = lapData.lapTimes.reduce((a, b) => a + b, 0);
   const bestLap = lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0;
-  ctx.fillText(`TOTAL: ${formatTime(total)}`, WIDTH / 2 - 104, viewportCenterY + 20);
-  ctx.fillText(`BEST: ${formatTime(bestLap)}`, WIDTH / 2 - 104, viewportCenterY + 46);
+  ctx.fillText(
+    `TOTAL: ${formatTime(total)}`,
+    WIDTH / 2 - 104,
+    viewportCenterY + 20,
+  );
+  ctx.fillText(
+    `BEST: ${formatTime(bestLap)}`,
+    WIDTH / 2 - 104,
+    viewportCenterY + 46,
+  );
   ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 72);
 }
 
@@ -857,10 +925,19 @@ function drawMenu() {
   if (appLogoReady) {
     const maxLogoWidth = 320;
     const maxLogoHeight = 130;
-    const ratio = Math.min(maxLogoWidth / appLogo.width, maxLogoHeight / appLogo.height);
+    const ratio = Math.min(
+      maxLogoWidth / appLogo.width,
+      maxLogoHeight / appLogo.height,
+    );
     const drawWidth = appLogo.width * ratio;
     const drawHeight = appLogo.height * ratio;
-    ctx.drawImage(appLogo, WIDTH * 0.5 - drawWidth * 0.5, 22, drawWidth, drawHeight);
+    ctx.drawImage(
+      appLogo,
+      WIDTH * 0.5 - drawWidth * 0.5,
+      22,
+      drawWidth,
+      drawHeight,
+    );
   }
 
   ctx.fillStyle = "#ffd25e";
@@ -879,7 +956,8 @@ function drawMenu() {
   }
 
   ctx.font = "bold 42px Verdana";
-  const { menuItems, selectedMenuIndex, highlightWidth } = getMainMenuRenderModel((text) => ctx.measureText(text).width);
+  const { menuItems, selectedMenuIndex, highlightWidth } =
+    getMainMenuRenderModel((text) => ctx.measureText(text).width);
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   menuItems.forEach((item, idx) => {
     const y = 386 + idx * 74;
@@ -980,9 +1058,8 @@ function drawLoginProviders() {
   ctx.fillText("LOGIN", WIDTH * 0.5 - 132, 220);
 
   ctx.font = "bold 38px Verdana";
-  const { loginItems, selectedLoginIndex, highlightWidth } = getLoginProviderRenderModel((text) =>
-    ctx.measureText(text).width,
-  );
+  const { loginItems, selectedLoginIndex, highlightWidth } =
+    getLoginProviderRenderModel((text) => ctx.measureText(text).width);
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   const textX = WIDTH * 0.5;
   const iconX = highlightX + 26;
@@ -1010,7 +1087,11 @@ function drawLoginProviders() {
 
   ctx.font = "22px Verdana";
   ctx.fillStyle = "#bfd8f7";
-  ctx.fillText("Use ↑ ↓ and Enter. Esc goes back.", WIDTH / 2 - 176, HEIGHT - 80);
+  ctx.fillText(
+    "Use ↑ ↓ and Enter. Esc goes back.",
+    WIDTH / 2 - 176,
+    HEIGHT - 80,
+  );
 }
 
 function drawTrackSelection() {
@@ -1035,13 +1116,23 @@ function drawTrackSelection() {
     const cardX = startX + i * (cardSize + gap);
     const selected = state.trackSelectIndex === trackIndex;
     const trackOption = model.visibleTracks[i];
-    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(trackIndex));
+    drawTrackPreviewCard(
+      cardX,
+      cardY,
+      cardSize,
+      selected,
+      getTrackPreset(trackIndex),
+    );
 
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
     ctx.font = "bold 24px Verdana";
     const label = trackOption.name;
     const labelWidth = ctx.measureText(label).width;
-    ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 34);
+    ctx.fillText(
+      label,
+      cardX + cardSize * 0.5 - labelWidth * 0.5,
+      cardY + cardSize + 34,
+    );
     if (trackOption.showAdminBadge) {
       ctx.fillStyle = "#5bc0eb";
       ctx.fillRect(cardX + 10, cardY + 10, 76, 26);
@@ -1054,7 +1145,11 @@ function drawTrackSelection() {
       ctx.font = "bold 14px Verdana";
       const ownerLabel = "OWNED";
       const ownerWidth = ctx.measureText(ownerLabel).width;
-      ctx.fillText(ownerLabel, cardX + cardSize * 0.5 - ownerWidth * 0.5, cardY + cardSize + 52);
+      ctx.fillText(
+        ownerLabel,
+        cardX + cardSize * 0.5 - ownerWidth * 0.5,
+        cardY + cardSize + 52,
+      );
     }
   }
 
@@ -1066,7 +1161,11 @@ function drawTrackSelection() {
   if (model.showRightHint) {
     ctx.fillStyle = "#ffd25e";
     ctx.font = "bold 34px Verdana";
-    ctx.fillText("\u203a", startX + totalWidth + 12, cardY + cardSize * 0.5 + 10);
+    ctx.fillText(
+      "\u203a",
+      startX + totalWidth + 12,
+      cardY + cardSize * 0.5 + 10,
+    );
   }
 
   const backY = cardY + cardSize + 106;
@@ -1082,13 +1181,23 @@ function drawTrackSelection() {
 
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#c3d9ec";
-  ctx.fillText("Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm", WIDTH * 0.5 - 270, HEIGHT - 70);
+  ctx.fillText(
+    "Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm",
+    WIDTH * 0.5 - 270,
+    HEIGHT - 70,
+  );
   const helpLines = [];
-  if (model.selectedTrackCanDelete) helpLines.push("DEL deletes your selected draft track");
+  if (model.selectedTrackCanDelete)
+    helpLines.push("DEL deletes your selected draft track");
   if (model.selectedTrackCanPublish) {
-    helpLines.push(model.selectedTrackIsPublished ? "Press P to unpublish selected track" : "Press P to publish selected track");
+    helpLines.push(
+      model.selectedTrackIsPublished
+        ? "Press P to unpublish selected track"
+        : "Press P to publish selected track",
+    );
   }
-  if (physicsConfig.flags.DEBUG_MODE) helpLines.push("Press E to edit selected track");
+  if (physicsConfig.flags.DEBUG_MODE)
+    helpLines.push("Press E to edit selected track");
   for (let i = 0; i < helpLines.length; i++) {
     ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, HEIGHT - 42 + i * 28);
   }
@@ -1157,7 +1266,11 @@ function drawSettings() {
   const settingsHeader = getSettingsHeaderRenderModel();
   ctx.save();
   ctx.textAlign = settingsHeader.textAlign;
-  ctx.fillText(settingsHeader.text, WIDTH * settingsHeader.xRatio, settingsHeader.y);
+  ctx.fillText(
+    settingsHeader.text,
+    WIDTH * settingsHeader.xRatio,
+    settingsHeader.y,
+  );
   ctx.restore();
 
   const menuTagline = activeMenuTagline();
@@ -1172,9 +1285,14 @@ function drawSettings() {
   }
 
   ctx.font = "bold 35px Verdana";
-  const { settingsItems, selectedSettingsIndex, rowLabels, rowGap, startY, highlightWidth } = getSettingsRenderLayout(
-    (text) => ctx.measureText(text).width,
-  );
+  const {
+    settingsItems,
+    selectedSettingsIndex,
+    rowLabels,
+    rowGap,
+    startY,
+    highlightWidth,
+  } = getSettingsRenderLayout((text) => ctx.measureText(text).width);
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   const textX = highlightX + 30;
   settingsItems.forEach((_, idx) => {
@@ -1191,7 +1309,11 @@ function drawSettings() {
 
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#d7e9f4";
-  ctx.fillText("Enter edits/chooses. Esc exits name edit.", WIDTH / 2 - 205, HEIGHT - 80);
+  ctx.fillText(
+    "Enter edits/chooses. Esc exits name edit.",
+    WIDTH / 2 - 205,
+    HEIGHT - 80,
+  );
 }
 
 function drawSnackbar() {
@@ -1290,7 +1412,11 @@ function drawModal() {
 
   ctx.fillStyle = "#b7cce0";
   ctx.font = "18px Verdana";
-  ctx.fillText("Use \u2190/\u2192 and Enter. No is default.", x + 34, buttonY + 33);
+  ctx.fillText(
+    "Use \u2190/\u2192 and Enter. No is default.",
+    x + 34,
+    buttonY + 33,
+  );
   ctx.restore();
 }
 

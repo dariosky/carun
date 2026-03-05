@@ -44,7 +44,11 @@ if (authResult === "failed") {
 if (authResult) {
   appUrl.searchParams.delete("auth");
   const query = appUrl.searchParams.toString();
-  window.history.replaceState({}, "", `${appUrl.pathname}${query ? `?${query}` : ""}${appUrl.hash}`);
+  window.history.replaceState(
+    {},
+    "",
+    `${appUrl.pathname}${query ? `?${query}` : ""}${appUrl.hash}`,
+  );
 }
 
 try {
@@ -67,14 +71,18 @@ const shareFromUrl = currentUrl.searchParams.get("share");
 const trackFromUrl = currentUrl.searchParams.get("track");
 if (shareFromUrl) {
   try {
-    await loadSharedTrackFromApi(shareFromUrl, { currentUserId: state.auth.userId });
+    await loadSharedTrackFromApi(shareFromUrl, {
+      currentUserId: state.auth.userId,
+    });
   } catch {
     state.snackbar.text = "Track not found";
     state.snackbar.time = 1.8;
   }
 } else if (trackFromUrl) {
   try {
-    await loadTrackPresetFromApi(trackFromUrl, { currentUserId: state.auth.userId });
+    await loadTrackPresetFromApi(trackFromUrl, {
+      currentUserId: state.auth.userId,
+    });
   } catch {
     state.snackbar.text = "Track not found";
     state.snackbar.time = 1.8;
@@ -86,10 +94,15 @@ if (trackOptions.length > 0) {
     : trackFromUrl
       ? trackFromUrl.toLowerCase()
       : "";
-  const targetIndex = targetTrackId ? trackOptions.findIndex((opt) => opt.id === targetTrackId) : -1;
+  const targetIndex = targetTrackId
+    ? trackOptions.findIndex((opt) => opt.id === targetTrackId)
+    : -1;
   state.selectedTrackIndex = targetIndex >= 0 ? targetIndex : 0;
   state.trackSelectIndex = state.selectedTrackIndex;
-  state.trackSelectViewOffset = Math.max(0, Math.min(state.selectedTrackIndex, Math.max(0, trackOptions.length - 4)));
+  state.trackSelectViewOffset = Math.max(
+    0,
+    Math.min(state.selectedTrackIndex, Math.max(0, trackOptions.length - 4)),
+  );
 }
 setCurbSegments(initCurbSegments());
 

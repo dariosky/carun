@@ -7,8 +7,14 @@ import {
   CURB_OUTSET,
   ctx,
 } from "./parameters.js";
-import {clamp, normalizeVec, signedAngleBetween} from "./utils.js";
-import {cleanOffsetLoop, decimateClusteredVertices, hasSelfIntersections, intersectLines, signedLoopArea} from "./polygon-clean.js";
+import { clamp, normalizeVec, signedAngleBetween } from "./utils.js";
+import {
+  cleanOffsetLoop,
+  decimateClusteredVertices,
+  hasSelfIntersections,
+  intersectLines,
+  signedLoopArea,
+} from "./polygon-clean.js";
 
 export function ellipseRadiusAtAngle(angle, a, b) {
   const c = Math.cos(angle);
@@ -31,7 +37,11 @@ function normalizeAngle(angle) {
 }
 
 function getCenterlineLoop(trackDef = track) {
-  if (!Array.isArray(trackDef.centerlineLoop) || trackDef.centerlineLoop.length < 3) return null;
+  if (
+    !Array.isArray(trackDef.centerlineLoop) ||
+    trackDef.centerlineLoop.length < 3
+  )
+    return null;
   return trackDef.centerlineLoop;
 }
 
@@ -67,11 +77,13 @@ function catmullRomTangent(p0, p1, p2, p3, t) {
   const t2 = t * t;
   return normalizeVec(
     0.5 *
-      ((-p0.x + p2.x) +
+      (-p0.x +
+        p2.x +
         2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t +
         3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t2),
     0.5 *
-      ((-p0.y + p2.y) +
+      (-p0.y +
+        p2.y +
         2 * (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t +
         3 * (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t2),
   );
@@ -79,7 +91,7 @@ function catmullRomTangent(p0, p1, p2, p3, t) {
 
 function pointOnLoopProgress(loop, progress) {
   const n = loop.length;
-  if (!n) return {x: 0, y: 0};
+  if (!n) return { x: 0, y: 0 };
   const wrapped = ((progress % 1) + 1) % 1;
   const f = wrapped * n;
   const i = Math.floor(f) % n;
@@ -102,7 +114,7 @@ function pointOnLoopProgress(loop, progress) {
 
 function tangentOnLoopProgress(loop, progress) {
   const n = loop.length;
-  if (!n) return {x: 1, y: 0};
+  if (!n) return { x: 1, y: 0 };
   const wrapped = ((progress % 1) + 1) % 1;
   const f = wrapped * n;
   const i = Math.floor(f) % n;
@@ -142,8 +154,8 @@ function offsetLoop(loop, offset, miterLimit = 2.6) {
     const next = loop[(i + 1) % n];
     const inDir = normalizeVec(curr.x - prev.x, curr.y - prev.y);
     const outDir = normalizeVec(next.x - curr.x, next.y - curr.y);
-    const inNormal = {x: -inDir.y, y: inDir.x};
-    const outNormal = {x: -outDir.y, y: outDir.x};
+    const inNormal = { x: -inDir.y, y: inDir.x };
+    const outNormal = { x: -outDir.y, y: outDir.x };
 
     const inPoint = {
       x: curr.x + inNormal.x * signedOffset,
@@ -164,7 +176,10 @@ function offsetLoop(loop, offset, miterLimit = 2.6) {
     }
 
     // Bevel fallback on very sharp/degenerate corners avoids offset spikes and self-overlaps.
-    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
+    const avg = normalizeVec(
+      inNormal.x + outNormal.x,
+      inNormal.y + outNormal.y,
+    );
     const fallbackNormal =
       Math.hypot(avg.x, avg.y) > 1e-4
         ? avg
@@ -188,7 +203,11 @@ function shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol) {
   if (segLenSq < 1e-8) return true;
 
   // Only remove points that project inside the local hull span [prev, next].
-  const t = clamp(((curr.x - prev.x) * segX + (curr.y - prev.y) * segY) / segLenSq, 0, 1);
+  const t = clamp(
+    ((curr.x - prev.x) * segX + (curr.y - prev.y) * segY) / segLenSq,
+    0,
+    1,
+  );
   if (t <= 1e-3 || t >= 1 - 1e-3) return false;
 
   const projX = prev.x + segX * t;
@@ -198,7 +217,8 @@ function shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol) {
 }
 
 function simplifyOpenPathRdp(points, epsilon) {
-  if (!Array.isArray(points) || points.length <= 2) return Array.isArray(points) ? [...points] : [];
+  if (!Array.isArray(points) || points.length <= 2)
+    return Array.isArray(points) ? [...points] : [];
   const first = points[0];
   const last = points[points.length - 1];
   const segX = last.x - first.x;
@@ -231,7 +251,8 @@ function simplifyOpenPathRdp(points, epsilon) {
 }
 
 function simplifyClosedLoopRdp(loop, epsilon, minVertices) {
-  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
+  if (!Array.isArray(loop) || loop.length < 4)
+    return Array.isArray(loop) ? [...loop] : [];
 
   let tol = epsilon;
   let simplified = [...loop];
@@ -247,10 +268,17 @@ function simplifyClosedLoopRdp(loop, epsilon, minVertices) {
 
 function simplifyClosedLoop(
   loop,
-  {minEdgeLen = 1.2, collinearTol = 1.6, rdpTolerance = 2.2, maxPasses = 6, minVertices = 14} = {},
+  {
+    minEdgeLen = 1.2,
+    collinearTol = 1.6,
+    rdpTolerance = 2.2,
+    maxPasses = 6,
+    minVertices = 14,
+  } = {},
 ) {
-  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
-  let points = loop.map((p) => ({x: p.x, y: p.y}));
+  if (!Array.isArray(loop) || loop.length < 4)
+    return Array.isArray(loop) ? [...loop] : [];
+  let points = loop.map((p) => ({ x: p.x, y: p.y }));
 
   for (let pass = 0; pass < maxPasses; pass++) {
     const n = points.length;
@@ -272,11 +300,16 @@ function simplifyClosedLoop(
     points = points.filter((_, i) => keep[i]);
   }
 
-  return simplifyClosedLoopRdp(points, rdpTolerance, Math.min(minVertices, Math.max(points.length - 1, 3)));
+  return simplifyClosedLoopRdp(
+    points,
+    rdpTolerance,
+    Math.min(minVertices, Math.max(points.length - 1, 3)),
+  );
 }
 
 function simplifyOpenRunPath(points, tolerance = 1.8, minPoints = 4) {
-  if (!Array.isArray(points) || points.length <= minPoints) return Array.isArray(points) ? [...points] : [];
+  if (!Array.isArray(points) || points.length <= minPoints)
+    return Array.isArray(points) ? [...points] : [];
   const simplified = simplifyOpenPathRdp(points, tolerance);
   return simplified.length >= minPoints ? simplified : [...points];
 }
@@ -330,7 +363,7 @@ function nearestDistanceAndProgressToLoop(x, y, loop) {
     }
   }
 
-  return {distance: Math.sqrt(bestDistSq), progress: bestProgress};
+  return { distance: Math.sqrt(bestDistSq), progress: bestProgress };
 }
 
 export function trackRadiiAtAngle(angle, trackDef = track) {
@@ -338,7 +371,10 @@ export function trackRadiiAtAngle(angle, trackDef = track) {
   if (loop) {
     const progress = normalizeAngle(angle) / (Math.PI * 2);
     const centerPoint = pointOnLoopProgress(loop, progress);
-    const centerRadius = Math.hypot(centerPoint.x - trackDef.cx, centerPoint.y - trackDef.cy);
+    const centerRadius = Math.hypot(
+      centerPoint.x - trackDef.cx,
+      centerPoint.y - trackDef.cy,
+    );
     const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
     return {
       outer: centerRadius + halfWidth,
@@ -347,10 +383,12 @@ export function trackRadiiAtAngle(angle, trackDef = track) {
   }
 
   const outer =
-    ellipseRadiusAtAngle(angle, trackDef.outerA, trackDef.outerB) * warpScale(angle, trackDef.warpOuter);
+    ellipseRadiusAtAngle(angle, trackDef.outerA, trackDef.outerB) *
+    warpScale(angle, trackDef.warpOuter);
   const inner =
-    ellipseRadiusAtAngle(angle, trackDef.innerA, trackDef.innerB) * warpScale(angle, trackDef.warpInner);
-  return {outer, inner};
+    ellipseRadiusAtAngle(angle, trackDef.innerA, trackDef.innerB) *
+    warpScale(angle, trackDef.warpInner);
+  return { outer, inner };
 }
 
 export function pointOnTrackRadius(angle, radius, trackDef = track) {
@@ -386,16 +424,20 @@ export function trackFrameAtAngle(angle, trackDef = track) {
     const progress = normalizeAngle(angle) / (Math.PI * 2);
     const point = pointOnLoopProgress(loop, progress);
     const tangent = tangentOnLoopProgress(loop, progress);
-    const normal = {x: -tangent.y, y: tangent.x};
+    const normal = { x: -tangent.y, y: tangent.x };
     const roadWidth = (trackDef.centerlineHalfWidth || 90) * 2;
-    return {point, tangent, normal, roadWidth};
+    return { point, tangent, normal, roadWidth };
   }
 
   const radii = trackRadiiAtAngle(angle, trackDef);
-  const point = pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5, trackDef);
-  const tangent = {x: -Math.sin(angle), y: Math.cos(angle)};
-  const normal = {x: Math.cos(angle), y: Math.sin(angle)};
-  return {point, tangent, normal, roadWidth: radii.outer - radii.inner};
+  const point = pointOnTrackRadius(
+    angle,
+    (radii.outer + radii.inner) * 0.5,
+    trackDef,
+  );
+  const tangent = { x: -Math.sin(angle), y: Math.cos(angle) };
+  const normal = { x: Math.cos(angle), y: Math.sin(angle) };
+  return { point, tangent, normal, roadWidth: radii.outer - radii.inner };
 }
 
 export function trackBoundaryPaths(trackDef = track, segments = 220) {
@@ -411,8 +453,14 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
       maxPasses: 6,
       minVertices: Math.max(14, Math.floor(sampledCenter.length * 0.08)),
     };
-    const outer = simplifyOffsetClosedLoop(offsetLoop(sampledCenter, halfWidth), simplifyParams);
-    const inner = simplifyOffsetClosedLoop(offsetLoop(sampledCenter, -halfWidth), simplifyParams);
+    const outer = simplifyOffsetClosedLoop(
+      offsetLoop(sampledCenter, halfWidth),
+      simplifyParams,
+    );
+    const inner = simplifyOffsetClosedLoop(
+      offsetLoop(sampledCenter, -halfWidth),
+      simplifyParams,
+    );
     return {
       center: sampledCenter,
       outer,
@@ -486,10 +534,17 @@ export function drawStripedCurb(
   const smoothstep = (t) => t * t * (3 - 2 * t);
   const widthAt = (d) => {
     if (totalLen <= fadeLen * 2) {
-      return minWidth + (maxWidth - minWidth) * Math.sin(clamp(d / totalLen, 0, 1) * Math.PI);
+      return (
+        minWidth +
+        (maxWidth - minWidth) * Math.sin(clamp(d / totalLen, 0, 1) * Math.PI)
+      );
     }
-    if (d < fadeLen) return minWidth + (maxWidth - minWidth) * smoothstep(d / fadeLen);
-    if (d > totalLen - fadeLen) return minWidth + (maxWidth - minWidth) * smoothstep((totalLen - d) / fadeLen);
+    if (d < fadeLen)
+      return minWidth + (maxWidth - minWidth) * smoothstep(d / fadeLen);
+    if (d > totalLen - fadeLen)
+      return (
+        minWidth + (maxWidth - minWidth) * smoothstep((totalLen - d) / fadeLen)
+      );
     return maxWidth;
   };
 
@@ -497,10 +552,11 @@ export function drawStripedCurb(
   // Compute the outward normal at every path vertex by averaging the
   // normals of the two adjacent edges (miter join).  Then offset by
   // the width envelope at that vertex's arc-length position.
-  const outerPts = new Array(nPts);  // offset point per vertex
+  const outerPts = new Array(nPts); // offset point per vertex
 
   for (let i = 0; i < nPts; i++) {
-    let nx = 0, ny = 0;
+    let nx = 0,
+      ny = 0;
     if (i > 0) {
       const dx = pathPoints[i].x - pathPoints[i - 1].x;
       const dy = pathPoints[i].y - pathPoints[i - 1].y;
@@ -541,8 +597,8 @@ export function drawStripedCurb(
     const oB = outerPts[seg + 1];
 
     return {
-      inner: {x: pA.x + (pB.x - pA.x) * t, y: pA.y + (pB.y - pA.y) * t},
-      outer: {x: oA.x + (oB.x - oA.x) * t, y: oA.y + (oB.y - oA.y) * t},
+      inner: { x: pA.x + (pB.x - pA.x) * t, y: pA.y + (pB.y - pA.y) * t },
+      outer: { x: oA.x + (oB.x - oA.x) * t, y: oA.y + (oB.y - oA.y) * t },
       seg,
     };
   };
@@ -563,15 +619,18 @@ export function drawStripedCurb(
     // Include all path vertices whose arc-length falls within (start, end).
     while (seg < nPts - 1 && cumulative[seg + 1] < end) {
       seg++;
-      innerVerts.push({x: pathPoints[seg].x, y: pathPoints[seg].y});
-      outerVerts.push({x: outerPts[seg].x, y: outerPts[seg].y});
+      innerVerts.push({ x: pathPoints[seg].x, y: pathPoints[seg].y });
+      outerVerts.push({ x: outerPts[seg].x, y: outerPts[seg].y });
     }
 
     const endPt = pointAtDist(end);
     innerVerts.push(endPt.inner);
     outerVerts.push(endPt.outer);
 
-    if (innerVerts.length < 2) { stripeIndex++; continue; }
+    if (innerVerts.length < 2) {
+      stripeIndex++;
+      continue;
+    }
 
     // Draw as a single polygon: inner edge forward, outer edge reversed.
     const color = stripeIndex % 2 === 0 ? "#d22e2e" : "#ddd4be";
@@ -611,11 +670,19 @@ function buildCurbSegments(trackDef = track) {
   } else {
     outer = sampleClosedPath((a) => {
       const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(a, radii.outer - trackDef.borderSize + CURB_OUTSET, trackDef);
+      return pointOnTrackRadius(
+        a,
+        radii.outer - trackDef.borderSize + CURB_OUTSET,
+        trackDef,
+      );
     }, segmentCount);
     inner = sampleClosedPath((a) => {
       const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(a, radii.inner + trackDef.borderSize - CURB_OUTSET, trackDef);
+      return pointOnTrackRadius(
+        a,
+        radii.inner + trackDef.borderSize - CURB_OUTSET,
+        trackDef,
+      );
     }, segmentCount);
   }
 
@@ -634,8 +701,10 @@ function buildCurbSegments(trackDef = track) {
     const segIn = normalizeVec(curr.x - prev.x, curr.y - prev.y);
     const segOut = normalizeVec(next.x - curr.x, next.y - curr.y);
     const signedTurn = signedAngleBetween(segIn, segOut);
-    const ds = (Math.hypot(curr.x - prev.x, curr.y - prev.y) +
-                Math.hypot(next.x - curr.x, next.y - curr.y)) * 0.5;
+    const ds =
+      (Math.hypot(curr.x - prev.x, curr.y - prev.y) +
+        Math.hypot(next.x - curr.x, next.y - curr.y)) *
+      0.5;
     const kappa = signedTurn / Math.max(ds, 1);
     signedCurvatures[i] = kappa;
     absCurvatures[i] = Math.abs(kappa);
@@ -643,7 +712,8 @@ function buildCurbSegments(trackDef = track) {
 
   // ── Adaptive curvature threshold ───────────────────────────────────
   const sortedAbs = Array.from(absCurvatures).sort((a, b) => a - b);
-  const curvatureThreshold = sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
+  const curvatureThreshold =
+    sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
 
   // ── Per-sample available-space estimation ──────────────────────────
   // For each centerline sample, measure the distance from the curb path
@@ -685,14 +755,20 @@ function buildCurbSegments(trackDef = track) {
 
     // Outer side eligibility
     if (outerSpace[i] >= minCurbSpace) {
-      if (outerIsOutside || absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) {
+      if (
+        outerIsOutside ||
+        absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost
+      ) {
         outerEligible[i] = 1;
       }
     }
 
     // Inner side eligibility
     if (innerSpace[i] >= minCurbSpace) {
-      if (!outerIsOutside || absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) {
+      if (
+        !outerIsOutside ||
+        absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost
+      ) {
         innerEligible[i] = 1;
       }
     }
@@ -726,7 +802,8 @@ function buildCurbSegments(trackDef = track) {
 
   // Compute the centroid of the centerline — used to determine the
   // outward extrusion direction for each curb run.
-  let centroidX = 0, centroidY = 0;
+  let centroidX = 0,
+    centroidY = 0;
   for (let i = 0; i < segmentCount; i++) {
     centroidX += center[i].x;
     centroidY += center[i].y;
@@ -766,49 +843,52 @@ function buildCurbSegments(trackDef = track) {
     }
 
     // Filter by minimum arc length, simplify, and compute outward sign.
-    return runs.filter((run) => {
-      if (run.length < 4) return false;
-      let arcLen = 0;
-      for (let i = 1; i < run.length; i++) {
-        arcLen += Math.hypot(run[i].x - run[i - 1].x, run[i].y - run[i - 1].y);
-      }
-      return arcLen >= minRunArcLength;
-    }).map((run) => {
-      const simplified = simplifyOpenRunPath(run, 1.8, 4);
+    return runs
+      .filter((run) => {
+        if (run.length < 4) return false;
+        let arcLen = 0;
+        for (let i = 1; i < run.length; i++) {
+          arcLen += Math.hypot(
+            run[i].x - run[i - 1].x,
+            run[i].y - run[i - 1].y,
+          );
+        }
+        return arcLen >= minRunArcLength;
+      })
+      .map((run) => {
+        const simplified = simplifyOpenRunPath(run, 1.8, 4);
 
-      // Determine outward sign: the curb must extrude AWAY from the
-      // track surface.
-      //   - Outer curbs: away from centroid (outward from the track ring).
-      //   - Inner curbs: toward centroid (into the hole, away from road).
-      const midIdx = Math.floor(simplified.length / 2);
-      const pA = simplified[Math.max(0, midIdx - 1)];
-      const pB = simplified[Math.min(simplified.length - 1, midIdx)];
-      const tdx = pB.x - pA.x;
-      const tdy = pB.y - pA.y;
-      const tlen = Math.hypot(tdx, tdy) || 1;
-      const tx = tdx / tlen;
-      const ty = tdy / tlen;
-      // Normal for sideSign=+1: (-ty, tx)
-      const nxPos = -ty;
-      const nyPos = tx;
-      // Midpoint of this segment
-      const mx = (pA.x + pB.x) * 0.5;
-      const my = (pA.y + pB.y) * 0.5;
-      // Dot with vector from midpoint to centroid
-      const toCenterX = centroidX - mx;
-      const toCenterY = centroidY - my;
-      const dot = nxPos * toCenterX + nyPos * toCenterY;
+        // Determine outward sign: the curb must extrude AWAY from the
+        // track surface.
+        //   - Outer curbs: away from centroid (outward from the track ring).
+        //   - Inner curbs: toward centroid (into the hole, away from road).
+        const midIdx = Math.floor(simplified.length / 2);
+        const pA = simplified[Math.max(0, midIdx - 1)];
+        const pB = simplified[Math.min(simplified.length - 1, midIdx)];
+        const tdx = pB.x - pA.x;
+        const tdy = pB.y - pA.y;
+        const tlen = Math.hypot(tdx, tdy) || 1;
+        const tx = tdx / tlen;
+        const ty = tdy / tlen;
+        // Normal for sideSign=+1: (-ty, tx)
+        const nxPos = -ty;
+        const nyPos = tx;
+        // Midpoint of this segment
+        const mx = (pA.x + pB.x) * 0.5;
+        const my = (pA.y + pB.y) * 0.5;
+        // Dot with vector from midpoint to centroid
+        const toCenterX = centroidX - mx;
+        const toCenterY = centroidY - my;
+        const dot = nxPos * toCenterX + nyPos * toCenterY;
 
-      // For outer curbs: extrude away from centroid.
-      //   dot > 0 means sideSign=+1 normal points toward centroid → need -1.
-      // For inner curbs: extrude toward centroid.
-      //   dot > 0 means sideSign=+1 normal points toward centroid → need +1.
-      const outwardSign = isOuter
-        ? (dot > 0 ? -1 : 1)
-        : (dot > 0 ? 1 : -1);
+        // For outer curbs: extrude away from centroid.
+        //   dot > 0 means sideSign=+1 normal points toward centroid → need -1.
+        // For inner curbs: extrude toward centroid.
+        //   dot > 0 means sideSign=+1 normal points toward centroid → need +1.
+        const outwardSign = isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
 
-      return {points: simplified, outwardSign};
-    });
+        return { points: simplified, outwardSign };
+      });
   };
 
   return {
@@ -830,50 +910,80 @@ function buildFullCurbSegments(trackDef = track) {
       maxPasses: 6,
       minVertices: Math.max(14, Math.floor(center.length * 0.08)),
     };
-    const outerLoop = simplifyOffsetClosedLoop(offsetLoop(center, curbOffset), simplifyParams);
-    const innerLoop = simplifyOffsetClosedLoop(offsetLoop(center, -curbOffset), simplifyParams);
+    const outerLoop = simplifyOffsetClosedLoop(
+      offsetLoop(center, curbOffset),
+      simplifyParams,
+    );
+    const innerLoop = simplifyOffsetClosedLoop(
+      offsetLoop(center, -curbOffset),
+      simplifyParams,
+    );
 
     // Compute outward signs using the centerline centroid.
     // isOuter=true → extrude away from centroid; false → toward centroid.
     const computeOutwardSign = (loop, isOuter) => {
       const n = loop.length;
-      let cx = 0, cy = 0;
-      for (let i = 0; i < center.length; i++) { cx += center[i].x; cy += center[i].y; }
-      cx /= center.length; cy /= center.length;
+      let cx = 0,
+        cy = 0;
+      for (let i = 0; i < center.length; i++) {
+        cx += center[i].x;
+        cy += center[i].y;
+      }
+      cx /= center.length;
+      cy /= center.length;
       const midIdx = Math.floor(n / 2);
       const pA = loop[midIdx];
       const pB = loop[(midIdx + 1) % n];
-      const dx = pB.x - pA.x, dy = pB.y - pA.y;
+      const dx = pB.x - pA.x,
+        dy = pB.y - pA.y;
       const len = Math.hypot(dx, dy) || 1;
-      const nx = -(dy / len), ny = dx / len; // sideSign=+1 normal
+      const nx = -(dy / len),
+        ny = dx / len; // sideSign=+1 normal
       const dot = nx * (cx - pA.x) + ny * (cy - pA.y);
-      return isOuter
-        ? (dot > 0 ? -1 : 1)
-        : (dot > 0 ? 1 : -1);
+      return isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
     };
 
     return {
-      outer: [{points: outerLoop, outwardSign: computeOutwardSign(outerLoop, true)}],
-      inner: [{points: innerLoop, outwardSign: computeOutwardSign(innerLoop, false)}],
+      outer: [
+        { points: outerLoop, outwardSign: computeOutwardSign(outerLoop, true) },
+      ],
+      inner: [
+        {
+          points: innerLoop,
+          outwardSign: computeOutwardSign(innerLoop, false),
+        },
+      ],
     };
   }
 
   // Elliptical track: outer curbs extrude outward (-1), inner extrude inward (+1).
   return {
-    outer: [{
-      points: sampleClosedPath((a) => {
-        const radii = trackRadiiAtAngle(a, trackDef);
-        return pointOnTrackRadius(a, radii.outer - trackDef.borderSize + CURB_OUTSET, trackDef);
-      }),
-      outwardSign: -1,
-    }],
-    inner: [{
-      points: sampleClosedPath((a) => {
-        const radii = trackRadiiAtAngle(a, trackDef);
-        return pointOnTrackRadius(a, radii.inner + trackDef.borderSize - CURB_OUTSET, trackDef);
-      }),
-      outwardSign: 1,
-    }],
+    outer: [
+      {
+        points: sampleClosedPath((a) => {
+          const radii = trackRadiiAtAngle(a, trackDef);
+          return pointOnTrackRadius(
+            a,
+            radii.outer - trackDef.borderSize + CURB_OUTSET,
+            trackDef,
+          );
+        }),
+        outwardSign: -1,
+      },
+    ],
+    inner: [
+      {
+        points: sampleClosedPath((a) => {
+          const radii = trackRadiiAtAngle(a, trackDef);
+          return pointOnTrackRadius(
+            a,
+            radii.inner + trackDef.borderSize - CURB_OUTSET,
+            trackDef,
+          );
+        }),
+        outwardSign: 1,
+      },
+    ],
   };
 }
 
@@ -881,7 +991,10 @@ export function initCurbSegments(trackDef = track) {
   try {
     return buildCurbSegments(trackDef);
   } catch (err) {
-    console.error("Curb segment generation failed, falling back to full curbs.", err);
+    console.error(
+      "Curb segment generation failed, falling back to full curbs.",
+      err,
+    );
     return buildFullCurbSegments(trackDef);
   }
 }
@@ -889,7 +1002,7 @@ export function initCurbSegments(trackDef = track) {
 function getSurface(x, y) {
   const loop = getCenterlineLoop(track);
   if (loop) {
-    const {distance} = nearestDistanceAndProgressToLoop(x, y, loop);
+    const { distance } = nearestDistanceAndProgressToLoop(x, y, loop);
     const halfWidth = Math.max(24, track.centerlineHalfWidth || 90);
     if (distance > halfWidth) return "grass";
     if (distance > halfWidth - track.borderSize) return "curb";
@@ -905,7 +1018,11 @@ function getSurface(x, y) {
   if (dist > radii.outer) return "grass";
   if (dist < radii.inner) return "innerGrass";
 
-  if (dist > radii.outer - track.borderSize || dist < radii.inner + track.borderSize) return "curb";
+  if (
+    dist > radii.outer - track.borderSize ||
+    dist < radii.inner + track.borderSize
+  )
+    return "curb";
 
   return "asphalt";
 }
@@ -964,5 +1081,5 @@ export function resolveObjectCollisions(x, y) {
     if (!pushed) break;
   }
 
-  return {x: rx, y: ry, hit, normalX, normalY};
+  return { x: rx, y: ry, hit, normalX, normalY };
 }

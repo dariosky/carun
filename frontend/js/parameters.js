@@ -1,4 +1,10 @@
-import { deleteTrackById, fetchSharedTrack, fetchTrackById, fetchTracks, saveTrackToDb } from "./api.js";
+import {
+  deleteTrackById,
+  fetchSharedTrack,
+  fetchTrackById,
+  fetchTracks,
+  saveTrackToDb,
+} from "./api.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -13,7 +19,11 @@ const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 
 export function sanitizePlayerName(raw) {
   if (typeof raw !== "string") return "PLAYER";
-  const cleaned = raw.toUpperCase().replace(/[^A-Z0-9 ]/g, "").trim().slice(0, 12);
+  const cleaned = raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, "")
+    .trim()
+    .slice(0, 12);
   return cleaned || "PLAYER";
 }
 
@@ -53,7 +63,9 @@ export function saveDebugMode(enabled) {
 }
 
 export function getMenuItems(authenticated) {
-  return authenticated ? ["RACE", "SETTINGS"] : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
+  return authenticated
+    ? ["RACE", "SETTINGS"]
+    : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
 }
 
 export function getLoginProviderItems() {
@@ -61,7 +73,9 @@ export function getLoginProviderItems() {
 }
 
 export function getSettingsItems(authenticated) {
-  return authenticated ? ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"] : ["PLAYER NAME", "DEBUG MODE", "BACK"];
+  return authenticated
+    ? ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"]
+    : ["PLAYER NAME", "DEBUG MODE", "BACK"];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 const TRACK_PRESETS = [
@@ -124,9 +138,11 @@ function clonePresetData(preset) {
     id: preset.id,
     name: preset.name,
     source: preset.source || "local",
-    ownerUserId: typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
+    ownerUserId:
+      typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
     isPublished: Boolean(preset.isPublished),
-    shareToken: typeof preset.shareToken === "string" ? preset.shareToken : null,
+    shareToken:
+      typeof preset.shareToken === "string" ? preset.shareToken : null,
     canDelete: Boolean(preset.canDelete),
     fromDb: Boolean(preset.fromDb),
     track: cloneTrackData(preset.track),
@@ -141,7 +157,11 @@ function clonePresetData(preset) {
 
 function normalizePresetId(raw) {
   if (typeof raw !== "string") return "";
-  return raw.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-").slice(0, 48);
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .slice(0, 48);
 }
 
 function normalizeTrackPresetData(raw) {
@@ -163,12 +183,20 @@ function normalizeTrackPresetData(raw) {
 
   if (!Array.isArray(safeTrack.warpOuter)) safeTrack.warpOuter = [];
   if (!Array.isArray(safeTrack.warpInner)) safeTrack.warpInner = [];
-  safeTrack.borderSize = Number.isFinite(safeTrack.borderSize) ? safeTrack.borderSize : 22;
+  safeTrack.borderSize = Number.isFinite(safeTrack.borderSize)
+    ? safeTrack.borderSize
+    : 22;
 
   return {
     id,
-    name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 36) : id.toUpperCase(),
-    source: typeof raw.source === "string" && raw.source.trim() ? raw.source.trim() : "local",
+    name:
+      typeof raw.name === "string" && raw.name.trim()
+        ? raw.name.trim().slice(0, 36)
+        : id.toUpperCase(),
+    source:
+      typeof raw.source === "string" && raw.source.trim()
+        ? raw.source.trim()
+        : "local",
     ownerUserId:
       typeof raw.ownerUserId === "string"
         ? raw.ownerUserId
@@ -185,12 +213,20 @@ function normalizeTrackPresetData(raw) {
     canDelete: Boolean(raw.canDelete ?? raw.can_delete ?? false),
     fromDb: Boolean(raw.fromDb ?? raw.from_db ?? false),
     track: safeTrack,
-    checkpoints: Array.isArray(raw.checkpoints) ? raw.checkpoints.map((cp) => ({ angle: Number(cp.angle) || 0 })) : [],
-    worldObjects: Array.isArray(raw.worldObjects) ? raw.worldObjects.map((obj) => ({ ...obj })) : [],
-    centerlineStrokes: Array.isArray(raw.centerlineStrokes)
-      ? raw.centerlineStrokes.map((stroke) => (Array.isArray(stroke) ? stroke.map((p) => ({ x: p.x, y: p.y })) : []))
+    checkpoints: Array.isArray(raw.checkpoints)
+      ? raw.checkpoints.map((cp) => ({ angle: Number(cp.angle) || 0 }))
       : [],
-    editStack: Array.isArray(raw.editStack) ? raw.editStack.map((e) => ({ ...e })) : [],
+    worldObjects: Array.isArray(raw.worldObjects)
+      ? raw.worldObjects.map((obj) => ({ ...obj }))
+      : [],
+    centerlineStrokes: Array.isArray(raw.centerlineStrokes)
+      ? raw.centerlineStrokes.map((stroke) =>
+          Array.isArray(stroke) ? stroke.map((p) => ({ x: p.x, y: p.y })) : [],
+        )
+      : [],
+    editStack: Array.isArray(raw.editStack)
+      ? raw.editStack.map((e) => ({ ...e }))
+      : [],
   };
 }
 
@@ -218,9 +254,12 @@ function applyPersistedTrackEdits() {
   for (const preset of TRACK_PRESETS) {
     const saved = savedById[preset.id];
     if (!saved || typeof saved !== "object") continue;
-    if (saved.track && typeof saved.track === "object") preset.track = cloneTrackData(saved.track);
-    if (Array.isArray(saved.checkpoints)) preset.checkpoints = saved.checkpoints.map((cp) => ({ ...cp }));
-    if (Array.isArray(saved.worldObjects)) preset.worldObjects = saved.worldObjects.map((obj) => ({ ...obj }));
+    if (saved.track && typeof saved.track === "object")
+      preset.track = cloneTrackData(saved.track);
+    if (Array.isArray(saved.checkpoints))
+      preset.checkpoints = saved.checkpoints.map((cp) => ({ ...cp }));
+    if (Array.isArray(saved.worldObjects))
+      preset.worldObjects = saved.worldObjects.map((obj) => ({ ...obj }));
     if (Array.isArray(saved.centerlineStrokes)) {
       preset.centerlineStrokes = saved.centerlineStrokes.map((stroke) =>
         Array.isArray(stroke) ? stroke.map((p) => ({ x: p.x, y: p.y })) : [],
@@ -241,22 +280,34 @@ export const trackOptions = [];
 function rebuildTrackOptions() {
   trackOptions.length = 0;
   trackOptions.push(
-    ...TRACK_PRESETS.map(({ id, name, canDelete, isPublished, ownerUserId, fromDb, shareToken }) => ({
-      id,
-      name,
-      canDelete: Boolean(canDelete),
-      isPublished: Boolean(isPublished),
-      ownerUserId: typeof ownerUserId === "string" ? ownerUserId : null,
-      fromDb: Boolean(fromDb),
-      shareToken: typeof shareToken === "string" ? shareToken : null,
-    })),
+    ...TRACK_PRESETS.map(
+      ({
+        id,
+        name,
+        canDelete,
+        isPublished,
+        ownerUserId,
+        fromDb,
+        shareToken,
+      }) => ({
+        id,
+        name,
+        canDelete: Boolean(canDelete),
+        isPublished: Boolean(isPublished),
+        ownerUserId: typeof ownerUserId === "string" ? ownerUserId : null,
+        fromDb: Boolean(fromDb),
+        shareToken: typeof shareToken === "string" ? shareToken : null,
+      }),
+    ),
   );
 }
 
 function upsertTrackPreset(data) {
   const normalized = normalizeTrackPresetData(data);
   if (!normalized) return null;
-  const existingIdx = TRACK_PRESETS.findIndex((preset) => preset.id === normalized.id);
+  const existingIdx = TRACK_PRESETS.findIndex(
+    (preset) => preset.id === normalized.id,
+  );
   if (existingIdx >= 0) TRACK_PRESETS[existingIdx] = normalized;
   else TRACK_PRESETS.push(normalized);
   rebuildTrackOptions();
@@ -275,7 +326,9 @@ export const checkpoints = activePreset.checkpoints.map((cp) => ({ ...cp }));
 
 export const CHECKPOINT_WIDTH_MULTIPLIER = 2;
 
-export const worldObjects = activePreset.worldObjects.map((obj) => ({ ...obj }));
+export const worldObjects = activePreset.worldObjects.map((obj) => ({
+  ...obj,
+}));
 
 export function getTrackPreset(index) {
   return TRACK_PRESETS[index] || TRACK_PRESETS[0];
@@ -298,13 +351,21 @@ function updateTrackDeleteCapabilities(currentUserId) {
   rebuildTrackOptions();
 }
 
-export function setTrackPresetMetadata(trackId, updates, { currentUserId = null } = {}) {
+export function setTrackPresetMetadata(
+  trackId,
+  updates,
+  { currentUserId = null } = {},
+) {
   const preset = getTrackPresetById(trackId);
   if (!preset) return null;
-  if (typeof updates.name === "string" && updates.name.trim()) preset.name = updates.name.trim().slice(0, 36);
-  if (typeof updates.ownerUserId === "string" || updates.ownerUserId === null) preset.ownerUserId = updates.ownerUserId;
-  if (typeof updates.isPublished === "boolean") preset.isPublished = updates.isPublished;
-  if (typeof updates.shareToken === "string" || updates.shareToken === null) preset.shareToken = updates.shareToken;
+  if (typeof updates.name === "string" && updates.name.trim())
+    preset.name = updates.name.trim().slice(0, 36);
+  if (typeof updates.ownerUserId === "string" || updates.ownerUserId === null)
+    preset.ownerUserId = updates.ownerUserId;
+  if (typeof updates.isPublished === "boolean")
+    preset.isPublished = updates.isPublished;
+  if (typeof updates.shareToken === "string" || updates.shareToken === null)
+    preset.shareToken = updates.shareToken;
   if (typeof updates.fromDb === "boolean") preset.fromDb = updates.fromDb;
   preset.canDelete = canDeleteTrackPreset(preset, currentUserId);
   rebuildTrackOptions();
@@ -415,7 +476,11 @@ function simplifyOpenRdp(points, epsilon) {
     let bestIndex = -1;
     let bestDistance = -1;
     for (let i = start + 1; i < end; i++) {
-      const d = pointToSegmentDistanceSquared(points[i], points[start], points[end]);
+      const d = pointToSegmentDistanceSquared(
+        points[i],
+        points[start],
+        points[end],
+      );
       if (d > bestDistance) {
         bestDistance = d;
         bestIndex = i;
@@ -435,7 +500,8 @@ function simplifyOpenRdp(points, epsilon) {
 }
 
 function simplifyClosedLoop(points, epsilon) {
-  if (!Array.isArray(points) || points.length < 4) return (points || []).map((p) => ({ x: p.x, y: p.y }));
+  if (!Array.isArray(points) || points.length < 4)
+    return (points || []).map((p) => ({ x: p.x, y: p.y }));
   let cx = 0;
   let cy = 0;
   for (const p of points) {
@@ -469,7 +535,8 @@ function simplifyClosedLoop(points, epsilon) {
 }
 
 function pruneTinyMovesClosed(points, minDistance) {
-  if (!Array.isArray(points) || points.length < 4) return (points || []).map((p) => ({ x: p.x, y: p.y }));
+  if (!Array.isArray(points) || points.length < 4)
+    return (points || []).map((p) => ({ x: p.x, y: p.y }));
   const out = [];
   const n = points.length;
   for (let i = 0; i < n; i++) {
@@ -601,7 +668,10 @@ function offsetClosedLoop(points, offset, miterLimit = 2.6) {
       }
     }
 
-    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
+    const avg = normalizeVec(
+      inNormal.x + outNormal.x,
+      inNormal.y + outNormal.y,
+    );
     out[i] = {
       x: curr.x + avg.x * signedOffset,
       y: curr.y + avg.y * signedOffset,
@@ -644,7 +714,9 @@ function solveLinearSystem(matrix, values) {
 
 function fitWarpProfile(angles, scaleValues, freqs, ampLimit = 0.24) {
   const termCount = freqs.length * 2;
-  const ata = Array.from({ length: termCount }, () => new Array(termCount).fill(0));
+  const ata = Array.from({ length: termCount }, () =>
+    new Array(termCount).fill(0),
+  );
   const atb = new Array(termCount).fill(0);
 
   for (let i = 0; i < angles.length; i++) {
@@ -697,7 +769,9 @@ function raySegmentDistance(cx, cy, angle, a, b) {
 }
 
 function connectedSegmentsFromStrokes(strokes) {
-  return (strokes || []).filter((stroke) => Array.isArray(stroke) && stroke.length > 0);
+  return (strokes || []).filter(
+    (stroke) => Array.isArray(stroke) && stroke.length > 0,
+  );
 }
 
 export function getConnectedCenterlinePoints(strokes) {
@@ -735,7 +809,11 @@ export function regenerateTrackFromCenterlineStrokes(index) {
 
   const simplifiedLoop = simplifyClosedLoop(rawLoop, simplifyEpsilon);
   const prunedLoop = pruneTinyMovesClosed(simplifiedLoop, tinyMoveCutoff);
-  const laplacianLoop = laplacianSmoothClosed(prunedLoop, laplacianPasses, laplacianStrength);
+  const laplacianLoop = laplacianSmoothClosed(
+    prunedLoop,
+    laplacianPasses,
+    laplacianStrength,
+  );
   const smoothedLoop = chaikinSmoothClosed(laplacianLoop, chaikinIterations);
   const loopPoints = resampleClosedLoop(smoothedLoop, 220);
   if (loopPoints.length > 0 && anchor) {
@@ -751,7 +829,9 @@ export function regenerateTrackFromCenterlineStrokes(index) {
       }
     }
     if (bestIdx > 0) {
-      const rotated = loopPoints.slice(bestIdx).concat(loopPoints.slice(0, bestIdx));
+      const rotated = loopPoints
+        .slice(bestIdx)
+        .concat(loopPoints.slice(0, bestIdx));
       loopPoints.length = 0;
       loopPoints.push(...rotated);
     }
@@ -789,7 +869,11 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   const spanBasedWidth = Math.min(spanX, spanY) * 0.11;
   const perimeterBasedWidth = perimeter / 90;
   const safeMaxWidth = Math.min(spanX, spanY) * 0.24;
-  const halfWidth = clamp(Math.min(Math.max(spanBasedWidth, perimeterBasedWidth), safeMaxWidth), 24, 72);
+  const halfWidth = clamp(
+    Math.min(Math.max(spanBasedWidth, perimeterBasedWidth), safeMaxWidth),
+    24,
+    72,
+  );
   const outerLoop = offsetClosedLoop(loopPoints, halfWidth);
   const innerLoop = offsetClosedLoop(loopPoints, -halfWidth);
   const outerA = Math.max(...outerLoop.map((p) => Math.abs(p.x - cx)));
@@ -826,7 +910,10 @@ export function regenerateTrackFromCenterlineStrokes(index) {
 
     outerTarget = outerTarget === null ? fallbackOuter : outerTarget;
     innerTarget = innerTarget === null ? fallbackInner : innerTarget;
-    const clampedInnerTarget = Math.max(24, Math.min(innerTarget, outerTarget - 12));
+    const clampedInnerTarget = Math.max(
+      24,
+      Math.min(innerTarget, outerTarget - 12),
+    );
     const outerBase = ellipseRadiusAtAngle(angle, outerA, outerB);
     const innerBase = ellipseRadiusAtAngle(angle, innerA, innerB);
     outerScales.push(outerTarget / Math.max(outerBase, 1e-6));
@@ -846,7 +933,10 @@ export function regenerateTrackFromCenterlineStrokes(index) {
     warpInner: fitWarpProfile(angles, innerScales, frequencies, 0.24),
     centerlineHalfWidth: Number(halfWidth.toFixed(1)),
     startAngle: 0,
-    centerlineLoop: loopPoints.map((p) => ({ x: Number(p.x.toFixed(1)), y: Number(p.y.toFixed(1)) })),
+    centerlineLoop: loopPoints.map((p) => ({
+      x: Number(p.x.toFixed(1)),
+      y: Number(p.y.toFixed(1)),
+    })),
   };
 
   return true;
@@ -894,13 +984,17 @@ export function importTrackPresetData(rawPreset, { persist = true } = {}) {
 
 function buildPresetFromApiTrack(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const payload = raw.track_payload_json && typeof raw.track_payload_json === "object" ? raw.track_payload_json : {};
+  const payload =
+    raw.track_payload_json && typeof raw.track_payload_json === "object"
+      ? raw.track_payload_json
+      : {};
   return {
     ...payload,
     id: raw.id,
     name: typeof raw.name === "string" ? raw.name : payload.name,
     source: typeof raw.source === "string" ? raw.source : "user",
-    ownerUserId: typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
+    ownerUserId:
+      typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
     isPublished: Boolean(raw.is_published),
     shareToken: typeof raw.share_token === "string" ? raw.share_token : null,
     canDelete: false,
@@ -932,7 +1026,10 @@ export async function loadVisibleTracksFromApi({ currentUserId = null } = {}) {
   return { loaded };
 }
 
-export async function loadTrackPresetFromApi(trackId, { currentUserId = null } = {}) {
+export async function loadTrackPresetFromApi(
+  trackId,
+  { currentUserId = null } = {},
+) {
   const cleanId = normalizePresetId(trackId);
   if (!cleanId) return null;
   const existing = getTrackPresetById(cleanId);
@@ -946,10 +1043,15 @@ export async function loadTrackPresetFromApi(trackId, { currentUserId = null } =
   return imported;
 }
 
-export async function saveTrackPresetToDb(index, { currentUserId = null } = {}) {
+export async function saveTrackPresetToDb(
+  index,
+  { currentUserId = null } = {},
+) {
   const presetData = exportTrackPresetData(index);
   const name =
-    typeof presetData.name === "string" && presetData.name.trim() ? presetData.name.trim() : `Track ${Date.now()}`;
+    typeof presetData.name === "string" && presetData.name.trim()
+      ? presetData.name.trim()
+      : `Track ${Date.now()}`;
   const createdTrack = await saveTrackToDb(name, presetData);
   const mergedPreset = {
     ...presetData,
@@ -967,7 +1069,10 @@ export async function saveTrackPresetToDb(index, { currentUserId = null } = {}) 
   return imported;
 }
 
-export async function loadSharedTrackFromApi(shareToken, { currentUserId = null } = {}) {
+export async function loadSharedTrackFromApi(
+  shareToken,
+  { currentUserId = null } = {},
+) {
   const rawTrack = await fetchSharedTrack(shareToken);
   const preset = buildPresetFromApiTrack({
     ...rawTrack,
@@ -1018,10 +1123,30 @@ export const physicsConfig = {
     handbrakeLongDecel: 1400,
   },
   surfaces: {
-    asphalt: { lateralGripMul: 0.95, longDragMul: 1.0, engineMul: 1.0, coastDecelMul: 1.0 },
-    curb: { lateralGripMul: 1.18, longDragMul: 1.02, engineMul: 1.0, coastDecelMul: 1.05 },
-    grass: { lateralGripMul: 0.85, longDragMul: 4.0, engineMul: 0.24, coastDecelMul: 5.0 },
-    water: { lateralGripMul: 0.14, longDragMul: 3.3, engineMul: 0.22, coastDecelMul: 2.8 },
+    asphalt: {
+      lateralGripMul: 0.95,
+      longDragMul: 1.0,
+      engineMul: 1.0,
+      coastDecelMul: 1.0,
+    },
+    curb: {
+      lateralGripMul: 1.18,
+      longDragMul: 1.02,
+      engineMul: 1.0,
+      coastDecelMul: 1.05,
+    },
+    grass: {
+      lateralGripMul: 0.85,
+      longDragMul: 4.0,
+      engineMul: 0.24,
+      coastDecelMul: 5.0,
+    },
+    water: {
+      lateralGripMul: 0.14,
+      longDragMul: 3.3,
+      engineMul: 0.22,
+      coastDecelMul: 2.8,
+    },
   },
   flags: {
     AUTO_DRIFT_ON_STEER: true,

@@ -42,7 +42,7 @@ export const TAGLINES = [
   "Small Cars. Big Slides.",
   "Slide Responsibly.",
   "Lose Control. On Purpose.",
-  "Drift Happens."
+  "Drift Happens.",
 ];
 
 export function shuffledTaglines() {
@@ -56,7 +56,11 @@ export function shuffledTaglines() {
 
 export function nextTaglineSet(previousSet = []) {
   const next = shuffledTaglines();
-  if (next.length > 1 && previousSet.length > 0 && next[0] === previousSet[previousSet.length - 1]) {
+  if (
+    next.length > 1 &&
+    previousSet.length > 0 &&
+    next[0] === previousSet[previousSet.length - 1]
+  ) {
     [next[0], next[1]] = [next[1], next[0]];
   }
   return next;

@@ -32,7 +32,12 @@ function setupDomStubs() {
     width: 1280,
     height: 720,
     getContext: () => fakeCtx,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1280, height: 720 }),
+    getBoundingClientRect: () => ({
+      left: 0,
+      top: 0,
+      width: 1280,
+      height: 720,
+    }),
   };
   globalThis.window = {
     location: { href: "http://localhost:8080/" },
@@ -68,9 +73,7 @@ const {
   physicsConfig,
   removeTrackPresetById,
   trackOptions,
-} = await import(
-  "../js/parameters.js"
-);
+} = await import("../js/parameters.js");
 const {
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
@@ -83,7 +86,11 @@ test("main menu model switches items by auth state", () => {
   state.auth.authenticated = false;
   state.menuIndex = 1;
   const loggedOut = getMainMenuRenderModel((text) => text.length * 10);
-  assert.deepEqual(loggedOut.menuItems, ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"]);
+  assert.deepEqual(loggedOut.menuItems, [
+    "LOGIN",
+    "RACE ANONYMOUSLY",
+    "SETTINGS",
+  ]);
   assert.equal(loggedOut.selectedMenuIndex, 1);
 
   state.auth.authenticated = true;
@@ -108,9 +115,16 @@ test("main menu highlight width grows for longest label", () => {
 test("login providers model exposes provider options and selected row", () => {
   state.loginProviderIndex = 1;
   const model = getLoginProviderRenderModel((text) => text.length * 10);
-  assert.deepEqual(model.loginItems, ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"]);
+  assert.deepEqual(model.loginItems, [
+    "LOGIN WITH GOOGLE",
+    "LOGIN WITH FACEBOOK",
+    "BACK",
+  ]);
   assert.equal(model.selectedLoginIndex, 1);
-  assert.equal(model.highlightWidth, Math.max(540, "LOGIN WITH FACEBOOK".length * 10 + 120));
+  assert.equal(
+    model.highlightWidth,
+    Math.max(540, "LOGIN WITH FACEBOOK".length * 10 + 120),
+  );
 });
 
 test("settings render layout uses longest rendered row label", () => {
@@ -120,7 +134,12 @@ test("settings render layout uses longest rendered row label", () => {
   physicsConfig.flags.DEBUG_MODE = true;
 
   const layout = getSettingsRenderLayout((text) => text.length * 10);
-  assert.deepEqual(layout.settingsItems, ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"]);
+  assert.deepEqual(layout.settingsItems, [
+    "PLAYER NAME",
+    "DEBUG MODE",
+    "LOGOUT",
+    "BACK",
+  ]);
   assert.equal(layout.rowGap, 74);
   assert.equal(layout.startY, 338);
 
@@ -139,19 +158,31 @@ test("settings header model defines centered title", () => {
 test("canDeleteTrackPreset only allows owned unpublished db tracks", () => {
   const currentUserId = "user-1";
   assert.equal(
-    canDeleteTrackPreset({ fromDb: true, ownerUserId: currentUserId, isPublished: false }, currentUserId),
+    canDeleteTrackPreset(
+      { fromDb: true, ownerUserId: currentUserId, isPublished: false },
+      currentUserId,
+    ),
     true,
   );
   assert.equal(
-    canDeleteTrackPreset({ fromDb: true, ownerUserId: currentUserId, isPublished: true }, currentUserId),
+    canDeleteTrackPreset(
+      { fromDb: true, ownerUserId: currentUserId, isPublished: true },
+      currentUserId,
+    ),
     false,
   );
   assert.equal(
-    canDeleteTrackPreset({ fromDb: true, ownerUserId: "user-2", isPublished: false }, currentUserId),
+    canDeleteTrackPreset(
+      { fromDb: true, ownerUserId: "user-2", isPublished: false },
+      currentUserId,
+    ),
     false,
   );
   assert.equal(
-    canDeleteTrackPreset({ fromDb: false, ownerUserId: currentUserId, isPublished: false }, currentUserId),
+    canDeleteTrackPreset(
+      { fromDb: false, ownerUserId: currentUserId, isPublished: false },
+      currentUserId,
+    ),
     false,
   );
 });
@@ -188,7 +219,9 @@ test("track selector render model windows large catalogs and exposes admin actio
 
   state.auth.userId = "admin-1";
   state.auth.isAdmin = true;
-  state.trackSelectIndex = trackOptions.findIndex((track) => track.id === "selector-4");
+  state.trackSelectIndex = trackOptions.findIndex(
+    (track) => track.id === "selector-4",
+  );
   state.trackSelectViewOffset = 2;
 
   const model = getTrackSelectRenderModel();
@@ -203,7 +236,8 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.visibleTracks[0].showAdminBadge, true);
   assert.equal(model.visibleTracks[1].showAdminBadge, false);
 
-  for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
+  for (const id of addedIds)
+    removeTrackPresetById(id, { removePersisted: false });
 });
 
 test("visible tracks from API replace local presets and keep published flags", async () => {
@@ -277,12 +311,25 @@ test("visible tracks from API replace local presets and keep published flags", a
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(trackOptions.some((t) => t.id === "classic"), false);
-  assert.equal(trackOptions.some((t) => t.id === "11111111-1111-1111-1111-111111111111"), true);
-  assert.equal(trackOptions.some((t) => t.id === "22222222-2222-2222-2222-222222222222"), true);
+  assert.equal(
+    trackOptions.some((t) => t.id === "classic"),
+    false,
+  );
+  assert.equal(
+    trackOptions.some((t) => t.id === "11111111-1111-1111-1111-111111111111"),
+    true,
+  );
+  assert.equal(
+    trackOptions.some((t) => t.id === "22222222-2222-2222-2222-222222222222"),
+    true,
+  );
 
-  const systemTrack = trackOptions.find((t) => t.id === "11111111-1111-1111-1111-111111111111");
-  const userTrack = trackOptions.find((t) => t.id === "22222222-2222-2222-2222-222222222222");
+  const systemTrack = trackOptions.find(
+    (t) => t.id === "11111111-1111-1111-1111-111111111111",
+  );
+  const userTrack = trackOptions.find(
+    (t) => t.id === "22222222-2222-2222-2222-222222222222",
+  );
   assert.equal(systemTrack?.isPublished, true);
   assert.equal(userTrack?.isPublished, true);
 });
