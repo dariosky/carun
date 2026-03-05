@@ -1,12 +1,19 @@
+from datetime import datetime
+from urllib.parse import urlencode
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from ..auth_utils import (
+    build_facebook_login_url,
     build_google_login_url,
-    exchange_code_for_userinfo,
+    exchange_facebook_code_for_userinfo,
+    exchange_google_code_for_userinfo,
+    pop_oauth_state,
     update_user_display_name,
-    upsert_user_from_google,
+    upsert_user_from_oauth,
 )
 from ..db import get_session
 from ..deps import get_current_user
@@ -17,17 +24,35 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/me", response_model=AuthMeResponse)
-def me(request: Request):
+def me(request: Request, session: Session = Depends(get_session)):
     user_id = request.session.get("user_id")
-    display_name = request.session.get("display_name")
-    is_admin = bool(request.session.get("is_admin"))
     if not user_id:
         return AuthMeResponse(authenticated=False)
+
+    try:
+        user_uuid = UUID(str(user_id))
+    except ValueError:
+        request.session.clear()
+        return AuthMeResponse(authenticated=False)
+
+    user = session.get(User, user_uuid)
+    if not user:
+        request.session.clear()
+        return AuthMeResponse(authenticated=False)
+
+    now = datetime.utcnow()
+    user.last_seen = now
+    user.updated_at = now
+    session.add(user)
+    session.commit()
+
+    request.session["display_name"] = user.display_name
+    request.session["is_admin"] = user.is_admin
     return AuthMeResponse(
         authenticated=True,
-        user_id=str(user_id),
-        display_name=display_name,
-        is_admin=is_admin,
+        user_id=str(user.id),
+        display_name=user.display_name,
+        is_admin=user.is_admin,
     )
 
 
@@ -40,13 +65,42 @@ def google_login(request: Request):
 async def google_callback(
     request: Request, code: str, state: str, session: Session = Depends(get_session)
 ):
-    expected_state = request.session.get("oauth_state")
+    expected_state = pop_oauth_state(request, "google")
     if not expected_state or expected_state != state:
+        other_state = request.session.get("oauth_state_facebook")
+        if other_state and other_state == state:
+            query = urlencode({"code": code, "state": state})
+            return RedirectResponse(f"/api/auth/facebook/callback?{query}", status_code=302)
         return RedirectResponse("/?auth=failed", status_code=302)
 
-    request.session.pop("oauth_state", None)
-    payload = await exchange_code_for_userinfo(code)
-    user = upsert_user_from_google(session, payload)
+    payload = await exchange_google_code_for_userinfo(code)
+    user = upsert_user_from_oauth(session, "google", payload)
+
+    request.session["user_id"] = str(user.id)
+    request.session["display_name"] = user.display_name
+    request.session["is_admin"] = user.is_admin
+    return RedirectResponse("/?auth=ok", status_code=302)
+
+
+@router.get("/facebook/login")
+def facebook_login(request: Request):
+    return RedirectResponse(build_facebook_login_url(request), status_code=302)
+
+
+@router.get("/facebook/callback")
+async def facebook_callback(
+    request: Request, code: str, state: str, session: Session = Depends(get_session)
+):
+    expected_state = pop_oauth_state(request, "facebook")
+    if not expected_state or expected_state != state:
+        other_state = request.session.get("oauth_state_google")
+        if other_state and other_state == state:
+            query = urlencode({"code": code, "state": state})
+            return RedirectResponse(f"/api/auth/google/callback?{query}", status_code=302)
+        return RedirectResponse("/?auth=failed", status_code=302)
+
+    payload = await exchange_facebook_code_for_userinfo(code)
+    user = upsert_user_from_oauth(session, "facebook", payload)
 
     request.session["user_id"] = str(user.id)
     request.session["display_name"] = user.display_name

@@ -74,10 +74,36 @@ def create_app() -> FastAPI:
         static_cache_control = "public, max-age=31536000, immutable" if is_prod else "no-store"
 
         index_template = (frontend_dir / "index.html").read_text(encoding="utf-8")
+        privacy_template_path = frontend_dir / "privacy.html"
+        terms_template_path = frontend_dir / "terms.html"
+        privacy_template = (
+            privacy_template_path.read_text(encoding="utf-8")
+            if privacy_template_path.exists()
+            else None
+        )
+        terms_template = (
+            terms_template_path.read_text(encoding="utf-8")
+            if terms_template_path.exists()
+            else None
+        )
 
         def render_index_html() -> str:
             return index_template.replace("__STATIC_BASE__", static_base).replace(
                 "__BUILD_LABEL__", build_label
+            )
+
+        def render_privacy_html() -> str:
+            if privacy_template is None:
+                return "<h1>Privacy page not found</h1>"
+            return privacy_template.replace("__STATIC_BASE__", static_base).replace(
+                "__ADMIN_EMAIL__", settings.admin_email
+            )
+
+        def render_terms_html() -> str:
+            if terms_template is None:
+                return "<h1>Terms page not found</h1>"
+            return terms_template.replace("__STATIC_BASE__", static_base).replace(
+                "__ADMIN_EMAIL__", settings.admin_email
             )
 
         def index_response():
@@ -93,6 +119,20 @@ def create_app() -> FastAPI:
         @app.api_route("/index.html", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend_index_file():
             return index_response()
+
+        @app.api_route("/privacy", methods=["GET", "HEAD"], include_in_schema=False)
+        def frontend_privacy():
+            return HTMLResponse(
+                content=render_privacy_html(),
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
+
+        @app.api_route("/terms", methods=["GET", "HEAD"], include_in_schema=False)
+        def frontend_terms():
+            return HTMLResponse(
+                content=render_terms_html(),
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
 
         app.mount(
             static_mount,

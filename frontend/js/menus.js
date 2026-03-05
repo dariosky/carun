@@ -4,6 +4,7 @@ import {
   canvas,
   deleteOwnTrackFromApi,
   getMenuItems,
+  getLoginProviderItems,
   getTrackPreset,
   getSettingsItems,
   importTrackPresetData,
@@ -34,6 +35,10 @@ function currentSettingsItems() {
   return getSettingsItems(state.auth.authenticated);
 }
 
+function currentLoginProviderItems() {
+  return getLoginProviderItems();
+}
+
 export function getMainMenuRenderModel(measureTextWidth) {
   const menuItems = currentMenuItems();
   const selectedMenuIndex = Math.max(0, Math.min(state.menuIndex, menuItems.length - 1));
@@ -43,6 +48,17 @@ export function getMainMenuRenderModel(measureTextWidth) {
   }
   const highlightWidth = Math.max(460, maxMenuLabelWidth + 96);
   return { menuItems, selectedMenuIndex, highlightWidth };
+}
+
+export function getLoginProviderRenderModel(measureTextWidth) {
+  const loginItems = currentLoginProviderItems();
+  const selectedLoginIndex = Math.max(0, Math.min(state.loginProviderIndex, loginItems.length - 1));
+  let maxLabelWidth = 0;
+  for (const item of loginItems) {
+    maxLabelWidth = Math.max(maxLabelWidth, measureTextWidth(item));
+  }
+  const highlightWidth = Math.max(540, maxLabelWidth + 120);
+  return { loginItems, selectedLoginIndex, highlightWidth };
 }
 
 export function getSettingsRenderLayout(measureTextWidth) {
@@ -148,6 +164,11 @@ export function getTrackSelectRenderModel() {
 
 function settingsMenuIndex() {
   const idx = currentMenuItems().indexOf("SETTINGS");
+  return idx >= 0 ? idx : 0;
+}
+
+function loginMenuIndex() {
+  const idx = currentMenuItems().indexOf("LOGIN");
   return idx >= 0 ? idx : 0;
 }
 
@@ -395,12 +416,17 @@ function enterEditor(trackIndex) {
 
 function activateSelection() {
   state.menuIndex = Math.max(0, Math.min(state.menuIndex, currentMenuItems().length - 1));
+  state.loginProviderIndex = Math.max(
+    0,
+    Math.min(state.loginProviderIndex, currentLoginProviderItems().length - 1),
+  );
   state.settingsIndex = Math.max(0, Math.min(state.settingsIndex, currentSettingsItems().length - 1));
 
   if (state.mode === "menu") {
     const selectedItem = currentMenuItems()[state.menuIndex];
     if (selectedItem === "LOGIN") {
-      window.location.assign("/api/auth/google/login");
+      state.mode = "loginProviders";
+      state.loginProviderIndex = 0;
       return;
     }
     if (selectedItem === "RACE" || selectedItem === "RACE ANONYMOUSLY") {
@@ -418,6 +444,24 @@ function activateSelection() {
       state.mode = "settings";
       state.settingsIndex = 0;
       state.editingName = false;
+      return;
+    }
+    return;
+  }
+
+  if (state.mode === "loginProviders") {
+    const selectedItem = currentLoginProviderItems()[state.loginProviderIndex];
+    if (selectedItem === "LOGIN WITH GOOGLE") {
+      window.location.assign("/api/auth/google/login");
+      return;
+    }
+    if (selectedItem === "LOGIN WITH FACEBOOK") {
+      window.location.assign("/api/auth/facebook/login");
+      return;
+    }
+    if (selectedItem === "BACK") {
+      state.mode = "menu";
+      state.menuIndex = loginMenuIndex();
       return;
     }
     return;
@@ -604,6 +648,11 @@ function onKeyDown(e) {
     state.paused = false;
     return;
   }
+  if (state.mode === "loginProviders" && key === "escape") {
+    state.mode = "menu";
+    state.menuIndex = loginMenuIndex();
+    return;
+  }
   if (state.mode === "editor" && key === "escape") {
     state.editor.drawing = false;
     state.editor.activeStroke = [];
@@ -743,6 +792,10 @@ function onKeyDown(e) {
       const items = currentSettingsItems();
       state.settingsIndex = (state.settingsIndex + items.length - 1) % items.length;
     }
+    if (state.mode === "loginProviders") {
+      const items = currentLoginProviderItems();
+      state.loginProviderIndex = (state.loginProviderIndex + items.length - 1) % items.length;
+    }
     if (state.mode === "trackSelect") {
       if (state.trackSelectIndex === trackSelectBackIndex()) {
         state.trackSelectIndex = state.selectedTrackIndex;
@@ -759,6 +812,10 @@ function onKeyDown(e) {
     if (state.mode === "settings") {
       const items = currentSettingsItems();
       state.settingsIndex = (state.settingsIndex + 1) % items.length;
+    }
+    if (state.mode === "loginProviders") {
+      const items = currentLoginProviderItems();
+      state.loginProviderIndex = (state.loginProviderIndex + 1) % items.length;
     }
     if (state.mode === "trackSelect") {
       state.trackSelectIndex = trackSelectBackIndex();

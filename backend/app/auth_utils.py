@@ -1,18 +1,33 @@
 import re
 import secrets
 from datetime import datetime
+from typing import Literal
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException, Request, status
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from .config import get_settings
 from .models import User
 
+Provider = Literal["google", "facebook"]
+
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
+
+FACEBOOK_AUTH_ENDPOINT = "https://www.facebook.com/v20.0/dialog/oauth"
+FACEBOOK_TOKEN_ENDPOINT = "https://graph.facebook.com/v20.0/oauth/access_token"
+FACEBOOK_USERINFO_ENDPOINT = "https://graph.facebook.com/v20.0/me"
+
+
+def _normalize_email(raw: str | None) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    email = raw.strip().lower()
+    return email or None
 
 
 def validate_google_oauth_config() -> None:
@@ -31,6 +46,25 @@ def validate_google_oauth_config() -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Google OAuth misconfigured: GOOGLE_REDIRECT_URI is missing",
+        )
+
+
+def validate_facebook_oauth_config() -> None:
+    settings = get_settings()
+    if not settings.facebook_client_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Facebook OAuth misconfigured: FACEBOOK_CLIENT_ID is missing",
+        )
+    if not settings.facebook_client_secret.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Facebook OAuth misconfigured: FACEBOOK_CLIENT_SECRET is missing",
+        )
+    if not settings.facebook_redirect_uri.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Facebook OAuth misconfigured: FACEBOOK_REDIRECT_URI is missing",
         )
 
 
@@ -70,11 +104,23 @@ def build_unique_display_name(session: Session, base_name: str, exclude_user_id=
     )
 
 
+def _store_oauth_state(request: Request, provider: Provider) -> str:
+    state = secrets.token_urlsafe(24)
+    request.session[f"oauth_state_{provider}"] = state
+    return state
+
+
+def pop_oauth_state(request: Request, provider: Provider) -> str | None:
+    key = f"oauth_state_{provider}"
+    value = request.session.get(key)
+    request.session.pop(key, None)
+    return value
+
+
 def build_google_login_url(request: Request) -> str:
     settings = get_settings()
     validate_google_oauth_config()
-    state = secrets.token_urlsafe(24)
-    request.session["oauth_state"] = state
+    state = _store_oauth_state(request, "google")
 
     query = {
         "client_id": settings.google_client_id,
@@ -88,7 +134,22 @@ def build_google_login_url(request: Request) -> str:
     return f"{GOOGLE_AUTH_ENDPOINT}?{urlencode(query)}"
 
 
-async def exchange_code_for_userinfo(code: str) -> dict:
+def build_facebook_login_url(request: Request) -> str:
+    settings = get_settings()
+    validate_facebook_oauth_config()
+    state = _store_oauth_state(request, "facebook")
+
+    query = {
+        "client_id": settings.facebook_client_id,
+        "redirect_uri": settings.facebook_redirect_uri,
+        "response_type": "code",
+        "scope": "email,public_profile",
+        "state": state,
+    }
+    return f"{FACEBOOK_AUTH_ENDPOINT}?{urlencode(query)}"
+
+
+async def exchange_google_code_for_userinfo(code: str) -> dict:
     settings = get_settings()
     validate_google_oauth_config()
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -127,28 +188,99 @@ async def exchange_code_for_userinfo(code: str) -> dict:
         return user_res.json()
 
 
-def upsert_user_from_google(session: Session, payload: dict) -> User:
-    google_sub = payload.get("sub")
-    if not google_sub:
+async def exchange_facebook_code_for_userinfo(code: str) -> dict:
+    settings = get_settings()
+    validate_facebook_oauth_config()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        token_res = await client.get(
+            FACEBOOK_TOKEN_ENDPOINT,
+            params={
+                "client_id": settings.facebook_client_id,
+                "client_secret": settings.facebook_client_secret,
+                "redirect_uri": settings.facebook_redirect_uri,
+                "code": code,
+            },
+        )
+
+        if token_res.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Facebook token exchange failed"
+            )
+
+        access_token = token_res.json().get("access_token")
+        if not access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="No Facebook access token"
+            )
+
+        user_res = await client.get(
+            FACEBOOK_USERINFO_ENDPOINT,
+            params={
+                "fields": "id,name,email",
+                "access_token": access_token,
+            },
+        )
+
+        if user_res.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Facebook userinfo fetch failed"
+            )
+
+        return user_res.json()
+
+
+def _provider_sub_field(provider: Provider) -> str:
+    return "google_sub" if provider == "google" else "facebook_sub"
+
+
+def upsert_user_from_oauth(session: Session, provider: Provider, payload: dict) -> User:
+    provider_sub_field = _provider_sub_field(provider)
+    provider_sub_key = "sub" if provider == "google" else "id"
+    provider_sub = payload.get(provider_sub_key)
+    if not provider_sub:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Google payload missing sub"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"{provider.title()} payload missing {provider_sub_key}",
         )
 
     display_name = payload.get("name") or payload.get("email") or "Carun Player"
-    email = payload.get("email")
+    email = _normalize_email(payload.get("email"))
 
-    user = session.exec(select(User).where(User.google_sub == google_sub)).first()
+    if provider == "facebook" and not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Facebook payload missing email",
+        )
+
+    provider_col = getattr(User, provider_sub_field)
+    user = session.exec(select(User).where(provider_col == provider_sub)).first()
+
+    if not user and email:
+        user = session.exec(select(User).where(func.lower(User.email) == email)).first()
+
+    now = datetime.utcnow()
     if user:
+        setattr(user, provider_sub_field, provider_sub)
         user.email = email
-        user.updated_at = datetime.utcnow()
+        user.last_seen = now
+        user.updated_at = now
     else:
         unique_name = build_unique_display_name(session, display_name)
-        user = User(google_sub=google_sub, display_name=unique_name, email=email)
+        user = User(
+            display_name=unique_name,
+            email=email,
+            last_seen=now,
+            **{provider_sub_field: provider_sub},
+        )
         session.add(user)
 
     session.commit()
     session.refresh(user)
     return user
+
+
+def upsert_user_from_google(session: Session, payload: dict) -> User:
+    return upsert_user_from_oauth(session, "google", payload)
 
 
 def update_user_display_name(session: Session, user: User, raw_display_name: str) -> User:

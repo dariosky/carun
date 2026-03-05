@@ -12,6 +12,7 @@ export const state = {
   paused: false,
   pauseMenuIndex: 0,
   menuIndex: 0,
+  loginProviderIndex: 0,
   trackSelectIndex: 0,
   trackSelectViewOffset: 0,
   selectedTrackIndex: 0,
@@ -137,6 +138,8 @@ export const kartSprite = new Image();
 export let kartSpriteReady = false;
 export const appLogo = new Image();
 export let appLogoReady = false;
+export const facebookLogo = new Image();
+export let facebookLogoReady = false;
 
 kartSprite.addEventListener("load", () => {
   kartSpriteReady = true;
@@ -153,3 +156,11 @@ appLogo.addEventListener("error", () => {
   console.warn("Failed to load app logo at assets/carun.svg");
 });
 appLogo.src = "assets/carun.svg";
+
+facebookLogo.addEventListener("load", () => {
+  facebookLogoReady = true;
+});
+facebookLogo.addEventListener("error", () => {
+  console.warn("Failed to load facebook logo at assets/facebook-svgrepo-com.svg");
+});
+facebookLogo.src = "assets/facebook-svgrepo-com.svg";

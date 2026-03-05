@@ -8,9 +8,11 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
-    google_sub: str = Field(index=True, unique=True)
+    google_sub: str | None = Field(default=None, index=True, unique=True)
+    facebook_sub: str | None = Field(default=None, index=True, unique=True)
     display_name: str = Field(index=True, unique=True)
     email: str | None = None
     is_admin: bool = Field(default=False, index=True)
+    last_seen: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

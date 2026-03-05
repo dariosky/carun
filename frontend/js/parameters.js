@@ -56,6 +56,10 @@ export function getMenuItems(authenticated) {
   return authenticated ? ["RACE", "SETTINGS"] : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
 }
 
+export function getLoginProviderItems() {
+  return ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"];
+}
+
 export function getSettingsItems(authenticated) {
   return authenticated ? ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"] : ["PLAYER NAME", "DEBUG MODE", "BACK"];
 }

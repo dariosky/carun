@@ -19,6 +19,8 @@ import {
   appLogoReady,
   car,
   curbSegments,
+  facebookLogo,
+  facebookLogoReady,
   kartSprite,
   kartSpriteReady,
   lapData,
@@ -27,6 +29,7 @@ import {
   state,
 } from "./state.js";
 import {
+  getLoginProviderRenderModel,
   getMainMenuRenderModel,
   getSettingsHeaderRenderModel,
   getSettingsRenderLayout,
@@ -967,6 +970,49 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   ctx.restore();
 }
 
+function drawLoginProviders() {
+  ctx.fillStyle = "#13283a";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawPixelNoise();
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 84px Verdana";
+  ctx.fillText("LOGIN", WIDTH * 0.5 - 132, 220);
+
+  ctx.font = "bold 38px Verdana";
+  const { loginItems, selectedLoginIndex, highlightWidth } = getLoginProviderRenderModel((text) =>
+    ctx.measureText(text).width,
+  );
+  const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
+  const textX = WIDTH * 0.5;
+  const iconX = highlightX + 26;
+  loginItems.forEach((item, idx) => {
+    const y = 352 + idx * 84;
+    const selected = idx === selectedLoginIndex;
+    if (selected) {
+      ctx.fillStyle = "#ec4f4f";
+      ctx.fillRect(highlightX, y - 44, highlightWidth, 58);
+    }
+
+    if (item === "LOGIN WITH FACEBOOK" && facebookLogoReady) {
+      ctx.drawImage(facebookLogo, iconX, y - 33, 32, 32);
+    } else if (item === "LOGIN WITH GOOGLE") {
+      ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
+      ctx.font = "bold 24px Verdana";
+      ctx.fillText("G", iconX + 6, y - 6);
+      ctx.font = "bold 38px Verdana";
+    }
+
+    ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
+    const width = ctx.measureText(item).width;
+    ctx.fillText(item, textX - width * 0.5, y);
+  });
+
+  ctx.font = "22px Verdana";
+  ctx.fillStyle = "#bfd8f7";
+  ctx.fillText("Use ↑ ↓ and Enter. Esc goes back.", WIDTH / 2 - 176, HEIGHT - 80);
+}
+
 function drawTrackSelection() {
   ctx.fillStyle = "#11283e";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -1257,6 +1303,7 @@ export function render() {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
   if (state.mode === "menu") drawMenu();
+  else if (state.mode === "loginProviders") drawLoginProviders();
   else if (state.mode === "trackSelect") drawTrackSelection();
   else if (state.mode === "editor") drawEditor();
   else if (state.mode === "settings") drawSettings();

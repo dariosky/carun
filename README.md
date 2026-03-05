@@ -59,6 +59,8 @@ uv run uvicorn app.main:app --app-dir backend --reload --port 8000
 - `GET /api/auth/me`
 - `GET /api/auth/google/login`
 - `GET /api/auth/google/callback`
+- `GET /api/auth/facebook/login`
+- `GET /api/auth/facebook/callback`
 - `POST /api/auth/logout`
 - `GET /api/tracks`
 - `POST /api/tracks`

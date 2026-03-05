@@ -65,6 +65,7 @@ const { canDeleteTrackPreset, importTrackPresetData, physicsConfig, removeTrackP
   "../js/parameters.js"
 );
 const {
+  getLoginProviderRenderModel,
   getMainMenuRenderModel,
   getSettingsRenderLayout,
   getSettingsHeaderRenderModel,
@@ -95,6 +96,14 @@ test("main menu highlight width grows for longest label", () => {
     text === "RACE ANONYMOUSLY" ? 500 : text.length * 10,
   );
   assert.equal(widerModel.highlightWidth, 596);
+});
+
+test("login providers model exposes provider options and selected row", () => {
+  state.loginProviderIndex = 1;
+  const model = getLoginProviderRenderModel((text) => text.length * 10);
+  assert.deepEqual(model.loginItems, ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"]);
+  assert.equal(model.selectedLoginIndex, 1);
+  assert.equal(model.highlightWidth, Math.max(540, "LOGIN WITH FACEBOOK".length * 10 + 120));
 });
 
 test("settings render layout uses longest rendered row label", () => {
