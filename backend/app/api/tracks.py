@@ -62,7 +62,7 @@ def _can_access_track(track: Track, current_user: User | None) -> bool:
     return bool(current_user.is_admin or track.owner_user_id == current_user.id)
 
 
-@router.get("", response_model=list[TrackResponse])
+@router.get("", response_model=list[TrackDetailResponse])
 def list_tracks(
     session: Session = Depends(get_session),
     current_user: User | None = Depends(get_optional_current_user),
@@ -76,7 +76,7 @@ def list_tracks(
         query = select(Track).where(visibility).order_by(Track.created_at.desc())
 
     tracks = session.exec(query).all()
-    return [_to_track_response(track) for track in tracks]
+    return [_to_track_detail_response(track) for track in tracks]
 
 
 @router.post("", response_model=TrackResponse, status_code=201)

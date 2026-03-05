@@ -1056,11 +1056,6 @@ function drawTrackSelection() {
       const ownerWidth = ctx.measureText(ownerLabel).width;
       ctx.fillText(ownerLabel, cardX + cardSize * 0.5 - ownerWidth * 0.5, cardY + cardSize + 52);
     }
-    ctx.fillStyle = trackOption.isPublished ? "#9fe870" : "#ff9f5a";
-    ctx.font = "bold 14px Verdana";
-    const statusLabel = trackOption.isPublished ? "PUBLISHED" : "DRAFT";
-    const statusWidth = ctx.measureText(statusLabel).width;
-    ctx.fillText(statusLabel, cardX + cardSize * 0.5 - statusWidth * 0.5, cardY + cardSize + 70);
   }
 
   if (model.showLeftHint) {

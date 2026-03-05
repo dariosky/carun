@@ -105,7 +105,9 @@ def test_list_tracks_for_anonymous_user(client, session):
     response = client.get("/api/tracks")
 
     assert response.status_code == 200
-    assert track_names(response.json()) == ["Published", "System"]
+    payload = response.json()
+    assert track_names(payload) == ["Published", "System"]
+    assert isinstance(payload[0].get("track_payload_json"), dict)
 
 
 def test_list_tracks_for_authenticated_non_admin_includes_own_drafts(client, session):

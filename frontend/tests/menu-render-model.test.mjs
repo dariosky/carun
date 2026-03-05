@@ -61,7 +61,14 @@ function setupDomStubs() {
 setupDomStubs();
 
 const { state } = await import("../js/state.js");
-const { canDeleteTrackPreset, importTrackPresetData, physicsConfig, removeTrackPresetById, trackOptions } = await import(
+const {
+  canDeleteTrackPreset,
+  importTrackPresetData,
+  loadVisibleTracksFromApi,
+  physicsConfig,
+  removeTrackPresetById,
+  trackOptions,
+} = await import(
   "../js/parameters.js"
 );
 const {
@@ -197,4 +204,85 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.visibleTracks[1].showAdminBadge, false);
 
   for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
+});
+
+test("visible tracks from API replace local presets and keep published flags", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (path) => {
+    if (path !== "/api/tracks") throw new Error(`Unexpected path: ${path}`);
+    return {
+      ok: true,
+      async json() {
+        return [
+          {
+            id: "11111111-1111-1111-1111-111111111111",
+            name: "NEVE 2",
+            source: "system",
+            is_published: true,
+            owner_user_id: null,
+            share_token: null,
+            created_at: "2026-03-01T00:00:00Z",
+            track_payload_json: {
+              id: "neve2",
+              name: "NEVE 2",
+              track: {
+                cx: 640,
+                cy: 360,
+                outerA: 520,
+                outerB: 320,
+                innerA: 360,
+                innerB: 200,
+                warpOuter: [],
+                warpInner: [],
+                borderSize: 22,
+              },
+              checkpoints: [],
+              worldObjects: [],
+            },
+          },
+          {
+            id: "22222222-2222-2222-2222-222222222222",
+            name: "USER TRACK",
+            source: "user",
+            is_published: true,
+            owner_user_id: "user-1",
+            share_token: "abc",
+            created_at: "2026-03-01T00:00:00Z",
+            track_payload_json: {
+              id: "user-track",
+              name: "USER TRACK",
+              track: {
+                cx: 630,
+                cy: 350,
+                outerA: 510,
+                outerB: 310,
+                innerA: 350,
+                innerB: 210,
+                warpOuter: [],
+                warpInner: [],
+                borderSize: 22,
+              },
+              checkpoints: [],
+              worldObjects: [],
+            },
+          },
+        ];
+      },
+    };
+  };
+
+  try {
+    await loadVisibleTracksFromApi({ currentUserId: "user-1" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(trackOptions.some((t) => t.id === "classic"), false);
+  assert.equal(trackOptions.some((t) => t.id === "11111111-1111-1111-1111-111111111111"), true);
+  assert.equal(trackOptions.some((t) => t.id === "22222222-2222-2222-2222-222222222222"), true);
+
+  const systemTrack = trackOptions.find((t) => t.id === "11111111-1111-1111-1111-111111111111");
+  const userTrack = trackOptions.find((t) => t.id === "22222222-2222-2222-2222-222222222222");
+  assert.equal(systemTrack?.isPublished, true);
+  assert.equal(userTrack?.isPublished, true);
 });

@@ -49,6 +49,7 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 ## Engineering Rules
 
 - Keep code dependency-light (vanilla JS unless explicitly needed).
+- For Python tooling/scripts, run commands directly from the local `.venv` (for example `source .venv/bin/activate`), not via `uv run`, to avoid unintended `uv.lock` changes.
 - Preserve full-track visibility in gameplay scenes.
 - Avoid large rewrites without clear gameplay gain.
 - Keep modular ES-module structure (no monolithic `game.js` reintroduction).

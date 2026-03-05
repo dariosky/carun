@@ -3,7 +3,6 @@ import { initInputHandlers } from "./menus.js";
 import {
   loadSharedTrackFromApi,
   loadTrackPresetFromApi,
-  loadTracksFromFolder,
   loadVisibleTracksFromApi,
   sanitizePlayerName,
   trackOptions,
@@ -62,7 +61,6 @@ try {
   // Ignore auth probe failures and continue in anonymous mode.
 }
 
-await loadTracksFromFolder();
 await loadVisibleTracksFromApi({ currentUserId: state.auth.userId });
 const currentUrl = new URL(window.location.href);
 const shareFromUrl = currentUrl.searchParams.get("share");

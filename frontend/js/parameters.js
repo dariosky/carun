@@ -916,9 +916,14 @@ export async function loadVisibleTracksFromApi({ currentUserId = null } = {}) {
     return { loaded: 0 };
   }
 
+  // When DB tracks are available, make them the source of truth for runtime selection.
+  if (tracks.length > 0) {
+    TRACK_PRESETS.length = 0;
+    rebuildTrackOptions();
+  }
+
   let loaded = 0;
   for (const rawTrack of tracks) {
-    if (rawTrack && rawTrack.source === "system") continue;
     const preset = buildPresetFromApiTrack(rawTrack);
     if (!preset) continue;
     if (importTrackPresetData(preset, { persist: false })) loaded += 1;
@@ -981,51 +986,6 @@ export async function deleteOwnTrackFromApi(trackId) {
   const cleanId = normalizePresetId(trackId);
   if (!cleanId) return;
   await deleteTrackById(cleanId);
-}
-
-async function discoverTrackJsonPaths() {
-  try {
-    const manifestRes = await fetch("tracks/index.json", { cache: "no-store" });
-    if (manifestRes.ok) {
-      const manifest = await manifestRes.json();
-      if (Array.isArray(manifest)) {
-        return manifest
-          .filter((name) => typeof name === "string" && name.toLowerCase().endsWith(".json"))
-          .map((name) => (name.startsWith("tracks/") ? name : `tracks/${name}`));
-      }
-    }
-  } catch {
-    // Fall through to directory listing discovery.
-  }
-
-  try {
-    const dirRes = await fetch("tracks/", { cache: "no-store" });
-    if (!dirRes.ok) return [];
-    const html = await dirRes.text();
-    const links = [...html.matchAll(/href=\"([^\"]+\.json)\"/gi)].map((m) => m[1]);
-    const paths = links
-      .filter((href) => !href.includes("..") && !href.toLowerCase().includes("index.json"))
-      .map((href) => (href.startsWith("tracks/") ? href : `tracks/${href.replace(/^\.\//, "")}`));
-    return Array.from(new Set(paths));
-  } catch {
-    return [];
-  }
-}
-
-export async function loadTracksFromFolder() {
-  const paths = await discoverTrackJsonPaths();
-  let loadedCount = 0;
-  for (const path of paths) {
-    try {
-      const res = await fetch(path, { cache: "no-store" });
-      if (!res.ok) continue;
-      const json = await res.json();
-      if (importTrackPresetData(json, { persist: true })) loadedCount++;
-    } catch {
-      // Ignore malformed or inaccessible files.
-    }
-  }
-  return loadedCount;
 }
 
 export const CURB_MIN_WIDTH = 3;
