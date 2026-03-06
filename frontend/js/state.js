@@ -49,6 +49,7 @@ export const state = {
   snackbar: {
     text: "",
     time: 0,
+    kind: "info",
   },
   modal: {
     open: false,

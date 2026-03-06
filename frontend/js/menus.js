@@ -21,6 +21,7 @@ import {
 } from "./parameters.js";
 import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
+import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments } from "./track.js";
 import { logoutAuth, setTrackPublished, updateAuthDisplayName } from "./api.js";
 
@@ -354,11 +355,6 @@ function undoLastEditorAddition() {
   setCurbSegments(initCurbSegments());
 }
 
-function showSnackbar(text, seconds = 1.4) {
-  state.snackbar.text = text;
-  state.snackbar.time = seconds;
-}
-
 function trackSelectCardCount() {
   return trackOptions.length; // Track cards only.
 }
@@ -379,7 +375,7 @@ async function saveEditorTrack() {
       currentUserId: state.auth.userId,
     });
     if (!imported) {
-      showSnackbar("Save failed", 2);
+      showSnackbar("Save failed", { seconds: 2, kind: "error" });
       return;
     }
     if (shouldReplacePrevious && previousId !== imported.id) {
@@ -395,12 +391,12 @@ async function saveEditorTrack() {
       syncTrackSelectWindow();
       setTrackInUrl(imported.id);
     }
-    showSnackbar("Saved to DB");
+    showSnackbar("Saved to DB", { kind: "success" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Save failed";
     if (message.toLowerCase().includes("authentication required"))
-      showSnackbar("Login required", 2);
-    else showSnackbar(message, 2);
+      showSnackbar("Login required", { seconds: 2, kind: "error" });
+    else showSnackbar(message, { seconds: 2, kind: "error" });
   }
 }
 
@@ -440,18 +436,18 @@ function createEmptyTrackAndEdit() {
 
   const imported = importTrackPresetData(newTrack, { persist: true });
   if (!imported) {
-    showSnackbar("Could not create track", 2);
+    showSnackbar("Could not create track", { seconds: 2, kind: "error" });
     return;
   }
   const idx = trackOptions.findIndex((opt) => opt.id === imported.id);
   if (idx < 0) {
-    showSnackbar("Could not create track", 2);
+    showSnackbar("Could not create track", { seconds: 2, kind: "error" });
     return;
   }
   state.selectedTrackIndex = idx;
   state.trackSelectIndex = idx;
   syncTrackSelectWindow();
-  showSnackbar("New track created", 1.6);
+  showSnackbar("New track created", { seconds: 1.6, kind: "success" });
   enterEditor(idx);
 }
 
@@ -569,12 +565,12 @@ function activateSelection() {
           state.settingsIndex = 0;
           state.editingName = false;
           state.paused = false;
-          showSnackbar("Logged out", 1.8);
+          showSnackbar("Logged out", { seconds: 1.8, kind: "info" });
         })
         .catch((error) => {
           const message =
             error instanceof Error ? error.message : "Logout failed";
-          showSnackbar(message, 2);
+          showSnackbar(message, { seconds: 2, kind: "error" });
         });
       return;
     }
@@ -619,7 +615,7 @@ function onKeyDown(e) {
       closeModal();
       if (shouldConfirm && typeof onConfirm === "function") {
         Promise.resolve(onConfirm()).catch(() => {
-          showSnackbar("Action failed", 2);
+          showSnackbar("Action failed", { seconds: 2, kind: "error" });
         });
       }
       return;
@@ -643,12 +639,15 @@ function onKeyDown(e) {
               );
               state.playerName = nextName;
               state.auth.displayName = nextName;
-              showSnackbar("Display name updated", 1.8);
+              showSnackbar("Display name updated", {
+                seconds: 1.8,
+                kind: "success",
+              });
             })
             .catch((error) => {
               const message =
                 error instanceof Error ? error.message : "Update failed";
-              showSnackbar(message, 2);
+              showSnackbar(message, { seconds: 2, kind: "error" });
             });
         }
         savePlayerName(state.playerName);
@@ -758,13 +757,13 @@ function onKeyDown(e) {
         if (!updatedPreset) return;
         showSnackbar(
           updatedPreset.isPublished ? "Track published" : "Track unpublished",
-          1.8,
+          { seconds: 1.8, kind: "success" },
         );
       })
       .catch((error) => {
         const message =
           error instanceof Error ? error.message : "Publish update failed";
-        showSnackbar(message, 2);
+        showSnackbar(message, { seconds: 2, kind: "error" });
       });
     return;
   }
@@ -790,7 +789,10 @@ function onKeyDown(e) {
   ) {
     const preset = getTrackPreset(state.trackSelectIndex);
     if (!preset || !canDeleteTrackPreset(preset, state.auth.userId)) {
-      showSnackbar("Only your unpublished tracks can be deleted", 1.8);
+      showSnackbar("Only your unpublished tracks can be deleted", {
+        seconds: 1.8,
+        kind: "error",
+      });
       return;
     }
     openConfirmModal({
@@ -816,11 +818,11 @@ function onKeyDown(e) {
             state.trackSelectViewOffset = 0;
           }
           clearTrackInUrl(preset.id);
-          showSnackbar("Track deleted", 1.8);
+          showSnackbar("Track deleted", { seconds: 1.8, kind: "success" });
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Delete failed";
-          showSnackbar(message, 2);
+          showSnackbar(message, { seconds: 2, kind: "error" });
         }
       },
     });

@@ -1319,6 +1319,9 @@ function drawSettings() {
 function drawSnackbar() {
   if (!state.snackbar.text || state.snackbar.time <= 0) return;
   const text = state.snackbar.text;
+  const kind = state.snackbar.kind || "info";
+  const isError = kind === "error";
+  const isSuccess = kind === "success";
   const alpha = Math.min(1, state.snackbar.time / 0.25);
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -1328,12 +1331,20 @@ function drawSnackbar() {
   const height = 44;
   const x = WIDTH * 0.5 - width * 0.5;
   const y = HEIGHT - 58;
-  ctx.fillStyle = "rgba(8, 16, 24, 0.85)";
+  ctx.fillStyle = isError
+    ? "rgba(128, 22, 34, 0.95)"
+    : isSuccess
+      ? "rgba(20, 106, 54, 0.9)"
+      : "rgba(8, 16, 24, 0.85)";
   ctx.fillRect(x, y, width, height);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+  ctx.strokeStyle = isError
+    ? "rgba(255, 171, 171, 0.95)"
+    : isSuccess
+      ? "rgba(176, 244, 194, 0.85)"
+      : "rgba(255, 255, 255, 0.42)";
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, width, height);
-  ctx.fillStyle = "#f2fbff";
+  ctx.fillStyle = isError ? "#fff3f3" : "#f2fbff";
   ctx.fillText(text, x + paddingX, y + 30);
   ctx.restore();
 }

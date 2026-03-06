@@ -158,3 +158,27 @@ def test_upsert_user_from_oauth_rejects_facebook_payload_without_email(session):
             {"id": "facebook-no-email", "name": "No Email"},
         )
     assert "missing email" in str(exc.value).lower()
+
+
+def test_google_callback_state_failure_includes_auth_error(client):
+    response = client.get(
+        "/api/auth/google/callback",
+        params={"code": "fake-code", "state": "fake-state"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    location = response.headers.get("location", "")
+    assert "auth=failed" in location
+    assert "auth_error=" in location
+
+
+def test_facebook_callback_state_failure_includes_auth_error(client):
+    response = client.get(
+        "/api/auth/facebook/callback",
+        params={"code": "fake-code", "state": "fake-state"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    location = response.headers.get("location", "")
+    assert "auth=failed" in location
+    assert "auth_error=" in location

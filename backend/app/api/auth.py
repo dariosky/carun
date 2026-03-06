@@ -2,7 +2,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
@@ -21,6 +21,11 @@ from ..models import User
 from ..schemas import AuthDisplayNameUpdateRequest, AuthMeResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _auth_failed_redirect(message: str) -> RedirectResponse:
+    query = urlencode({"auth": "failed", "auth_error": message[:180]})
+    return RedirectResponse(f"/?{query}", status_code=302)
 
 
 @router.get("/me", response_model=AuthMeResponse)
@@ -71,10 +76,16 @@ async def google_callback(
         if other_state and other_state == state:
             query = urlencode({"code": code, "state": state})
             return RedirectResponse(f"/api/auth/facebook/callback?{query}", status_code=302)
-        return RedirectResponse("/?auth=failed", status_code=302)
+        return _auth_failed_redirect("Login state verification failed")
 
-    payload = await exchange_google_code_for_userinfo(code)
-    user = upsert_user_from_oauth(session, "google", payload)
+    try:
+        payload = await exchange_google_code_for_userinfo(code)
+        user = upsert_user_from_oauth(session, "google", payload)
+    except HTTPException as exc:
+        detail = str(exc.detail) if hasattr(exc, "detail") else "Google login failed"
+        return _auth_failed_redirect(detail or "Google login failed")
+    except Exception:
+        return _auth_failed_redirect("Google login failed")
 
     request.session["user_id"] = str(user.id)
     request.session["display_name"] = user.display_name
@@ -97,10 +108,16 @@ async def facebook_callback(
         if other_state and other_state == state:
             query = urlencode({"code": code, "state": state})
             return RedirectResponse(f"/api/auth/google/callback?{query}", status_code=302)
-        return RedirectResponse("/?auth=failed", status_code=302)
+        return _auth_failed_redirect("Login state verification failed")
 
-    payload = await exchange_facebook_code_for_userinfo(code)
-    user = upsert_user_from_oauth(session, "facebook", payload)
+    try:
+        payload = await exchange_facebook_code_for_userinfo(code)
+        user = upsert_user_from_oauth(session, "facebook", payload)
+    except HTTPException as exc:
+        detail = str(exc.detail) if hasattr(exc, "detail") else "Facebook login failed"
+        return _auth_failed_redirect(detail or "Facebook login failed")
+    except Exception:
+        return _auth_failed_redirect("Facebook login failed")
 
     request.session["user_id"] = str(user.id)
     request.session["display_name"] = user.display_name

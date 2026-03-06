@@ -9,6 +9,7 @@ import {
 } from "./parameters.js";
 import { updateRace } from "./physics.js";
 import { render } from "./render.js";
+import { showSnackbar, tickSnackbar } from "./snackbar.js";
 import { setCurbSegments, state } from "./state.js";
 import { nextTaglineSet } from "./taglines.js";
 import { initCurbSegments } from "./track.js";
@@ -33,16 +34,17 @@ function updateMenuTagline(dt) {
 
 const appUrl = new URL(window.location.href);
 const authResult = appUrl.searchParams.get("auth");
+const authError = appUrl.searchParams.get("auth_error");
 if (authResult === "ok") {
-  state.snackbar.text = "Logged in";
-  state.snackbar.time = 1.8;
+  showSnackbar("Logged in", { seconds: 1.8, kind: "success" });
 }
 if (authResult === "failed") {
-  state.snackbar.text = "Login failed";
-  state.snackbar.time = 1.8;
+  const errorText = authError ? `Login failed: ${authError}` : "Login failed";
+  showSnackbar(errorText, { seconds: 2.4, kind: "error" });
 }
 if (authResult) {
   appUrl.searchParams.delete("auth");
+  appUrl.searchParams.delete("auth_error");
   const query = appUrl.searchParams.toString();
   window.history.replaceState(
     {},
@@ -75,8 +77,7 @@ if (shareFromUrl) {
       currentUserId: state.auth.userId,
     });
   } catch {
-    state.snackbar.text = "Track not found";
-    state.snackbar.time = 1.8;
+    showSnackbar("Track not found", { seconds: 1.8, kind: "error" });
   }
 } else if (trackFromUrl) {
   try {
@@ -84,8 +85,7 @@ if (shareFromUrl) {
       currentUserId: state.auth.userId,
     });
   } catch {
-    state.snackbar.text = "Track not found";
-    state.snackbar.time = 1.8;
+    showSnackbar("Track not found", { seconds: 1.8, kind: "error" });
   }
 }
 if (trackOptions.length > 0) {
@@ -112,10 +112,7 @@ render();
 startGameLoop({
   update(dt) {
     updateMenuTagline(dt);
-    if (state.snackbar.time > 0) {
-      state.snackbar.time = Math.max(0, state.snackbar.time - dt);
-      if (state.snackbar.time === 0) state.snackbar.text = "";
-    }
+    tickSnackbar(dt);
     if (state.mode === "racing" && !state.paused) {
       updateRace(dt);
     }
