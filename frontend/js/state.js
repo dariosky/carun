@@ -28,6 +28,10 @@ export const state = {
   editingName: false,
   raceTime: 0,
   finished: false,
+  raceSubmission: {
+    inFlight: false,
+    completed: false,
+  },
   startSequence: {
     active: false,
     elapsed: 0,

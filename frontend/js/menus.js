@@ -845,6 +845,10 @@ function onKeyDown(e) {
               ? Number(updatedTrack.best_lap_ms)
               : null,
             bestLapDisplayName: updatedTrack.best_lap_display_name || null,
+            bestRaceMs: Number.isFinite(updatedTrack.best_race_ms)
+              ? Number(updatedTrack.best_race_ms)
+              : null,
+            bestRaceDisplayName: updatedTrack.best_race_display_name || null,
             isPublished: Boolean(updatedTrack.is_published),
             shareToken: updatedTrack.share_token || null,
             fromDb: true,
@@ -893,6 +897,10 @@ function onKeyDown(e) {
               ? Number(updatedTrack.best_lap_ms)
               : null,
             bestLapDisplayName: updatedTrack.best_lap_display_name || null,
+            bestRaceMs: Number.isFinite(updatedTrack.best_race_ms)
+              ? Number(updatedTrack.best_race_ms)
+              : null,
+            bestRaceDisplayName: updatedTrack.best_race_display_name || null,
             isPublished: Boolean(updatedTrack.is_published),
             shareToken: updatedTrack.share_token || null,
             fromDb: true,

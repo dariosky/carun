@@ -1208,6 +1208,11 @@ function drawTrackSelection() {
           selectedOption.bestLapMs / 1000,
         )}`
       : "No laps yet";
+    const bestRaceText = Number.isFinite(selectedOption?.bestRaceMs)
+      ? `${selectedOption.bestRaceDisplayName || "UNKNOWN"} - ${formatTime(
+          selectedOption.bestRaceMs / 1000,
+        )}`
+      : "No races yet";
 
     let centerlineLength = centerlineLengthCache.get(selectedPreset.track);
     if (!Number.isFinite(centerlineLength)) {
@@ -1237,6 +1242,7 @@ function drawTrackSelection() {
     ctx.fillText(`Owner: ${ownerName}`, statsX, statsY);
     ctx.fillText(`Distance: ${distanceLabel}`, statsX, statsY + 28);
     ctx.fillText(`Best lap: ${bestLapText}`, statsX, statsY + 56);
+    ctx.fillText(`Best total: ${bestRaceText}`, statsX, statsY + 84);
   }
 }
 

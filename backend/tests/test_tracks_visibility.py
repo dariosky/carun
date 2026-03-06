@@ -3,9 +3,9 @@ from base64 import b64encode
 from uuid import UUID
 
 from app.config import get_settings
-from app.models import BestLap, Track, User
+from app.models import BestLap, BestRace, Track, User
 from itsdangerous import TimestampSigner
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 
 def login_as(client, user: User):
@@ -253,6 +253,7 @@ def test_list_tracks_includes_owner_and_best_lap_metadata(client, session):
     owner = create_user(session, "OWNER")
     track = create_track(session, "Published", owner=owner, is_published=True)
     session.add(BestLap(user_id=owner.id, track_id=track.id, lap_ms=11111, build_version="test"))
+    session.add(BestRace(user_id=owner.id, track_id=track.id, race_ms=33333, build_version="test"))
     session.commit()
 
     response = client.get("/api/tracks")
@@ -263,6 +264,8 @@ def test_list_tracks_includes_owner_and_best_lap_metadata(client, session):
     assert row["owner_display_name"] == owner.display_name
     assert row["best_lap_ms"] == 11111
     assert row["best_lap_display_name"] == owner.display_name
+    assert row["best_race_ms"] == 33333
+    assert row["best_race_display_name"] == owner.display_name
 
 
 def test_owner_can_rename_own_track(client, session):
@@ -299,3 +302,59 @@ def test_non_owner_non_admin_cannot_rename_track(client, session):
     response = client.patch(f"/api/tracks/{track.id}", json={"name": "Nope"})
 
     assert response.status_code == 403
+
+
+def test_submit_race_requires_auth(client, session):
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Track", owner=owner, is_published=True)
+    logout(client)
+
+    response = client.post(
+        "/api/races",
+        json={
+            "track_id": str(track.id),
+            "race_ms": 45000,
+            "lap_count": 3,
+            "completed": True,
+            "build_version": "test",
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_submit_race_upserts_best_race(client, session):
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Track", owner=owner, is_published=True)
+    login_as(client, owner)
+
+    first = client.post(
+        "/api/races",
+        json={
+            "track_id": str(track.id),
+            "race_ms": 52000,
+            "lap_count": 3,
+            "completed": True,
+            "build_version": "test",
+        },
+    )
+    second = client.post(
+        "/api/races",
+        json={
+            "track_id": str(track.id),
+            "race_ms": 50000,
+            "lap_count": 3,
+            "completed": True,
+            "build_version": "test",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["best_race_ms"] == 52000
+    assert second.json()["best_race_ms"] == 50000
+
+    stored = session.exec(
+        select(BestRace).where(BestRace.user_id == owner.id, BestRace.track_id == track.id)
+    ).first()
+    assert stored is not None
+    assert stored.race_ms == 50000

@@ -149,6 +149,11 @@ function clonePresetData(preset) {
       typeof preset.bestLapDisplayName === "string"
         ? preset.bestLapDisplayName
         : null,
+    bestRaceMs: Number.isFinite(preset.bestRaceMs) ? preset.bestRaceMs : null,
+    bestRaceDisplayName:
+      typeof preset.bestRaceDisplayName === "string"
+        ? preset.bestRaceDisplayName
+        : null,
     isPublished: Boolean(preset.isPublished),
     shareToken:
       typeof preset.shareToken === "string" ? preset.shareToken : null,
@@ -228,6 +233,17 @@ function normalizeTrackPresetData(raw) {
         ? raw.bestLapDisplayName
         : typeof raw.best_lap_display_name === "string"
           ? raw.best_lap_display_name
+          : null,
+    bestRaceMs: Number.isFinite(raw.bestRaceMs)
+      ? Number(raw.bestRaceMs)
+      : Number.isFinite(raw.best_race_ms)
+        ? Number(raw.best_race_ms)
+        : null,
+    bestRaceDisplayName:
+      typeof raw.bestRaceDisplayName === "string"
+        ? raw.bestRaceDisplayName
+        : typeof raw.best_race_display_name === "string"
+          ? raw.best_race_display_name
           : null,
     isPublished: Boolean(raw.isPublished ?? raw.is_published ?? false),
     shareToken:
@@ -316,6 +332,8 @@ function rebuildTrackOptions() {
         ownerDisplayName,
         bestLapMs,
         bestLapDisplayName,
+        bestRaceMs,
+        bestRaceDisplayName,
         fromDb,
         shareToken,
       }) => ({
@@ -329,6 +347,9 @@ function rebuildTrackOptions() {
         bestLapMs: Number.isFinite(bestLapMs) ? bestLapMs : null,
         bestLapDisplayName:
           typeof bestLapDisplayName === "string" ? bestLapDisplayName : null,
+        bestRaceMs: Number.isFinite(bestRaceMs) ? bestRaceMs : null,
+        bestRaceDisplayName:
+          typeof bestRaceDisplayName === "string" ? bestRaceDisplayName : null,
         fromDb: Boolean(fromDb),
         shareToken: typeof shareToken === "string" ? shareToken : null,
       }),
@@ -412,6 +433,17 @@ export function setTrackPresetMetadata(
     updates.bestLapDisplayName === null
   ) {
     preset.bestLapDisplayName = updates.bestLapDisplayName;
+  }
+  if (Number.isFinite(updates.bestRaceMs) || updates.bestRaceMs === null) {
+    preset.bestRaceMs = Number.isFinite(updates.bestRaceMs)
+      ? Number(updates.bestRaceMs)
+      : null;
+  }
+  if (
+    typeof updates.bestRaceDisplayName === "string" ||
+    updates.bestRaceDisplayName === null
+  ) {
+    preset.bestRaceDisplayName = updates.bestRaceDisplayName;
   }
   if (typeof updates.isPublished === "boolean")
     preset.isPublished = updates.isPublished;
@@ -1057,6 +1089,13 @@ function buildPresetFromApiTrack(raw) {
       typeof raw.best_lap_display_name === "string"
         ? raw.best_lap_display_name
         : null,
+    bestRaceMs: Number.isFinite(raw.best_race_ms)
+      ? Number(raw.best_race_ms)
+      : null,
+    bestRaceDisplayName:
+      typeof raw.best_race_display_name === "string"
+        ? raw.best_race_display_name
+        : null,
     isPublished: Boolean(raw.is_published),
     shareToken: typeof raw.share_token === "string" ? raw.share_token : null,
     canDelete: false,
@@ -1126,6 +1165,10 @@ export async function saveTrackPresetToDb(
       ? Number(createdTrack.best_lap_ms)
       : null,
     bestLapDisplayName: createdTrack.best_lap_display_name || null,
+    bestRaceMs: Number.isFinite(createdTrack.best_race_ms)
+      ? Number(createdTrack.best_race_ms)
+      : null,
+    bestRaceDisplayName: createdTrack.best_race_display_name || null,
     isPublished: Boolean(createdTrack.is_published),
     shareToken: createdTrack.share_token || null,
     canDelete: true,

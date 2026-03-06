@@ -185,3 +185,37 @@ export async function deleteTrackById(trackId) {
     throw new Error(message);
   }
 }
+
+export async function submitLapResult(payload) {
+  const response = await request("/api/laps", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(data) && typeof data.detail === "string"
+        ? data.detail
+        : "Lap submit failed";
+    throw new Error(message);
+  }
+  if (!isObject(data)) throw new Error("Lap submit failed");
+  return data;
+}
+
+export async function submitRaceResult(payload) {
+  const response = await request("/api/races", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(data) && typeof data.detail === "string"
+        ? data.detail
+        : "Race submit failed";
+    throw new Error(message);
+  }
+  if (!isObject(data)) throw new Error("Race submit failed");
+  return data;
+}

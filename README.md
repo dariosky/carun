@@ -67,6 +67,7 @@ uv run uvicorn app.main:app --app-dir backend --reload --port 8000
 - `GET /api/tracks/share/{share_token}`
 - `GET /api/leaderboard/{track_id}`
 - `POST /api/laps`
+- `POST /api/races`
 
 ## Deployment
 

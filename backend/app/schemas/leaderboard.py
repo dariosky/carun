@@ -17,6 +17,20 @@ class LapSubmitResponse(BaseModel):
     best_lap_ms: int | None = None
 
 
+class RaceSubmitRequest(BaseModel):
+    track_id: str
+    race_ms: int = Field(gt=0)
+    lap_count: int = Field(gt=0)
+    completed: bool = True
+    build_version: str = "dev"
+
+
+class RaceSubmitResponse(BaseModel):
+    accepted: bool
+    reason: str | None = None
+    best_race_ms: int | None = None
+
+
 class LeaderboardEntry(BaseModel):
     rank: int
     user_id: str

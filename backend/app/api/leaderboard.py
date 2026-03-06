@@ -6,8 +6,15 @@ from sqlmodel import Session, select
 
 from ..db import get_session
 from ..deps import get_current_user, get_optional_current_user
-from ..models import BestLap, LapEvent, Track, User
-from ..schemas import LapSubmitRequest, LapSubmitResponse, LeaderboardEntry, LeaderboardResponse
+from ..models import BestLap, BestRace, LapEvent, Track, User
+from ..schemas import (
+    LapSubmitRequest,
+    LapSubmitResponse,
+    LeaderboardEntry,
+    LeaderboardResponse,
+    RaceSubmitRequest,
+    RaceSubmitResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["leaderboard"])
 
@@ -119,3 +126,39 @@ def submit_lap(
         session.refresh(best)
 
     return LapSubmitResponse(accepted=True, best_lap_ms=best.lap_ms if best else payload.lap_ms)
+
+
+@router.post("/races", response_model=RaceSubmitResponse)
+def submit_race(
+    payload: RaceSubmitRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    track = session.get(Track, parse_track_id(payload.track_id))
+    if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+
+    if not payload.completed:
+        return RaceSubmitResponse(accepted=False, reason="race_incomplete")
+
+    best = session.exec(
+        select(BestRace).where(BestRace.user_id == current_user.id, BestRace.track_id == track.id)
+    ).first()
+
+    if not best:
+        best = BestRace(
+            user_id=current_user.id,
+            track_id=track.id,
+            race_ms=payload.race_ms,
+            build_version=payload.build_version,
+            updated_at=datetime.utcnow(),
+        )
+        session.add(best)
+    elif payload.race_ms < best.race_ms:
+        best.race_ms = payload.race_ms
+        best.build_version = payload.build_version
+        best.updated_at = datetime.utcnow()
+
+    session.commit()
+    session.refresh(best)
+    return RaceSubmitResponse(accepted=True, best_race_ms=best.race_ms)

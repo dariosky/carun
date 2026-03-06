@@ -2,8 +2,12 @@ import {
   CHECKPOINT_WIDTH_MULTIPLIER,
   physicsConfig,
   checkpoints,
+  getTrackPresetById,
+  setTrackPresetMetadata,
   track,
+  trackOptions,
 } from "./parameters.js";
+import { submitLapResult, submitRaceResult } from "./api.js";
 import {
   car,
   keys,
@@ -150,6 +154,8 @@ export function resetRace() {
   state.startSequence.goTime = 3 + Math.random() * 2;
   state.startSequence.goFlash = 0;
   state.checkpointBlink.time = 0;
+  state.raceSubmission.inFlight = false;
+  state.raceSubmission.completed = false;
   physicsRuntime.input.throttle = 0;
   physicsRuntime.input.brake = 0;
   physicsRuntime.input.steer = 0;
@@ -462,7 +468,83 @@ export function updateRace(dt) {
 
   if (!state.finished) {
     checkCheckpoints();
+  } else if (
+    !state.raceSubmission.completed &&
+    !state.raceSubmission.inFlight
+  ) {
+    state.raceSubmission.inFlight = true;
+    Promise.resolve(persistRaceResults())
+      .catch(() => {
+        // Ignore transient submit failures: race UI should remain responsive.
+      })
+      .finally(() => {
+        state.raceSubmission.inFlight = false;
+        state.raceSubmission.completed = true;
+      });
   }
+}
+
+async function persistRaceResults() {
+  if (!state.auth.authenticated) return;
+  if (
+    state.selectedTrackIndex < 0 ||
+    state.selectedTrackIndex >= trackOptions.length
+  )
+    return;
+
+  const selectedTrack = trackOptions[state.selectedTrackIndex];
+  if (
+    !selectedTrack ||
+    !selectedTrack.fromDb ||
+    typeof selectedTrack.id !== "string"
+  )
+    return;
+
+  if (!lapData.lapTimes.length) return;
+
+  const lapTimesMs = lapData.lapTimes
+    .map((seconds) => Math.round(seconds * 1000))
+    .filter((lapMs) => Number.isFinite(lapMs) && lapMs > 0);
+  if (!lapTimesMs.length) return;
+
+  const bestLapMs = Math.min(...lapTimesMs);
+  const raceMs = lapTimesMs.reduce((sum, lapMs) => sum + lapMs, 0);
+  const lapSubmit = await submitLapResult({
+    track_id: selectedTrack.id,
+    lap_ms: bestLapMs,
+    completed: true,
+    checkpoint_count: checkpoints.length,
+    expected_checkpoint_count: checkpoints.length,
+    lap_data_checksum: `finish:${selectedTrack.id}:${bestLapMs}:${raceMs}`,
+    build_version: "dev",
+  });
+
+  await submitRaceResult({
+    track_id: selectedTrack.id,
+    race_ms: raceMs,
+    lap_count: lapTimesMs.length,
+    completed: true,
+    build_version: "dev",
+  });
+
+  const nextBestLapMs = Number.isFinite(lapSubmit.best_lap_ms)
+    ? Number(lapSubmit.best_lap_ms)
+    : bestLapMs;
+  const selectedPreset = getTrackPresetById(selectedTrack.id);
+  const nextBestRaceMs =
+    selectedPreset && Number.isFinite(selectedPreset.bestRaceMs)
+      ? Math.min(Number(selectedPreset.bestRaceMs), raceMs)
+      : raceMs;
+  setTrackPresetMetadata(
+    selectedTrack.id,
+    {
+      bestLapMs: nextBestLapMs,
+      bestLapDisplayName: state.auth.displayName || null,
+      bestRaceMs: nextBestRaceMs,
+      bestRaceDisplayName: state.auth.displayName || null,
+    },
+    { currentUserId: state.auth.userId },
+  );
 }
 
 function checkCheckpoints() {

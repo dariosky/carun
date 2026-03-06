@@ -27,6 +27,8 @@ class TrackResponse(BaseModel):
     owner_display_name: str | None = None
     best_lap_ms: int | None = None
     best_lap_display_name: str | None = None
+    best_race_ms: int | None = None
+    best_race_display_name: str | None = None
     created_at: datetime
 
 
@@ -48,5 +50,7 @@ class TrackDetailResponse(BaseModel):
     owner_display_name: str | None = None
     best_lap_ms: int | None = None
     best_lap_display_name: str | None = None
+    best_race_ms: int | None = None
+    best_race_display_name: str | None = None
     created_at: datetime
     track_payload_json: dict

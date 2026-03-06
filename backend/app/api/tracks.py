@@ -8,7 +8,7 @@ from sqlmodel import Session, or_, select
 
 from ..db import get_session
 from ..deps import get_current_user, get_optional_current_user
-from ..models import BestLap, Track, User
+from ..models import BestLap, BestRace, Track, User
 from ..schemas import (
     TrackCreateRequest,
     TrackDetailResponse,
@@ -41,6 +41,19 @@ def _best_lap_for_track(session: Session, track_id: UUID) -> tuple[int | None, s
     return row[0], row[1]
 
 
+def _best_race_for_track(session: Session, track_id: UUID) -> tuple[int | None, str | None]:
+    row = session.exec(
+        select(BestRace.race_ms, User.display_name)
+        .join(User, User.id == BestRace.user_id)
+        .where(BestRace.track_id == track_id)
+        .order_by(BestRace.race_ms.asc(), BestRace.updated_at.asc())
+        .limit(1)
+    ).first()
+    if not row:
+        return None, None
+    return row[0], row[1]
+
+
 def _owner_display_name_for_track(session: Session, track: Track) -> str | None:
     if not track.owner_user_id:
         return None
@@ -50,6 +63,7 @@ def _owner_display_name_for_track(session: Session, track: Track) -> str | None:
 
 def _to_track_response(session: Session, track: Track) -> TrackResponse:
     best_lap_ms, best_lap_display_name = _best_lap_for_track(session, track.id)
+    best_race_ms, best_race_display_name = _best_race_for_track(session, track.id)
     return TrackResponse(
         id=str(track.id),
         slug=track.slug,
@@ -61,12 +75,15 @@ def _to_track_response(session: Session, track: Track) -> TrackResponse:
         owner_display_name=_owner_display_name_for_track(session, track),
         best_lap_ms=best_lap_ms,
         best_lap_display_name=best_lap_display_name,
+        best_race_ms=best_race_ms,
+        best_race_display_name=best_race_display_name,
         created_at=track.created_at,
     )
 
 
 def _to_track_detail_response(session: Session, track: Track) -> TrackDetailResponse:
     best_lap_ms, best_lap_display_name = _best_lap_for_track(session, track.id)
+    best_race_ms, best_race_display_name = _best_race_for_track(session, track.id)
     return TrackDetailResponse(
         id=str(track.id),
         slug=track.slug,
@@ -78,6 +95,8 @@ def _to_track_detail_response(session: Session, track: Track) -> TrackDetailResp
         owner_display_name=_owner_display_name_for_track(session, track),
         best_lap_ms=best_lap_ms,
         best_lap_display_name=best_lap_display_name,
+        best_race_ms=best_race_ms,
+        best_race_display_name=best_race_display_name,
         created_at=track.created_at,
         track_payload_json=track.track_payload_json,
     )

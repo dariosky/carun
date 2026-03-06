@@ -1,5 +1,12 @@
 from .auth import AuthDisplayNameUpdateRequest, AuthMeResponse
-from .leaderboard import LapSubmitRequest, LapSubmitResponse, LeaderboardEntry, LeaderboardResponse
+from .leaderboard import (
+    LapSubmitRequest,
+    LapSubmitResponse,
+    LeaderboardEntry,
+    LeaderboardResponse,
+    RaceSubmitRequest,
+    RaceSubmitResponse,
+)
 from .tracks import (
     TrackCreateRequest,
     TrackDetailResponse,
@@ -16,6 +23,8 @@ __all__ = [
     "LeaderboardResponse",
     "LapSubmitRequest",
     "LapSubmitResponse",
+    "RaceSubmitRequest",
+    "RaceSubmitResponse",
     "TrackCreateRequest",
     "TrackDetailResponse",
     "TrackPublishRequest",
