@@ -16,6 +16,7 @@ import { initCurbSegments } from "./track.js";
 import { fetchAuthMe } from "./api.js";
 import { initAudio, syncMenuMusicForMode } from "./audio.js";
 import { gameAudio } from "./game-audio.js";
+import { updateParticles } from "./particles.js";
 
 function updateMenuTagline(dt) {
   const rotation = state.menuTagline;
@@ -128,6 +129,7 @@ startGameLoop({
       raceAudioActive = false;
     }
     if (state.mode === "racing" && !state.paused) {
+      updateParticles(dt);
       updateRace(dt);
     }
   },

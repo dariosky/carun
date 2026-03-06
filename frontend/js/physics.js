@@ -9,6 +9,13 @@ import {
 } from "./parameters.js";
 import { submitLapResult, submitRaceResult } from "./api.js";
 import {
+  emitFinishConfetti,
+  emitGrassDust,
+  emitHandbrakeSmoke,
+  emitWaterSpray,
+  resetParticles,
+} from "./particles.js";
+import {
   car,
   keys,
   lapData,
@@ -83,6 +90,84 @@ function wheelWorldPoints() {
     x: car.x + forwardX * o.x + rightX * o.y,
     y: car.y + forwardY * o.x + rightY * o.y,
   }));
+}
+
+function emitDrivingParticles({
+  dt,
+  wheelPoints,
+  forwardX,
+  forwardY,
+  headingForwardSpeed,
+  headingLateralSpeed,
+  surfaceName,
+}) {
+  const emitters = physicsRuntime.particleEmitters;
+  emitters.smokeCooldown = Math.max(0, emitters.smokeCooldown - dt);
+  emitters.splashCooldown = Math.max(0, emitters.splashCooldown - dt);
+  emitters.dustCooldown = Math.max(0, emitters.dustCooldown - dt);
+
+  const speedAbs = Math.abs(headingForwardSpeed);
+  const lateralAbs = Math.abs(headingLateralSpeed);
+  const handbrakeStrength =
+    physicsRuntime.input.handbrake *
+    clamp((speedAbs - 35) / 85, 0, 1) *
+    clamp((lateralAbs - 24) / 120, 0, 1);
+
+  if (handbrakeStrength > 0.08 && emitters.smokeCooldown <= 0) {
+    const rearAngle = Math.atan2(-forwardY, -forwardX);
+    emitHandbrakeSmoke({
+      x: wheelPoints[2].x,
+      y: wheelPoints[2].y,
+      angle: rearAngle,
+      strength: 0.7 + handbrakeStrength * 1.6,
+    });
+    emitHandbrakeSmoke({
+      x: wheelPoints[3].x,
+      y: wheelPoints[3].y,
+      angle: rearAngle,
+      strength: 0.7 + handbrakeStrength * 1.6,
+    });
+    emitters.smokeCooldown = 0.028;
+  }
+
+  const waterStrength =
+    surfaceName === "water" ? clamp((car.speed - 24) / 120, 0, 1) : 0;
+  if (waterStrength > 0.05 && emitters.splashCooldown <= 0) {
+    const frontMidX = (wheelPoints[0].x + wheelPoints[1].x) * 0.5;
+    const frontMidY = (wheelPoints[0].y + wheelPoints[1].y) * 0.5;
+    const noseX = frontMidX + forwardX * (car.width * 0.22);
+    const noseY = frontMidY + forwardY * (car.width * 0.22);
+    const sprayAngle = Math.atan2(forwardY, forwardX);
+    emitWaterSpray({
+      x: noseX,
+      y: noseY,
+      angle: sprayAngle,
+      strength: 0.8 + waterStrength * 1.5,
+      inheritVx: car.vx * 0.16,
+      inheritVy: car.vy * 0.16,
+    });
+    emitters.splashCooldown = 0.022;
+  }
+
+  const grassStrength =
+    surfaceName === "grass" ? clamp((car.speed - 18) / 90, 0, 1) : 0;
+  if (grassStrength > 0.04 && emitters.dustCooldown <= 0) {
+    const travelAngle = Math.atan2(car.vy, car.vx);
+    const dustAngle = Number.isFinite(travelAngle)
+      ? travelAngle + Math.PI
+      : Math.atan2(-forwardY, -forwardX);
+    for (let i = 0; i < wheelPoints.length; i++) {
+      emitGrassDust({
+        x: wheelPoints[i].x,
+        y: wheelPoints[i].y,
+        angle: dustAngle,
+        strength: 0.7 + grassStrength * 1.25,
+        inheritVx: car.vx * 0.1,
+        inheritVy: car.vy * 0.1,
+      });
+    }
+    emitters.dustCooldown = 0.036;
+  }
 }
 
 function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
@@ -177,7 +262,16 @@ export function resetRace() {
   physicsRuntime.debug.pivotY = car.y;
   physicsRuntime.wheelLastPoints = null;
   physicsRuntime.prevForwardSpeed = null;
+  physicsRuntime.particleEmitters.smokeCooldown = 0;
+  physicsRuntime.particleEmitters.splashCooldown = 0;
+  physicsRuntime.particleEmitters.dustCooldown = 0;
   skidMarks.length = 0;
+  resetParticles();
+  state.finishCelebration.bestLap = false;
+  state.finishCelebration.bestRace = false;
+  state.finishCelebration.totalTime = 0;
+  state.finishCelebration.bestLapTime = 0;
+  state.finishCelebration.confettiActive = false;
 }
 
 export function clearRaceInputs() {
@@ -540,7 +634,17 @@ export function updateRace(dt) {
       : (headingForwardSpeed - prevForward) / dt;
   physicsRuntime.prevForwardSpeed = headingForwardSpeed;
   const skidSurface = surfaceAt(car.x, car.y);
+  const wheelPoints = wheelWorldPoints();
   recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
+  emitDrivingParticles({
+    dt,
+    wheelPoints,
+    forwardX: headingForwardX,
+    forwardY: headingForwardY,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    surfaceName: skidSurface,
+  });
   const skidAmount =
     clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
     clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
@@ -634,6 +738,39 @@ async function persistRaceResults() {
   );
 }
 
+function finalizeFinishCelebration() {
+  const lapTimes = lapData.lapTimes;
+  const totalTime = lapTimes.reduce((sum, lapSeconds) => sum + lapSeconds, 0);
+  const bestLapTime = lapTimes.length ? Math.min(...lapTimes) : 0;
+  const selectedTrack = trackOptions[state.selectedTrackIndex] || null;
+  const previousBestLapMs =
+    selectedTrack && Number.isFinite(selectedTrack.bestLapMs)
+      ? Number(selectedTrack.bestLapMs)
+      : null;
+  const previousBestRaceMs =
+    selectedTrack && Number.isFinite(selectedTrack.bestRaceMs)
+      ? Number(selectedTrack.bestRaceMs)
+      : null;
+  const totalMs = Math.round(totalTime * 1000);
+  const bestLapMs = Math.round(bestLapTime * 1000);
+  const bestLap =
+    lapTimes.length > 0 &&
+    (previousBestLapMs === null || bestLapMs < previousBestLapMs);
+  const bestRace =
+    lapTimes.length > 0 &&
+    (previousBestRaceMs === null || totalMs < previousBestRaceMs);
+
+  state.finishCelebration.bestLap = bestLap;
+  state.finishCelebration.bestRace = bestRace;
+  state.finishCelebration.totalTime = totalTime;
+  state.finishCelebration.bestLapTime = bestLapTime;
+  state.finishCelebration.confettiActive = bestLap || bestRace;
+
+  if (bestLap || bestRace) {
+    emitFinishConfetti({ bestLap, bestRace });
+  }
+}
+
 function checkCheckpoints() {
   if (!checkpoints.length) return;
   const startCheckpointIndex = getStartCheckpointIndex();
@@ -673,5 +810,6 @@ function checkCheckpoints() {
 
   if (lapData.lap > lapData.maxLaps) {
     state.finished = true;
+    finalizeFinishCelebration();
   }
 }

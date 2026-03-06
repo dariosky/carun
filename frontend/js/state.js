@@ -32,6 +32,13 @@ export const state = {
     inFlight: false,
     completed: false,
   },
+  finishCelebration: {
+    bestLap: false,
+    bestRace: false,
+    totalTime: 0,
+    bestLapTime: 0,
+    confettiActive: false,
+  },
   startSequence: {
     active: false,
     elapsed: 0,
@@ -138,6 +145,11 @@ export const physicsRuntime = {
   },
   wheelLastPoints: null,
   prevForwardSpeed: null,
+  particleEmitters: {
+    smokeCooldown: 0,
+    splashCooldown: 0,
+    dustCooldown: 0,
+  },
 };
 
 export let curbSegments = { outer: [], inner: [] };

@@ -19,7 +19,7 @@ import {
   savePlayerName,
   trackOptions,
 } from "./parameters.js";
-import { keys, setCurbSegments, state } from "./state.js";
+import { car, keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments } from "./track.js";
@@ -30,6 +30,11 @@ import {
   updateAuthDisplayName,
 } from "./api.js";
 import { syncMenuMusicForMode, unlockMenuMusic } from "./audio.js";
+import {
+  emitFinishConfetti,
+  emitHandbrakeSmoke,
+  emitWaterSpray,
+} from "./particles.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const TRACK_SELECT_VISIBLE_CARDS = 4;
@@ -226,6 +231,43 @@ function setTrackInUrl(trackId) {
     "",
     `${url.pathname}?${url.searchParams.toString()}${url.hash}`,
   );
+}
+
+function getCarParticleAnchors() {
+  const forwardX = Math.cos(car.angle);
+  const forwardY = Math.sin(car.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  const frontOffset = car.width * 0.36;
+  const rearOffset = -car.width * 0.34;
+  const sideOffset = car.height * 0.43;
+  const frontLeft = {
+    x: car.x + forwardX * frontOffset - rightX * sideOffset,
+    y: car.y + forwardY * frontOffset - rightY * sideOffset,
+  };
+  const frontRight = {
+    x: car.x + forwardX * frontOffset + rightX * sideOffset,
+    y: car.y + forwardY * frontOffset + rightY * sideOffset,
+  };
+  const rearLeft = {
+    x: car.x + forwardX * rearOffset - rightX * sideOffset,
+    y: car.y + forwardY * rearOffset - rightY * sideOffset,
+  };
+  const rearRight = {
+    x: car.x + forwardX * rearOffset + rightX * sideOffset,
+    y: car.y + forwardY * rearOffset + rightY * sideOffset,
+  };
+
+  return {
+    forwardX,
+    forwardY,
+    frontMid: {
+      x: (frontLeft.x + frontRight.x) * 0.5,
+      y: (frontLeft.y + frontRight.y) * 0.5,
+    },
+    rearLeft,
+    rearRight,
+  };
 }
 
 function clearTrackInUrl(trackId) {
@@ -777,6 +819,37 @@ function onKeyDown(e) {
       state.pauseMenuIndex = 0;
       clearRaceInputs();
       return;
+    }
+
+    if (!state.paused && !e.repeat) {
+      const anchors = getCarParticleAnchors();
+      if (key === "c") {
+        emitFinishConfetti({ bestLap: true, bestRace: true });
+      } else if (key === "s") {
+        const rearAngle = Math.atan2(-anchors.forwardY, -anchors.forwardX);
+        emitHandbrakeSmoke({
+          x: anchors.rearLeft.x,
+          y: anchors.rearLeft.y,
+          angle: rearAngle,
+          strength: 1.4,
+        });
+        emitHandbrakeSmoke({
+          x: anchors.rearRight.x,
+          y: anchors.rearRight.y,
+          angle: rearAngle,
+          strength: 1.4,
+        });
+      } else if (key === "w") {
+        const sprayAngle = Math.atan2(anchors.forwardY, anchors.forwardX);
+        emitWaterSpray({
+          x: anchors.frontMid.x + anchors.forwardX * (car.width * 0.22),
+          y: anchors.frontMid.y + anchors.forwardY * (car.width * 0.22),
+          angle: sprayAngle,
+          strength: 1.9,
+          inheritVx: car.vx * 0.16,
+          inheritVy: car.vy * 0.16,
+        });
+      }
     }
 
     if (key === "p" || key === "escape") {

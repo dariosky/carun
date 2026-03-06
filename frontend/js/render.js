@@ -49,6 +49,7 @@ import {
   trackStartAngle,
 } from "./track.js";
 import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
+import { drawParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
@@ -852,27 +853,54 @@ function drawEditorTitleBar() {
 function drawFinishOverlay() {
   if (!state.finished || state.mode !== "racing") return;
   const viewportCenterY = TOP_BAR_HEIGHT + (HEIGHT - TOP_BAR_HEIGHT) * 0.5;
+  const total =
+    state.finishCelebration.totalTime ||
+    lapData.lapTimes.reduce((a, b) => a + b, 0);
+  const bestLap =
+    state.finishCelebration.bestLapTime ||
+    (lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0);
 
   ctx.fillStyle = "rgba(12, 22, 18, 0.86)";
-  ctx.fillRect(WIDTH / 2 - 210, viewportCenterY - 90, 420, 180);
+  ctx.fillRect(WIDTH / 2 - 248, viewportCenterY - 104, 496, 222);
   ctx.fillStyle = "#6af0a8";
   ctx.font = "bold 42px Verdana";
-  ctx.fillText("FINISH!", WIDTH / 2 - 95, viewportCenterY - 18);
+  ctx.fillText("FINISH!", WIDTH / 2 - 95, viewportCenterY - 28);
   ctx.font = "20px Verdana";
-  ctx.fillStyle = "#ffffff";
-  const total = lapData.lapTimes.reduce((a, b) => a + b, 0);
-  const bestLap = lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0;
-  ctx.fillText(
-    `TOTAL: ${formatTime(total)}`,
-    WIDTH / 2 - 104,
-    viewportCenterY + 20,
-  );
-  ctx.fillText(
-    `BEST: ${formatTime(bestLap)}`,
-    WIDTH / 2 - 104,
-    viewportCenterY + 46,
-  );
-  ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 72);
+
+  const rows = [
+    {
+      label: "TOTAL",
+      value: formatTime(total),
+      rewarded: state.finishCelebration.bestRace,
+      rewardLabel: "BEST RACE",
+      y: viewportCenterY + 14,
+    },
+    {
+      label: "BEST",
+      value: formatTime(bestLap),
+      rewarded: state.finishCelebration.bestLap,
+      rewardLabel: "BEST LAP",
+      y: viewportCenterY + 54,
+    },
+  ];
+
+  for (const row of rows) {
+    ctx.fillStyle = row.rewarded ? "#ffe167" : "#ffffff";
+    ctx.fillText(`${row.label}: ${row.value}`, WIDTH / 2 - 136, row.y);
+    if (!row.rewarded) continue;
+    const badgeText = row.rewardLabel;
+    const badgeW = ctx.measureText(badgeText).width + 20;
+    const badgeX = WIDTH / 2 + 58;
+    const badgeY = row.y - 19;
+    ctx.fillStyle = "#ffe167";
+    ctx.fillRect(badgeX, badgeY, badgeW, 24);
+    ctx.fillStyle = "#4e3600";
+    ctx.font = "bold 12px Verdana";
+    ctx.fillText(badgeText, badgeX + 10, badgeY + 16);
+    ctx.font = "20px Verdana";
+  }
+
+  ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 96);
 }
 
 function drawPauseOverlay() {
@@ -1545,6 +1573,7 @@ export function render() {
     ctx.translate(0, TOP_BAR_HEIGHT);
     drawTrack();
     drawCar();
+    drawParticles(ctx);
     drawDebugVectors();
     drawStartSequenceOverlay();
     ctx.restore();
