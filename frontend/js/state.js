@@ -37,6 +37,7 @@ export const state = {
     elapsed: 0,
     goTime: 0,
     goFlash: 0,
+    lastCountdownStep: 0,
   },
   checkpointBlink: {
     time: 0,
@@ -119,6 +120,7 @@ export const physicsRuntime = {
   steeringRate: 0,
   recoveryTimer: 0,
   collisionGripTimer: 0,
+  impactCooldown: 0,
   prevSteerAbs: 0,
   surface: {
     lateralGripMul: 1,

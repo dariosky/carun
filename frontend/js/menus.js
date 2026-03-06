@@ -29,6 +29,7 @@ import {
   setTrackPublished,
   updateAuthDisplayName,
 } from "./api.js";
+import { syncMenuMusicForMode, unlockMenuMusic } from "./audio.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const TRACK_SELECT_VISIBLE_CARDS = 4;
@@ -320,6 +321,7 @@ function returnToTrackSelect() {
     state.selectedTrackIndex = 0;
   }
   state.mode = "trackSelect";
+  syncMenuMusicForMode(state.mode);
   state.trackSelectIndex = state.selectedTrackIndex;
   syncTrackSelectWindow();
   state.paused = false;
@@ -500,6 +502,7 @@ function enterEditor(trackIndex) {
   applyTrackPreset(trackIndex);
   setCurbSegments(initCurbSegments());
   state.mode = "editor";
+  syncMenuMusicForMode(state.mode);
   state.editor.trackIndex = trackIndex;
   state.editor.drawing = false;
   state.editor.activeStroke = [];
@@ -525,6 +528,7 @@ function activateSelection() {
     const selectedItem = currentMenuItems()[state.menuIndex];
     if (selectedItem === "LOGIN") {
       state.mode = "loginProviders";
+      syncMenuMusicForMode(state.mode);
       state.loginProviderIndex = 0;
       return;
     }
@@ -538,12 +542,14 @@ function activateSelection() {
         state.selectedTrackIndex = 0;
       }
       state.mode = "trackSelect";
+      syncMenuMusicForMode(state.mode);
       state.trackSelectIndex = state.selectedTrackIndex;
       syncTrackSelectWindow();
       return;
     }
     if (selectedItem === "SETTINGS") {
       state.mode = "settings";
+      syncMenuMusicForMode(state.mode);
       state.settingsIndex = 0;
       state.editingName = false;
       return;
@@ -563,6 +569,7 @@ function activateSelection() {
     }
     if (selectedItem === "BACK") {
       state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
       state.menuIndex = loginMenuIndex();
       return;
     }
@@ -573,12 +580,14 @@ function activateSelection() {
     const backIndex = trackSelectBackIndex();
     if (state.trackSelectIndex === backIndex) {
       state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
       state.menuIndex = raceMenuIndex();
     } else {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
       setCurbSegments(initCurbSegments());
       state.mode = "racing";
+      syncMenuMusicForMode(state.mode);
       resetRace();
       const selected = trackOptions[state.selectedTrackIndex];
       if (selected) setTrackInUrl(selected.id);
@@ -605,6 +614,7 @@ function activateSelection() {
           state.auth.isAdmin = false;
           state.playerName = sanitizePlayerName(state.playerName);
           state.mode = "menu";
+          syncMenuMusicForMode(state.mode);
           state.menuIndex = 0;
           state.settingsIndex = 0;
           state.editingName = false;
@@ -620,6 +630,7 @@ function activateSelection() {
     }
     if (selectedSetting === "BACK") {
       state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
       state.menuIndex = settingsMenuIndex();
       state.paused = false;
       return;
@@ -629,6 +640,7 @@ function activateSelection() {
 
   if (state.mode === "racing" && state.finished) {
     state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
     state.paused = false;
     state.pauseMenuIndex = 0;
   }
@@ -760,6 +772,7 @@ function onKeyDown(e) {
   if (state.mode === "racing") {
     if (state.finished && key === "escape") {
       state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
       state.paused = false;
       state.pauseMenuIndex = 0;
       clearRaceInputs();
@@ -799,17 +812,20 @@ function onKeyDown(e) {
 
   if (state.mode === "trackSelect" && key === "escape") {
     state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
     state.menuIndex = raceMenuIndex();
     return;
   }
   if (state.mode === "settings" && key === "escape") {
     state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
     state.menuIndex = settingsMenuIndex();
     state.paused = false;
     return;
   }
   if (state.mode === "loginProviders" && key === "escape") {
     state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
     state.menuIndex = loginMenuIndex();
     return;
   }
@@ -989,6 +1005,7 @@ function onKeyDown(e) {
       applyTrackPreset(state.editor.trackIndex);
       setCurbSegments(initCurbSegments());
       state.mode = "racing";
+      syncMenuMusicForMode(state.mode);
       resetRace();
       const selected = trackOptions[state.selectedTrackIndex];
       if (selected) setTrackInUrl(selected.id);
@@ -1105,6 +1122,20 @@ function onKeyUp(e) {
 
 export function initInputHandlers() {
   window.addEventListener("keydown", onKeyDown);
+  window.addEventListener(
+    "keydown",
+    () => {
+      void unlockMenuMusic();
+    },
+    { once: true },
+  );
+  window.addEventListener(
+    "touchstart",
+    () => {
+      void unlockMenuMusic();
+    },
+    { once: true },
+  );
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("mousemove", (event) => {
     updateEditorCursorFromEvent(event);
@@ -1118,6 +1149,7 @@ export function initInputHandlers() {
     }
   });
   window.addEventListener("mousedown", (event) => {
+    void unlockMenuMusic();
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
     if (state.editor.cursorY < 0) return;

@@ -14,6 +14,8 @@ import { setCurbSegments, state } from "./state.js";
 import { nextTaglineSet } from "./taglines.js";
 import { initCurbSegments } from "./track.js";
 import { fetchAuthMe } from "./api.js";
+import { initAudio, syncMenuMusicForMode } from "./audio.js";
+import { gameAudio } from "./game-audio.js";
 
 function updateMenuTagline(dt) {
   const rotation = state.menuTagline;
@@ -35,6 +37,7 @@ function updateMenuTagline(dt) {
 const appUrl = new URL(window.location.href);
 const authResult = appUrl.searchParams.get("auth");
 const authError = appUrl.searchParams.get("auth_error");
+let raceAudioActive = false;
 if (authResult === "ok") {
   showSnackbar("Logged in", { seconds: 1.8, kind: "success" });
 }
@@ -106,13 +109,24 @@ if (trackOptions.length > 0) {
 }
 setCurbSegments(initCurbSegments());
 
+initAudio();
+gameAudio.resumeOnUserGesture();
 initInputHandlers();
 render();
+syncMenuMusicForMode(state.mode, { immediate: true });
 
 startGameLoop({
   update(dt) {
     updateMenuTagline(dt);
     tickSnackbar(dt);
+    const shouldPlayRaceAudio = state.mode === "racing" && !state.paused;
+    if (shouldPlayRaceAudio && !raceAudioActive) {
+      void gameAudio.start();
+      raceAudioActive = true;
+    } else if (!shouldPlayRaceAudio && raceAudioActive) {
+      gameAudio.stop();
+      raceAudioActive = false;
+    }
     if (state.mode === "racing" && !state.paused) {
       updateRace(dt);
     }

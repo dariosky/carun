@@ -16,6 +16,7 @@ import {
   skidMarks,
   state,
 } from "./state.js";
+import { gameAudio } from "./game-audio.js";
 import { clamp, moveTowards } from "./utils.js";
 import {
   pointOnCenterLine,
@@ -153,6 +154,7 @@ export function resetRace() {
   state.startSequence.elapsed = 0;
   state.startSequence.goTime = 3 + Math.random() * 2;
   state.startSequence.goFlash = 0;
+  state.startSequence.lastCountdownStep = 0;
   state.checkpointBlink.time = 0;
   state.raceSubmission.inFlight = false;
   state.raceSubmission.completed = false;
@@ -163,6 +165,7 @@ export function resetRace() {
   physicsRuntime.steeringRate = 0;
   physicsRuntime.recoveryTimer = 0;
   physicsRuntime.collisionGripTimer = 0;
+  physicsRuntime.impactCooldown = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = {
     lateralGripMul: 1,
@@ -196,14 +199,36 @@ export function updateRace(dt) {
     state.startSequence.goFlash = Math.max(0, state.startSequence.goFlash - dt);
   }
 
+  const surfaceName = surfaceAt(car.x, car.y);
+
   if (state.startSequence.active) {
     state.startSequence.elapsed += dt;
+    const countdownStep = Math.min(3, Math.floor(state.startSequence.elapsed));
+    if (countdownStep > state.startSequence.lastCountdownStep) {
+      for (
+        let step = state.startSequence.lastCountdownStep + 1;
+        step <= countdownStep;
+        step++
+      ) {
+        gameAudio.playCountdownBeep(step);
+      }
+      state.startSequence.lastCountdownStep = countdownStep;
+    }
     if (state.startSequence.elapsed >= state.startSequence.goTime) {
       state.startSequence.active = false;
       state.startSequence.goFlash = 0.85;
       state.raceTime = 0;
       lapData.currentLapStart = 0;
+      gameAudio.playGo();
     }
+    gameAudio.updateVehicleAudio({
+      speedNormalized: 0,
+      throttle: keys.accel ? 1 : 0,
+      acceleration: keys.accel ? 0.35 : 0,
+      skidAmount: 0,
+      surface: surfaceName,
+      isMoving: false,
+    });
     return;
   }
 
@@ -214,7 +239,6 @@ export function updateRace(dt) {
     state.checkpointBlink.time = Math.max(0, state.checkpointBlink.time - dt);
   }
 
-  const surfaceName = surfaceAt(car.x, car.y);
   const targetSurface =
     physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
   const blendAlpha = flags.SURFACE_BLENDING
@@ -286,11 +310,19 @@ export function updateRace(dt) {
     );
   }
   if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
-    forwardSpeed = moveTowards(
-      forwardSpeed,
-      0,
-      assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt,
-    );
+    const handbrakeDecel =
+      assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt;
+    if (forwardSpeed > 0) {
+      forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
+    } else {
+      forwardSpeed = moveTowards(
+        forwardSpeed,
+        0,
+        assistCfg.handbrakeReverseKillDecel *
+          physicsRuntime.input.handbrake *
+          dt,
+      );
+    }
   }
   forwardSpeed *= Math.exp(
     -carCfg.longDrag * physicsRuntime.surface.longDragMul * dt,
@@ -354,16 +386,49 @@ export function updateRace(dt) {
       );
     }
   }
+  if (
+    allowAutoDrift &&
+    physicsRuntime.input.throttle < 0.08 &&
+    speedAbs > assistCfg.throttleLiftMinSpeed
+  ) {
+    const liftBlend =
+      (1 - physicsRuntime.input.throttle) *
+      clamp(
+        (speedAbs - assistCfg.throttleLiftMinSpeed) /
+          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
+        0,
+        1,
+      );
+    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
+    lateralSpeed +=
+      physicsRuntime.input.steer *
+      speedAbs *
+      assistCfg.throttleLiftSlipBoost *
+      liftBlend *
+      dt;
+  }
   if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
     const gripMul =
       1 + (assistCfg.handbrakeGrip - 1) * physicsRuntime.input.handbrake;
     effectiveLateralGrip *= gripMul;
+    lateralSpeed +=
+      physicsRuntime.input.steer *
+      Math.max(speedAbs, 0) *
+      assistCfg.handbrakeSlipBoost *
+      physicsRuntime.input.handbrake *
+      dt;
   }
   if (physicsRuntime.collisionGripTimer > 0) {
     effectiveLateralGrip *= 0.7;
     physicsRuntime.collisionGripTimer = Math.max(
       0,
       physicsRuntime.collisionGripTimer - dt,
+    );
+  }
+  if (physicsRuntime.impactCooldown > 0) {
+    physicsRuntime.impactCooldown = Math.max(
+      0,
+      physicsRuntime.impactCooldown - dt,
     );
   }
 
@@ -402,6 +467,18 @@ export function updateRace(dt) {
   car.y = collision.y;
   if (collision.hit) {
     const inwardSpeed = car.vx * collision.normalX + car.vy * collision.normalY;
+    const impactStrength = clamp(
+      Math.max(Math.abs(inwardSpeed), car.speed * 0.4) / 180,
+      0,
+      1,
+    );
+    if (physicsRuntime.impactCooldown <= 0 && impactStrength > 0.08) {
+      if (collision.hitType === "tree") gameAudio.playTreeBump(impactStrength);
+      else if (collision.hitType === "barrel")
+        gameAudio.playBarrelBump(impactStrength);
+      else gameAudio.playWallBump(impactStrength);
+      physicsRuntime.impactCooldown = 0.11;
+    }
     if (inwardSpeed < 0) {
       car.vx -= inwardSpeed * collision.normalX;
       car.vy -= inwardSpeed * collision.normalY;
@@ -425,8 +502,7 @@ export function updateRace(dt) {
   if (
     flags.HANDBRAKE_MODE &&
     physicsRuntime.input.handbrake > 0.05 &&
-    rawHeadingForwardSpeed < 0 &&
-    forwardSpeed >= 0
+    rawHeadingForwardSpeed < 0
   ) {
     // Remove only the backward longitudinal component, preserve lateral velocity for drift.
     car.vx -= rawHeadingForwardSpeed * headingForwardX;
@@ -465,6 +541,17 @@ export function updateRace(dt) {
   physicsRuntime.prevForwardSpeed = headingForwardSpeed;
   const skidSurface = surfaceAt(car.x, car.y);
   recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
+  const skidAmount =
+    clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
+    clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
+  gameAudio.updateVehicleAudio({
+    speedNormalized: clamp(car.speed / Math.max(carCfg.maxSpeed, 1), 0, 1),
+    throttle: physicsRuntime.input.throttle,
+    acceleration: clamp(longAccel / Math.max(carCfg.engineAccel, 1), -1, 1),
+    skidAmount,
+    surface: skidSurface,
+    isMoving: car.speed > 4,
+  });
 
   if (!state.finished) {
     checkCheckpoints();

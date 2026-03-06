@@ -1053,6 +1053,7 @@ export function resolveObjectCollisions(x, y) {
   let hit = false;
   let normalX = 0;
   let normalY = 0;
+  let hitType = "";
   const carRadius = 8;
 
   for (let pass = 0; pass < 3; pass++) {
@@ -1076,10 +1077,16 @@ export function resolveObjectCollisions(x, y) {
       ry += ny * (penetration + 0.25);
       normalX = nx;
       normalY = ny;
+      hitType =
+        obj.type === "tree"
+          ? "tree"
+          : obj.type === "barrel"
+            ? "barrel"
+            : "wall";
     }
 
     if (!pushed) break;
   }
 
-  return { x: rx, y: ry, hit, normalX, normalY };
+  return { x: rx, y: ry, hit, normalX, normalY, hitType };
 }
