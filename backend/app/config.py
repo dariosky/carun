@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/carun")
     session_secret: str = "dev-session-secret"
+    session_max_age_seconds: int = 60 * 60 * 24 * 365
 
     google_client_id: str = ""
     google_client_secret: str = ""

@@ -79,6 +79,30 @@ def test_auth_me_returns_admin_flag(client, session):
     }
 
 
+def test_auth_me_refreshes_session_cookie_with_long_max_age(client, session):
+    racer = create_user(session, "RACER")
+
+    login_as(client, racer)
+    response = client.get("/api/auth/me")
+
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "session=" in set_cookie
+    assert f"Max-Age={get_settings().session_max_age_seconds}" in set_cookie
+
+
+def test_logout_clears_session_cookie(client, session):
+    racer = create_user(session, "RACER")
+
+    login_as(client, racer)
+    response = client.post("/api/auth/logout")
+
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "session=null" in set_cookie
+    assert "expires=Thu, 01 Jan 1970 00:00:00 GMT" in set_cookie
+
+
 def test_create_track_defaults_to_unpublished(client, session):
     owner = create_user(session, "OWNER")
     login_as(client, owner)
