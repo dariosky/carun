@@ -4,6 +4,7 @@ from .tracks import (
     TrackCreateRequest,
     TrackDetailResponse,
     TrackPublishRequest,
+    TrackRenameRequest,
     TrackResponse,
     TrackShareResponse,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "TrackCreateRequest",
     "TrackDetailResponse",
     "TrackPublishRequest",
+    "TrackRenameRequest",
     "TrackResponse",
     "TrackShareResponse",
 ]

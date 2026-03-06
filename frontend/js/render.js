@@ -77,6 +77,7 @@ let pixelNoiseOverlay = null;
 let cachedTrackBoundaries = null;
 let cachedTrackSignature = null;
 const previewTrackDataCache = new Map();
+const centerlineLengthCache = new WeakMap();
 
 function createTextureCanvas(width, height) {
   if (typeof OffscreenCanvas !== "undefined")
@@ -1133,23 +1134,12 @@ function drawTrackSelection() {
       cardX + cardSize * 0.5 - labelWidth * 0.5,
       cardY + cardSize + 34,
     );
-    if (trackOption.showAdminBadge) {
-      ctx.fillStyle = "#5bc0eb";
-      ctx.fillRect(cardX + 10, cardY + 10, 76, 26);
-      ctx.fillStyle = "#0f2434";
+    if (!trackOption.isPublished) {
+      ctx.fillStyle = "#f26b6b";
+      ctx.fillRect(cardX + 10, cardY + 10, 92, 26);
+      ctx.fillStyle = "#3d1010";
       ctx.font = "bold 12px Verdana";
-      ctx.fillText("ADMIN", cardX + 22, cardY + 28);
-    }
-    if (trackOption.ownerUserId === state.auth.userId) {
-      ctx.fillStyle = "#ffd66d";
-      ctx.font = "bold 14px Verdana";
-      const ownerLabel = "OWNED";
-      const ownerWidth = ctx.measureText(ownerLabel).width;
-      ctx.fillText(
-        ownerLabel,
-        cardX + cardSize * 0.5 - ownerWidth * 0.5,
-        cardY + cardSize + 52,
-      );
+      ctx.fillText("PRIVATE", cardX + 26, cardY + 28);
     }
   }
 
@@ -1171,13 +1161,15 @@ function drawTrackSelection() {
   const backY = cardY + cardSize + 106;
   const backIndex = trackOptions.length;
   const backSelected = state.trackSelectIndex === backIndex;
+  const backWidth = 290;
+  const backX = WIDTH - backWidth - 48;
   if (backSelected) {
     ctx.fillStyle = "#ec4f4f";
-    ctx.fillRect(WIDTH * 0.5 - 145, backY - 39, 290, 52);
+    ctx.fillRect(backX, backY - 39, backWidth, 52);
   }
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 40px Verdana";
-  ctx.fillText("BACK", WIDTH * 0.5 - 62, backY);
+  ctx.fillText("BACK", backX + 82, backY);
 
   ctx.font = "20px Verdana";
   ctx.fillStyle = "#c3d9ec";
@@ -1198,8 +1190,53 @@ function drawTrackSelection() {
   }
   if (physicsConfig.flags.DEBUG_MODE)
     helpLines.push("Press E to edit selected track");
+  if (model.selectedTrackCanRename)
+    helpLines.push("Press R to rename selected track");
   for (let i = 0; i < helpLines.length; i++) {
     ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, HEIGHT - 42 + i * 28);
+  }
+
+  if (
+    state.trackSelectIndex >= 0 &&
+    state.trackSelectIndex < trackOptions.length
+  ) {
+    const selectedPreset = getTrackPreset(state.trackSelectIndex);
+    const selectedOption = trackOptions[state.trackSelectIndex];
+    const ownerName = selectedOption?.ownerDisplayName || "N/A";
+    const bestLapText = Number.isFinite(selectedOption?.bestLapMs)
+      ? `${selectedOption.bestLapDisplayName || "UNKNOWN"} - ${formatTime(
+          selectedOption.bestLapMs / 1000,
+        )}`
+      : "No laps yet";
+
+    let centerlineLength = centerlineLengthCache.get(selectedPreset.track);
+    if (!Number.isFinite(centerlineLength)) {
+      const boundaries = trackBoundaryPaths(
+        selectedPreset.track,
+        TRACK_SEGMENTS,
+      );
+      const points = boundaries.center || [];
+      let total = 0;
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        total += Math.hypot(b.x - a.x, b.y - a.y);
+      }
+      centerlineLength = total;
+      centerlineLengthCache.set(selectedPreset.track, centerlineLength);
+    }
+
+    const statsX = 72;
+    const statsY = cardY + cardSize + 98;
+    const distanceMeters = centerlineLength / 15;
+    const distanceLabel = Number.isInteger(distanceMeters)
+      ? `${distanceMeters} m`
+      : `${distanceMeters.toFixed(1)} m`;
+    ctx.fillStyle = "#d8e7f5";
+    ctx.font = "bold 20px Verdana";
+    ctx.fillText(`Owner: ${ownerName}`, statsX, statsY);
+    ctx.fillText(`Distance: ${distanceLabel}`, statsX, statsY + 28);
+    ctx.fillText(`Best lap: ${bestLapText}`, statsX, statsY + 56);
   }
 }
 
@@ -1376,7 +1413,7 @@ function drawModal() {
   if (!state.modal.open) return;
 
   const panelW = 620;
-  const panelH = 270;
+  const panelH = state.modal.mode === "input" ? 340 : 270;
   const x = WIDTH * 0.5 - panelW * 0.5;
   const y = HEIGHT * 0.5 - panelH * 0.5;
 
@@ -1396,38 +1433,92 @@ function drawModal() {
 
   ctx.fillStyle = "#c7d8e8";
   ctx.font = "24px Verdana";
-  drawWrappedText(state.modal.message || "", x + 34, y + 108, panelW - 68, 34);
+  const infoLines = drawWrappedText(
+    state.modal.message || "",
+    x + 34,
+    y + 108,
+    panelW - 68,
+    34,
+  );
+
+  let contentBottomY = y + 108 + infoLines * 34;
+  if (state.modal.mode === "input") {
+    const inputY = contentBottomY + 12;
+    const inputH = 44;
+    const inputW = panelW - 68;
+    const inputX = x + 34;
+    const value = state.modal.inputValue || "";
+    const placeholder = state.modal.inputPlaceholder || "";
+    const inputText = value || placeholder || "Type here...";
+    ctx.fillStyle = "#0d1e2b";
+    ctx.fillRect(inputX, inputY, inputW, inputH);
+    ctx.strokeStyle = "#89a6be";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(inputX, inputY, inputW, inputH);
+    ctx.fillStyle = value ? "#f4fbff" : "#7d95a9";
+    ctx.font = "bold 24px Verdana";
+    ctx.fillText(inputText, inputX + 14, inputY + 30);
+    contentBottomY = inputY + inputH;
+  }
 
   const noSelected = state.modal.selectedAction === "cancel";
   const yesSelected = state.modal.selectedAction === "confirm";
-  const buttonY = y + panelH - 84;
-  const noX = x + panelW - 312;
-  const yesX = x + panelW - 168;
-
-  ctx.fillStyle = noSelected ? "#2f4b61" : "#21394d";
-  ctx.fillRect(noX, buttonY, 112, 48);
-  ctx.strokeStyle = noSelected ? "#ffffff" : "#8aa8bf";
-  ctx.lineWidth = noSelected ? 3 : 2;
-  ctx.strokeRect(noX, buttonY, 112, 48);
-  ctx.fillStyle = "#f0f7ff";
+  const cancelLabel = state.modal.cancelLabel || "No";
+  const confirmLabel = state.modal.confirmLabel || "Yes";
+  const helpY = contentBottomY + 30;
+  const buttonY = contentBottomY + 44;
+  const buttonH = 48;
+  const buttonGap = 16;
+  const buttonPadX = 22;
+  const minButtonW = 96;
   ctx.font = "bold 24px Verdana";
-  ctx.fillText(state.modal.cancelLabel || "No", noX + 38, buttonY + 33);
-
-  ctx.fillStyle = state.modal.danger ? "#c32727" : "#2f7e45";
-  ctx.fillRect(yesX, buttonY, 112, 48);
-  ctx.strokeStyle = yesSelected ? "#ffffff" : "#e6bcbc";
-  ctx.lineWidth = yesSelected ? 3 : 2;
-  ctx.strokeRect(yesX, buttonY, 112, 48);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(state.modal.confirmLabel || "Yes", yesX + 35, buttonY + 33);
+  const cancelW = Math.max(
+    minButtonW,
+    ctx.measureText(cancelLabel).width + buttonPadX * 2,
+  );
+  const confirmW = Math.max(
+    minButtonW,
+    ctx.measureText(confirmLabel).width + buttonPadX * 2,
+  );
+  const rightEdge = x + panelW - 34;
+  const yesX = rightEdge - confirmW;
+  const noX = yesX - buttonGap - cancelW;
 
   ctx.fillStyle = "#b7cce0";
   ctx.font = "18px Verdana";
   ctx.fillText(
-    "Use \u2190/\u2192 and Enter. No is default.",
+    state.modal.mode === "input"
+      ? "Type, Backspace, \u2190/\u2192 and Enter."
+      : "Use \u2190/\u2192 and Enter. No is default.",
     x + 34,
+    helpY,
+  );
+
+  ctx.fillStyle = noSelected ? "#2f4b61" : "#21394d";
+  ctx.fillRect(noX, buttonY, cancelW, buttonH);
+  ctx.strokeStyle = noSelected ? "#ffffff" : "#8aa8bf";
+  ctx.lineWidth = noSelected ? 3 : 2;
+  ctx.strokeRect(noX, buttonY, cancelW, buttonH);
+  ctx.fillStyle = "#f0f7ff";
+  ctx.font = "bold 24px Verdana";
+  ctx.fillText(
+    cancelLabel,
+    noX + (cancelW - ctx.measureText(cancelLabel).width) * 0.5,
     buttonY + 33,
   );
+
+  ctx.fillStyle = state.modal.danger ? "#c32727" : "#2f7e45";
+  ctx.fillRect(yesX, buttonY, confirmW, buttonH);
+  ctx.strokeStyle = yesSelected ? "#ffffff" : "#e6bcbc";
+  ctx.lineWidth = yesSelected ? 3 : 2;
+  ctx.strokeRect(yesX, buttonY, confirmW, buttonH);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(
+    confirmLabel,
+    yesX + (confirmW - ctx.measureText(confirmLabel).width) * 0.5,
+    buttonY + 33,
+  );
+
   ctx.restore();
 }
 

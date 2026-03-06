@@ -8,11 +8,12 @@ from sqlmodel import Session, or_, select
 
 from ..db import get_session
 from ..deps import get_current_user, get_optional_current_user
-from ..models import Track, User
+from ..models import BestLap, Track, User
 from ..schemas import (
     TrackCreateRequest,
     TrackDetailResponse,
     TrackPublishRequest,
+    TrackRenameRequest,
     TrackResponse,
     TrackShareResponse,
 )
@@ -27,7 +28,28 @@ def _parse_track_id(track_id: str) -> UUID:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid track_id")
 
 
-def _to_track_response(track: Track) -> TrackResponse:
+def _best_lap_for_track(session: Session, track_id: UUID) -> tuple[int | None, str | None]:
+    row = session.exec(
+        select(BestLap.lap_ms, User.display_name)
+        .join(User, User.id == BestLap.user_id)
+        .where(BestLap.track_id == track_id)
+        .order_by(BestLap.lap_ms.asc(), BestLap.updated_at.asc())
+        .limit(1)
+    ).first()
+    if not row:
+        return None, None
+    return row[0], row[1]
+
+
+def _owner_display_name_for_track(session: Session, track: Track) -> str | None:
+    if not track.owner_user_id:
+        return None
+    owner = session.get(User, track.owner_user_id)
+    return owner.display_name if owner else None
+
+
+def _to_track_response(session: Session, track: Track) -> TrackResponse:
+    best_lap_ms, best_lap_display_name = _best_lap_for_track(session, track.id)
     return TrackResponse(
         id=str(track.id),
         slug=track.slug,
@@ -36,11 +58,15 @@ def _to_track_response(track: Track) -> TrackResponse:
         is_published=track.is_published,
         share_token=track.share_token,
         owner_user_id=str(track.owner_user_id) if track.owner_user_id else None,
+        owner_display_name=_owner_display_name_for_track(session, track),
+        best_lap_ms=best_lap_ms,
+        best_lap_display_name=best_lap_display_name,
         created_at=track.created_at,
     )
 
 
-def _to_track_detail_response(track: Track) -> TrackDetailResponse:
+def _to_track_detail_response(session: Session, track: Track) -> TrackDetailResponse:
+    best_lap_ms, best_lap_display_name = _best_lap_for_track(session, track.id)
     return TrackDetailResponse(
         id=str(track.id),
         slug=track.slug,
@@ -49,6 +75,9 @@ def _to_track_detail_response(track: Track) -> TrackDetailResponse:
         is_published=track.is_published,
         share_token=track.share_token,
         owner_user_id=str(track.owner_user_id) if track.owner_user_id else None,
+        owner_display_name=_owner_display_name_for_track(session, track),
+        best_lap_ms=best_lap_ms,
+        best_lap_display_name=best_lap_display_name,
         created_at=track.created_at,
         track_payload_json=track.track_payload_json,
     )
@@ -76,7 +105,7 @@ def list_tracks(
         query = select(Track).where(visibility).order_by(Track.created_at.desc())
 
     tracks = session.exec(query).all()
-    return [_to_track_detail_response(track) for track in tracks]
+    return [_to_track_detail_response(session, track) for track in tracks]
 
 
 @router.post("", response_model=TrackResponse, status_code=201)
@@ -98,7 +127,7 @@ def create_track(
     session.commit()
     session.refresh(track)
 
-    return _to_track_response(track)
+    return _to_track_response(session, track)
 
 
 @router.patch("/{track_id}/publish", response_model=TrackResponse)
@@ -121,7 +150,7 @@ def set_track_publish_state(
     session.commit()
     session.refresh(track)
 
-    return _to_track_response(track)
+    return _to_track_response(session, track)
 
 
 @router.get("/mine", response_model=list[TrackDetailResponse])
@@ -135,7 +164,7 @@ def list_my_tracks(
         .order_by(Track.created_at.desc())
     )
     tracks = session.exec(query).all()
-    return [_to_track_detail_response(track) for track in tracks]
+    return [_to_track_detail_response(session, track) for track in tracks]
 
 
 @router.get("/share/{share_token}", response_model=TrackShareResponse)
@@ -165,7 +194,36 @@ def get_track_by_id(
     if not _can_access_track(track, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
-    return _to_track_detail_response(track)
+    return _to_track_detail_response(session, track)
+
+
+@router.patch("/{track_id}", response_model=TrackResponse)
+def rename_track(
+    track_id: str,
+    payload: TrackRenameRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    track = session.get(Track, _parse_track_id(track_id))
+    if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+
+    allowed = bool(current_user.is_admin or track.owner_user_id == current_user.id)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+
+    trimmed_name = payload.name.strip()
+    if not trimmed_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Track name required"
+        )
+
+    track.name = trimmed_name
+    track.updated_at = datetime.utcnow()
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+    return _to_track_response(session, track)
 
 
 @router.delete("/{track_id}", status_code=204)

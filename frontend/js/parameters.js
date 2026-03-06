@@ -140,6 +140,15 @@ function clonePresetData(preset) {
     source: preset.source || "local",
     ownerUserId:
       typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
+    ownerDisplayName:
+      typeof preset.ownerDisplayName === "string"
+        ? preset.ownerDisplayName
+        : null,
+    bestLapMs: Number.isFinite(preset.bestLapMs) ? preset.bestLapMs : null,
+    bestLapDisplayName:
+      typeof preset.bestLapDisplayName === "string"
+        ? preset.bestLapDisplayName
+        : null,
     isPublished: Boolean(preset.isPublished),
     shareToken:
       typeof preset.shareToken === "string" ? preset.shareToken : null,
@@ -202,6 +211,23 @@ function normalizeTrackPresetData(raw) {
         ? raw.ownerUserId
         : typeof raw.owner_user_id === "string"
           ? raw.owner_user_id
+          : null,
+    ownerDisplayName:
+      typeof raw.ownerDisplayName === "string"
+        ? raw.ownerDisplayName
+        : typeof raw.owner_display_name === "string"
+          ? raw.owner_display_name
+          : null,
+    bestLapMs: Number.isFinite(raw.bestLapMs)
+      ? Number(raw.bestLapMs)
+      : Number.isFinite(raw.best_lap_ms)
+        ? Number(raw.best_lap_ms)
+        : null,
+    bestLapDisplayName:
+      typeof raw.bestLapDisplayName === "string"
+        ? raw.bestLapDisplayName
+        : typeof raw.best_lap_display_name === "string"
+          ? raw.best_lap_display_name
           : null,
     isPublished: Boolean(raw.isPublished ?? raw.is_published ?? false),
     shareToken:
@@ -287,6 +313,9 @@ function rebuildTrackOptions() {
         canDelete,
         isPublished,
         ownerUserId,
+        ownerDisplayName,
+        bestLapMs,
+        bestLapDisplayName,
         fromDb,
         shareToken,
       }) => ({
@@ -295,6 +324,11 @@ function rebuildTrackOptions() {
         canDelete: Boolean(canDelete),
         isPublished: Boolean(isPublished),
         ownerUserId: typeof ownerUserId === "string" ? ownerUserId : null,
+        ownerDisplayName:
+          typeof ownerDisplayName === "string" ? ownerDisplayName : null,
+        bestLapMs: Number.isFinite(bestLapMs) ? bestLapMs : null,
+        bestLapDisplayName:
+          typeof bestLapDisplayName === "string" ? bestLapDisplayName : null,
         fromDb: Boolean(fromDb),
         shareToken: typeof shareToken === "string" ? shareToken : null,
       }),
@@ -362,6 +396,23 @@ export function setTrackPresetMetadata(
     preset.name = updates.name.trim().slice(0, 36);
   if (typeof updates.ownerUserId === "string" || updates.ownerUserId === null)
     preset.ownerUserId = updates.ownerUserId;
+  if (
+    typeof updates.ownerDisplayName === "string" ||
+    updates.ownerDisplayName === null
+  ) {
+    preset.ownerDisplayName = updates.ownerDisplayName;
+  }
+  if (Number.isFinite(updates.bestLapMs) || updates.bestLapMs === null) {
+    preset.bestLapMs = Number.isFinite(updates.bestLapMs)
+      ? Number(updates.bestLapMs)
+      : null;
+  }
+  if (
+    typeof updates.bestLapDisplayName === "string" ||
+    updates.bestLapDisplayName === null
+  ) {
+    preset.bestLapDisplayName = updates.bestLapDisplayName;
+  }
   if (typeof updates.isPublished === "boolean")
     preset.isPublished = updates.isPublished;
   if (typeof updates.shareToken === "string" || updates.shareToken === null)
@@ -995,6 +1046,17 @@ function buildPresetFromApiTrack(raw) {
     source: typeof raw.source === "string" ? raw.source : "user",
     ownerUserId:
       typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
+    ownerDisplayName:
+      typeof raw.owner_display_name === "string"
+        ? raw.owner_display_name
+        : null,
+    bestLapMs: Number.isFinite(raw.best_lap_ms)
+      ? Number(raw.best_lap_ms)
+      : null,
+    bestLapDisplayName:
+      typeof raw.best_lap_display_name === "string"
+        ? raw.best_lap_display_name
+        : null,
     isPublished: Boolean(raw.is_published),
     shareToken: typeof raw.share_token === "string" ? raw.share_token : null,
     canDelete: false,
@@ -1059,6 +1121,11 @@ export async function saveTrackPresetToDb(
     name: createdTrack.name,
     source: createdTrack.source || "user",
     ownerUserId: createdTrack.owner_user_id || null,
+    ownerDisplayName: createdTrack.owner_display_name || null,
+    bestLapMs: Number.isFinite(createdTrack.best_lap_ms)
+      ? Number(createdTrack.best_lap_ms)
+      : null,
+    bestLapDisplayName: createdTrack.best_lap_display_name || null,
     isPublished: Boolean(createdTrack.is_published),
     shareToken: createdTrack.share_token || null,
     canDelete: true,

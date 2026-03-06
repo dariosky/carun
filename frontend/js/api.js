@@ -155,6 +155,23 @@ export async function setTrackPublished(trackId, isPublished) {
   return payload;
 }
 
+export async function renameTrack(trackId, name) {
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Rename failed";
+    throw new Error(message);
+  }
+  if (!isObject(payload)) throw new Error("Rename failed");
+  return payload;
+}
+
 export async function deleteTrackById(trackId) {
   const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
     method: "DELETE",

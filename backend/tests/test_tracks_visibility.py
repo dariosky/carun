@@ -247,3 +247,55 @@ def test_leaderboard_visible_to_admin_for_unpublished_track(client, session):
 
     assert response.status_code == 200
     assert response.json()["entries"][0]["display_name"] == owner.display_name
+
+
+def test_list_tracks_includes_owner_and_best_lap_metadata(client, session):
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Published", owner=owner, is_published=True)
+    session.add(BestLap(user_id=owner.id, track_id=track.id, lap_ms=11111, build_version="test"))
+    session.commit()
+
+    response = client.get("/api/tracks")
+
+    assert response.status_code == 200
+    row = next((item for item in response.json() if item["id"] == str(track.id)), None)
+    assert row is not None
+    assert row["owner_display_name"] == owner.display_name
+    assert row["best_lap_ms"] == 11111
+    assert row["best_lap_display_name"] == owner.display_name
+
+
+def test_owner_can_rename_own_track(client, session):
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Old Name", owner=owner, is_published=False)
+    login_as(client, owner)
+
+    response = client.patch(f"/api/tracks/{track.id}", json={"name": "New Name"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "New Name"
+    session.refresh(track)
+    assert track.name == "New Name"
+
+
+def test_admin_can_rename_any_track(client, session):
+    admin = create_user(session, "ADMIN", is_admin=True)
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Old Name", owner=owner, is_published=False)
+    login_as(client, admin)
+
+    response = client.patch(f"/api/tracks/{track.id}", json={"name": "Admin Rename"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Admin Rename"
+
+
+def test_non_owner_non_admin_cannot_rename_track(client, session):
+    owner = create_user(session, "OWNER")
+    other = create_user(session, "OTHER")
+    track = create_track(session, "Old Name", owner=owner, is_published=False)
+    login_as(client, other)
+
+    response = client.patch(f"/api/tracks/{track.id}", json={"name": "Nope"})
+
+    assert response.status_code == 403

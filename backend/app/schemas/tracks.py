@@ -12,6 +12,10 @@ class TrackPublishRequest(BaseModel):
     is_published: bool
 
 
+class TrackRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class TrackResponse(BaseModel):
     id: str
     slug: str | None = None
@@ -20,6 +24,9 @@ class TrackResponse(BaseModel):
     is_published: bool
     share_token: str | None = None
     owner_user_id: str | None = None
+    owner_display_name: str | None = None
+    best_lap_ms: int | None = None
+    best_lap_display_name: str | None = None
     created_at: datetime
 
 
@@ -38,5 +45,8 @@ class TrackDetailResponse(BaseModel):
     is_published: bool
     share_token: str | None = None
     owner_user_id: str | None = None
+    owner_display_name: str | None = None
+    best_lap_ms: int | None = None
+    best_lap_display_name: str | None = None
     created_at: datetime
     track_payload_json: dict

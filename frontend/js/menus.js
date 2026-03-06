@@ -23,7 +23,12 @@ import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments } from "./track.js";
-import { logoutAuth, setTrackPublished, updateAuthDisplayName } from "./api.js";
+import {
+  logoutAuth,
+  renameTrack,
+  setTrackPublished,
+  updateAuthDisplayName,
+} from "./api.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const TRACK_SELECT_VISIBLE_CARDS = 4;
@@ -157,6 +162,13 @@ function selectedTrackCanPublish() {
   return Boolean(state.auth.isAdmin && preset && preset.fromDb);
 }
 
+function selectedTrackCanRename() {
+  const preset = selectedTrackPreset();
+  if (!preset || !preset.fromDb) return false;
+  if (state.auth.isAdmin) return true;
+  return Boolean(state.auth.userId && preset.ownerUserId === state.auth.userId);
+}
+
 export function getTrackSelectRenderModel() {
   const visibleCount = trackSelectVisibleCount();
   const totalCount = trackOptions.length;
@@ -165,17 +177,10 @@ export function getTrackSelectRenderModel() {
     0,
     Math.min(state.trackSelectViewOffset, maxOffset),
   );
-  const visibleTracks = trackOptions
-    .slice(viewOffset, viewOffset + visibleCount)
-    .map((track) => ({
-      ...track,
-      showAdminBadge: Boolean(
-        state.auth.isAdmin &&
-        track.fromDb &&
-        track.ownerUserId &&
-        track.ownerUserId !== state.auth.userId,
-      ),
-    }));
+  const visibleTracks = trackOptions.slice(
+    viewOffset,
+    viewOffset + visibleCount,
+  );
   const selectedTrack = selectedTrackPreset();
 
   return {
@@ -187,6 +192,7 @@ export function getTrackSelectRenderModel() {
     showRightHint: viewOffset + visibleCount < totalCount,
     selectedTrackCanDelete: selectedTrackCanDelete(),
     selectedTrackCanPublish: selectedTrackCanPublish(),
+    selectedTrackCanRename: selectedTrackCanRename(),
     selectedTrackIsPublished: Boolean(selectedTrack?.isPublished),
   };
 }
@@ -242,25 +248,63 @@ function openConfirmModal({
   onConfirm,
 }) {
   state.modal.open = true;
+  state.modal.mode = "confirm";
   state.modal.title = title || "Confirm";
   state.modal.message = message || "";
   state.modal.confirmLabel = confirmLabel;
   state.modal.cancelLabel = cancelLabel;
   state.modal.danger = danger;
   state.modal.selectedAction = "cancel";
+  state.modal.inputValue = "";
+  state.modal.inputPlaceholder = "";
+  state.modal.inputMaxLength = 36;
+  state.modal.onSubmit = null;
   state.modal.onConfirm = typeof onConfirm === "function" ? onConfirm : null;
+  state.modal.onCancel = null;
+}
+
+function openInputModal({
+  title,
+  message,
+  confirmLabel = "Save",
+  cancelLabel = "Cancel",
+  initialValue = "",
+  placeholder = "",
+  maxLength = 36,
+  onSubmit,
+}) {
+  state.modal.open = true;
+  state.modal.mode = "input";
+  state.modal.title = title || "Input";
+  state.modal.message = message || "";
+  state.modal.confirmLabel = confirmLabel;
+  state.modal.cancelLabel = cancelLabel;
+  state.modal.danger = false;
+  state.modal.selectedAction = "confirm";
+  state.modal.inputValue =
+    typeof initialValue === "string" ? initialValue.slice(0, maxLength) : "";
+  state.modal.inputPlaceholder =
+    typeof placeholder === "string" ? placeholder : "";
+  state.modal.inputMaxLength = Math.max(1, Math.floor(maxLength) || 36);
+  state.modal.onSubmit = typeof onSubmit === "function" ? onSubmit : null;
+  state.modal.onConfirm = null;
   state.modal.onCancel = null;
 }
 
 function closeModal({ runCancel = false } = {}) {
   const onCancel = state.modal.onCancel;
   state.modal.open = false;
+  state.modal.mode = "confirm";
   state.modal.title = "";
   state.modal.message = "";
   state.modal.confirmLabel = "Yes";
   state.modal.cancelLabel = "No";
   state.modal.danger = false;
   state.modal.selectedAction = "cancel";
+  state.modal.inputValue = "";
+  state.modal.inputPlaceholder = "";
+  state.modal.inputMaxLength = 36;
+  state.modal.onSubmit = null;
   state.modal.onConfirm = null;
   state.modal.onCancel = null;
   if (runCancel && typeof onCancel === "function") onCancel();
@@ -592,12 +636,57 @@ function activateSelection() {
 
 function onKeyDown(e) {
   const key = e.key.toLowerCase();
+  const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
 
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) {
     e.preventDefault();
   }
 
   if (state.modal.open) {
+    if (state.modal.mode === "input") {
+      if (
+        ["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)
+      ) {
+        state.modal.selectedAction =
+          state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
+        return;
+      }
+      if (key === "escape") {
+        closeModal({ runCancel: true });
+        return;
+      }
+      if (key === "enter") {
+        const shouldSubmit = state.modal.selectedAction === "confirm";
+        const onSubmit = state.modal.onSubmit;
+        const value = state.modal.inputValue;
+        if (shouldSubmit && !String(value || "").trim()) {
+          showSnackbar("Track name required", { seconds: 2, kind: "error" });
+          return;
+        }
+        closeModal();
+        if (shouldSubmit && typeof onSubmit === "function") {
+          Promise.resolve(onSubmit(value)).catch((error) => {
+            const message =
+              error instanceof Error ? error.message : "Action failed";
+            showSnackbar(message, { seconds: 2, kind: "error" });
+          });
+        }
+        return;
+      }
+      if (key === "backspace") {
+        state.modal.inputValue = state.modal.inputValue.slice(0, -1);
+        return;
+      }
+      if (
+        key.length === 1 &&
+        /^[a-z0-9 _-]$/i.test(key) &&
+        state.modal.inputValue.length < state.modal.inputMaxLength
+      ) {
+        state.modal.inputValue += key.toUpperCase();
+      }
+      return;
+    }
+
     if (
       ["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)
     ) {
@@ -664,6 +753,9 @@ function onKeyDown(e) {
       return;
     }
   }
+
+  // Keep gameplay/menu shortcuts on plain keys only.
+  if (hasModifier) return;
 
   if (state.mode === "racing") {
     if (state.finished && key === "escape") {
@@ -748,6 +840,11 @@ function onKeyDown(e) {
           {
             name: updatedTrack.name,
             ownerUserId: updatedTrack.owner_user_id || null,
+            ownerDisplayName: updatedTrack.owner_display_name || null,
+            bestLapMs: Number.isFinite(updatedTrack.best_lap_ms)
+              ? Number(updatedTrack.best_lap_ms)
+              : null,
+            bestLapDisplayName: updatedTrack.best_lap_display_name || null,
             isPublished: Boolean(updatedTrack.is_published),
             shareToken: updatedTrack.share_token || null,
             fromDb: true,
@@ -765,6 +862,47 @@ function onKeyDown(e) {
           error instanceof Error ? error.message : "Publish update failed";
         showSnackbar(message, { seconds: 2, kind: "error" });
       });
+    return;
+  }
+
+  if (
+    key === "r" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= 0 &&
+    state.trackSelectIndex < trackOptions.length
+  ) {
+    const preset = selectedTrackPreset();
+    if (!selectedTrackCanRename() || !preset) return;
+    openInputModal({
+      title: "Rename Track",
+      message: "Enter a new name for the selected track.",
+      confirmLabel: "Save",
+      cancelLabel: "Cancel",
+      initialValue: preset.name || "",
+      maxLength: 36,
+      onSubmit: async (rawName) => {
+        const nextName = typeof rawName === "string" ? rawName.trim() : "";
+        const updatedTrack = await renameTrack(preset.id, nextName);
+        const updatedPreset = setTrackPresetMetadata(
+          updatedTrack.id,
+          {
+            name: updatedTrack.name,
+            ownerUserId: updatedTrack.owner_user_id || null,
+            ownerDisplayName: updatedTrack.owner_display_name || null,
+            bestLapMs: Number.isFinite(updatedTrack.best_lap_ms)
+              ? Number(updatedTrack.best_lap_ms)
+              : null,
+            bestLapDisplayName: updatedTrack.best_lap_display_name || null,
+            isPublished: Boolean(updatedTrack.is_published),
+            shareToken: updatedTrack.share_token || null,
+            fromDb: true,
+          },
+          { currentUserId: state.auth.userId },
+        );
+        if (!updatedPreset) return;
+        showSnackbar("Track renamed", { seconds: 1.8, kind: "success" });
+      },
+    });
     return;
   }
 
