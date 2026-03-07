@@ -108,50 +108,53 @@ function emitDrivingParticles({
 
   const speedAbs = Math.abs(headingForwardSpeed);
   const lateralAbs = Math.abs(headingLateralSpeed);
+  const speedFactor = clamp((car.speed - 28) / 110, 0, 1);
   const handbrakeStrength =
     physicsRuntime.input.handbrake *
+    speedFactor *
     clamp((speedAbs - 35) / 85, 0, 1) *
     clamp((lateralAbs - 24) / 120, 0, 1);
 
-  if (handbrakeStrength > 0.08 && emitters.smokeCooldown <= 0) {
+  if (handbrakeStrength > 0.035 && emitters.smokeCooldown <= 0) {
     const rearAngle = Math.atan2(-forwardY, -forwardX);
     emitHandbrakeSmoke({
       x: wheelPoints[2].x,
       y: wheelPoints[2].y,
       angle: rearAngle,
-      strength: 0.7 + handbrakeStrength * 1.6,
+      strength: 0.15 + handbrakeStrength * 1.9,
     });
     emitHandbrakeSmoke({
       x: wheelPoints[3].x,
       y: wheelPoints[3].y,
       angle: rearAngle,
-      strength: 0.7 + handbrakeStrength * 1.6,
+      strength: 0.15 + handbrakeStrength * 1.9,
     });
-    emitters.smokeCooldown = 0.028;
+    emitters.smokeCooldown = 0.05 - handbrakeStrength * 0.02;
   }
 
   const waterStrength =
-    surfaceName === "water" ? clamp((car.speed - 24) / 120, 0, 1) : 0;
-  if (waterStrength > 0.05 && emitters.splashCooldown <= 0) {
-    const frontMidX = (wheelPoints[0].x + wheelPoints[1].x) * 0.5;
-    const frontMidY = (wheelPoints[0].y + wheelPoints[1].y) * 0.5;
-    const noseX = frontMidX + forwardX * (car.width * 0.22);
-    const noseY = frontMidY + forwardY * (car.width * 0.22);
-    const sprayAngle = Math.atan2(forwardY, forwardX);
-    emitWaterSpray({
-      x: noseX,
-      y: noseY,
-      angle: sprayAngle,
-      strength: 0.8 + waterStrength * 1.5,
-      inheritVx: car.vx * 0.16,
-      inheritVy: car.vy * 0.16,
-    });
-    emitters.splashCooldown = 0.022;
+    surfaceName === "water" ? clamp((car.speed - 30) / 115, 0, 1) : 0;
+  if (waterStrength > 0.03 && emitters.splashCooldown <= 0) {
+    const travelAngle = Math.atan2(car.vy, car.vx);
+    const sprayAngle = Number.isFinite(travelAngle)
+      ? travelAngle
+      : Math.atan2(forwardY, forwardX);
+    for (let i = 0; i < wheelPoints.length; i++) {
+      emitWaterSpray({
+        x: wheelPoints[i].x,
+        y: wheelPoints[i].y,
+        angle: sprayAngle,
+        strength: 0.2 + waterStrength * 1.4,
+        inheritVx: car.vx * 0.16,
+        inheritVy: car.vy * 0.16,
+      });
+    }
+    emitters.splashCooldown = 0.045 - waterStrength * 0.02;
   }
 
   const grassStrength =
-    surfaceName === "grass" ? clamp((car.speed - 18) / 90, 0, 1) : 0;
-  if (grassStrength > 0.04 && emitters.dustCooldown <= 0) {
+    surfaceName === "grass" ? clamp((car.speed - 42) / 120, 0, 1) : 0;
+  if (grassStrength > 0.02 && emitters.dustCooldown <= 0) {
     const travelAngle = Math.atan2(car.vy, car.vx);
     const dustAngle = Number.isFinite(travelAngle)
       ? travelAngle + Math.PI
@@ -161,12 +164,12 @@ function emitDrivingParticles({
         x: wheelPoints[i].x,
         y: wheelPoints[i].y,
         angle: dustAngle,
-        strength: 0.7 + grassStrength * 1.25,
+        strength: 0.2 + grassStrength * 1.35,
         inheritVx: car.vx * 0.1,
         inheritVy: car.vy * 0.1,
       });
     }
-    emitters.dustCooldown = 0.036;
+    emitters.dustCooldown = 0.05 - grassStrength * 0.022;
   }
 }
 

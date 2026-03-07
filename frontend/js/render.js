@@ -1572,8 +1572,9 @@ export function render() {
     ctx.clip();
     ctx.translate(0, TOP_BAR_HEIGHT);
     drawTrack();
+    drawParticles(ctx, { layer: "belowCar" });
     drawCar();
-    drawParticles(ctx);
+    drawParticles(ctx, { layer: "aboveCar" });
     drawDebugVectors();
     drawStartSequenceOverlay();
     ctx.restore();

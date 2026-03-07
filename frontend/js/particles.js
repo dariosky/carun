@@ -47,6 +47,7 @@ export function emitBurst({
   spread = Math.PI * 2,
   angleOffset = 0,
   kind = "square",
+  layer = "aboveCar",
 } = {}) {
   for (let i = 0; i < count; i++) {
     const angle = angleOffset + randomRange(-spread * 0.5, spread * 0.5);
@@ -64,6 +65,7 @@ export function emitBurst({
       size: randomRange(sizeMin, sizeMax),
       color: colors[Math.floor(Math.random() * colors.length)] || "#ffffff",
       drag,
+      layer,
       rotation: randomRange(0, Math.PI * 2),
       spin: randomRange(-10, 10),
       aspect: randomRange(0.45, 1.6),
@@ -156,9 +158,10 @@ export function emitWaterSpray({
     gravity: 42,
     inheritVx,
     inheritVy,
-    spread: Math.PI * 0.75,
+    spread: Math.PI * 0.95,
     angleOffset: angle,
     kind: "spray",
+    layer: "belowCar",
   });
 }
 
@@ -195,9 +198,10 @@ export function emitGrassDust({
   });
 }
 
-export function drawParticles(ctx) {
+export function drawParticles(ctx, { layer = null } = {}) {
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
+    if (layer && p.layer !== layer) continue;
     const lifeT = 1 - p.age / Math.max(p.life, 0.0001);
     if (lifeT <= 0) continue;
 
@@ -220,7 +224,7 @@ export function drawParticles(ctx) {
     } else if (p.kind === "dust") {
       ctx.fillRect(-p.size * 0.65, -p.size * 0.32, p.size * 1.3, p.size * 0.64);
     } else if (p.kind === "spray") {
-      ctx.fillRect(-p.size * 0.35, -p.size * 0.6, p.size * 0.7, p.size * 1.2);
+      ctx.fillRect(-p.size * 0.7, -p.size * 0.45, p.size * 1.4, p.size * 0.9);
     } else {
       ctx.beginPath();
       ctx.arc(0, 0, p.size * 0.5, 0, Math.PI * 2);
