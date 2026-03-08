@@ -575,7 +575,18 @@ function drawTrackSurface(
         CURB_MAX_WIDTH * stripeScale,
       );
       if (segment.renderStyle === "dotted") {
-        drawDottedCurbGuide(pts);
+        const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
+        if (
+          shouldRenderExplicitGuideSegment(
+            pts,
+            sign,
+            trackDef,
+            objects,
+            widthCaps,
+          )
+        ) {
+          drawDottedCurbGuide(pts);
+        }
         return;
       }
       const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
@@ -706,6 +717,42 @@ function shouldRenderCurbSubsection(
   if (samples === 0) return false;
   if (run.kind === "guide") return asphaltHits > 0 && curbHits > 0;
   return curbHits > 0;
+}
+
+function shouldRenderExplicitGuideSegment(
+  points,
+  sideSign,
+  trackDef = track,
+  objects = worldObjects,
+  widthCaps = null,
+) {
+  if (!Array.isArray(points) || points.length < 2) return false;
+  let nonAsphaltHits = 0;
+  let samples = 0;
+  let supportedWidthHits = 0;
+  let widthSamples = 0;
+  let widthSum = 0;
+  const stride = Math.max(1, Math.floor(points.length / 8));
+  const probeDistance = CURB_MAX_WIDTH * 0.8;
+  for (let i = 0; i < points.length; i += stride) {
+    const probe = curbOuterProbePoint(points, i, sideSign, probeDistance);
+    const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
+    if (surface !== "asphalt") nonAsphaltHits += 1;
+    if (Array.isArray(widthCaps)) {
+      const width = Math.max(0, widthCaps[i] ?? 0);
+      widthSum += width;
+      widthSamples += 1;
+      if (width >= CURB_MIN_WIDTH * 1.4) supportedWidthHits += 1;
+    }
+    samples += 1;
+  }
+  if (samples === 0) return false;
+  const nonAsphaltRatio = nonAsphaltHits / samples;
+  if (nonAsphaltRatio < 0.6) return false;
+  if (!Array.isArray(widthCaps) || widthSamples === 0) return true;
+  const supportedWidthRatio = supportedWidthHits / widthSamples;
+  const averageWidth = widthSum / widthSamples;
+  return supportedWidthRatio >= 0.55 && averageWidth >= CURB_MIN_WIDTH * 1.55;
 }
 
 function buildCurbWidthCaps(

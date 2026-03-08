@@ -709,6 +709,7 @@ function buildCurbSegments(trackDef = track) {
   const sortedAbs = Array.from(absCurvatures).sort((a, b) => a - b);
   const curvatureThreshold =
     sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
+  const primaryCurbThreshold = curvatureThreshold * 0.78;
 
   // ── Per-sample available-space estimation ──────────────────────────
   // For each centerline sample, measure the distance from the curb path
@@ -729,13 +730,13 @@ function buildCurbSegments(trackDef = track) {
   const curvatureRange = Math.max(curvatureThreshold * 2.1, 1e-6);
   for (let i = 0; i < segmentCount; i++) {
     const curvatureT = clamp(
-      (absCurvatures[i] - curvatureThreshold) / curvatureRange,
+      (absCurvatures[i] - primaryCurbThreshold) / curvatureRange,
       0,
       1,
     );
-    const widthByRoad = roadHalfWidths[i] * (0.28 + curvatureT * 0.24);
+    const widthByRoad = roadHalfWidths[i] * (0.24 + curvatureT * 0.28);
     const targetWidth = clamp(widthByRoad, CURB_MIN_WIDTH, CURB_MAX_WIDTH);
-    minCurbSpaces[i] = targetWidth * (1.1 + (1 - curvatureT) * 0.45);
+    minCurbSpaces[i] = targetWidth * (0.95 + (1 - curvatureT) * 0.35);
   }
 
   // ── Per-sample curb eligibility (separate per side) ────────────────
@@ -752,10 +753,10 @@ function buildCurbSegments(trackDef = track) {
 
   // Higher threshold for "inside-of-turn" curbs (need stronger curvature
   // to justify a curb on the compressed side).
-  const insideCurvatureBoost = 1.8;
+  const insideCurvatureBoost = 1.65;
 
   for (let i = 0; i < segmentCount; i++) {
-    if (absCurvatures[i] < curvatureThreshold) continue;
+    if (absCurvatures[i] < primaryCurbThreshold) continue;
 
     // Positive signed curvature → turning left → outer side is convex
     // (outside of turn), inner is concave (inside of turn).
@@ -777,7 +778,7 @@ function buildCurbSegments(trackDef = track) {
   }
 
   // ── Expand eligible regions slightly (smooth short gaps) ───────────
-  const expandBy = 2;
+  const expandBy = 4;
   const expandMask = (mask) => {
     const expanded = new Uint8Array(segmentCount);
     for (let i = 0; i < segmentCount; i++) {
@@ -808,7 +809,7 @@ function buildCurbSegments(trackDef = track) {
   }
 
   // ── Collect contiguous runs and filter by minimum arc length ───────
-  const minRunArcLength = CURB_STRIPE_LENGTH * 2; // at least 2 stripes
+  const minRunArcLength = CURB_STRIPE_LENGTH * 1.2;
 
   // Compute the centroid of the centerline — used to determine the
   // outward extrusion direction for each curb run.
