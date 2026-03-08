@@ -585,25 +585,25 @@ function appendBridge(points, from, to, spacing = 10) {
 
 const CENTERLINE_SMOOTHING_CONFIG = {
   raw: {
-    simplifyEpsilon: 1.3,
-    tinyMoveCutoff: 0.75,
+    simplifyEpsilon: 0.85,
+    tinyMoveCutoff: 0.45,
     laplacianPasses: 1,
-    laplacianStrength: 0.16,
+    laplacianStrength: 0.06,
     chaikinIterations: 0,
   },
   light: {
-    simplifyEpsilon: 2.2,
-    tinyMoveCutoff: 1.1,
-    laplacianPasses: 1,
-    laplacianStrength: 0.22,
-    chaikinIterations: 1,
+    simplifyEpsilon: 3.4,
+    tinyMoveCutoff: 1.65,
+    laplacianPasses: 2,
+    laplacianStrength: 0.28,
+    chaikinIterations: 2,
   },
   smooth: {
-    simplifyEpsilon: 3.8,
-    tinyMoveCutoff: 1.8,
-    laplacianPasses: 2,
-    laplacianStrength: 0.3,
-    chaikinIterations: 2,
+    simplifyEpsilon: 6.8,
+    tinyMoveCutoff: 2.9,
+    laplacianPasses: 5,
+    laplacianStrength: 0.38,
+    chaikinIterations: 4,
   },
 };
 
