@@ -1,14 +1,16 @@
+import { loadMenuMusicEnabled } from "./parameters.js";
 import { state } from "./state.js";
 
 const MENU_MUSIC_SRC = "sounds/menu.mp3";
 const MENU_MUSIC_VOLUME = 0.42;
-const MENU_MUSIC_FADE_IN_SECONDS = 0.8;
-const MENU_MUSIC_FADE_OUT_SECONDS = 0.45;
+const MENU_MUSIC_FADE_IN_SECONDS = 2;
+const MENU_MUSIC_FADE_OUT_SECONDS = 2;
 
 let menuMusic = null;
 let audioUnlocked = false;
 let targetMenuMusicActive = false;
 let currentFade = null;
+let menuMusicEnabled = loadMenuMusicEnabled(true);
 
 function cancelFade() {
   if (currentFade !== null) {
@@ -60,11 +62,23 @@ async function startMenuMusic({ immediate = false } = {}) {
   try {
     if (audio.paused) {
       audio.currentTime = 0;
-      await audio.play();
+      audio.muted = false;
+      try {
+        await audio.play();
+      } catch (error) {
+        if (audioUnlocked) throw error;
+        audio.muted = true;
+        await audio.play();
+      }
     }
   } catch {
     return;
   }
+  if (!audioUnlocked && audio.muted) {
+    audio.volume = 0;
+    return;
+  }
+  audio.muted = false;
   fadeMenuMusicTo(
     MENU_MUSIC_VOLUME,
     immediate ? 0 : MENU_MUSIC_FADE_IN_SECONDS,
@@ -81,12 +95,11 @@ function stopMenuMusic({ immediate = false } = {}) {
 }
 
 function shouldMenuMusicPlayForMode(mode) {
-  return mode !== "racing";
+  return menuMusicEnabled && mode !== "racing";
 }
 
 export function syncMenuMusicForMode(mode, { immediate = false } = {}) {
   targetMenuMusicActive = shouldMenuMusicPlayForMode(mode);
-  if (!audioUnlocked) return;
   if (targetMenuMusicActive) {
     void startMenuMusic({ immediate });
     return;
@@ -97,10 +110,23 @@ export function syncMenuMusicForMode(mode, { immediate = false } = {}) {
 export async function unlockMenuMusic() {
   audioUnlocked = true;
   if (!targetMenuMusicActive) return;
+  const audio = ensureMenuMusic();
+  if (audio.muted) audio.volume = 0;
   await startMenuMusic();
+}
+
+export function setMenuMusicEnabled(enabled) {
+  menuMusicEnabled = Boolean(enabled);
+  syncMenuMusicForMode(state.mode, { immediate: false });
+}
+
+export function isMenuMusicEnabled() {
+  return menuMusicEnabled;
 }
 
 export function initAudio() {
   targetMenuMusicActive = shouldMenuMusicPlayForMode(state.mode);
-  ensureMenuMusic();
+  const audio = ensureMenuMusic();
+  audio.defaultMuted = false;
+  audio.playsInline = true;
 }

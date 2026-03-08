@@ -1,5 +1,6 @@
 import {
   CHECKPOINT_WIDTH_MULTIPLIER,
+  centerlineSmoothingLabel,
   ctx,
   WIDTH,
   HEIGHT,
@@ -29,6 +30,7 @@ import {
   state,
 } from "./state.js";
 import {
+  getEditorToolbarLayout,
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
   getSettingsHeaderRenderModel,
@@ -40,10 +42,13 @@ import {
   blobRadius,
   drawPath,
   drawStripedCurb,
+  getTrackWorldScale,
   initCurbSegments,
   isCenterlineTrack,
   pointOnCenterLine,
+  sampleCenterlineHalfWidth,
   sampleClosedPath,
+  surfaceAtForTrack,
   trackBoundaryPaths,
   trackFrameAtAngle,
   trackStartAngle,
@@ -113,6 +118,15 @@ function warpProfileSignature(waves) {
   return Number(sum.toFixed(5));
 }
 
+function widthProfileSignature(values) {
+  if (!Array.isArray(values) || !values.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += (Number(values[i]) || 0) * ((i % 7) + 1);
+  }
+  return Number(sum.toFixed(3));
+}
+
 function trackSignature(trackDef, segments) {
   return {
     segments,
@@ -123,7 +137,12 @@ function trackSignature(trackDef, segments) {
     innerA: trackDef.innerA,
     innerB: trackDef.innerB,
     borderSize: trackDef.borderSize,
+    worldScale: getTrackWorldScale(trackDef),
     centerlineHalfWidth: trackDef.centerlineHalfWidth,
+    centerlineWidthSig: widthProfileSignature(trackDef.centerlineWidthProfile),
+    centerlineWidthLength: Array.isArray(trackDef.centerlineWidthProfile)
+      ? trackDef.centerlineWidthProfile.length
+      : 0,
     warpOuterSig: warpProfileSignature(trackDef.warpOuter || []),
     warpInnerSig: warpProfileSignature(trackDef.warpInner || []),
     centerlineLoopRef: trackDef.centerlineLoop,
@@ -144,7 +163,10 @@ function sameTrackSignature(a, b) {
     a.innerA === b.innerA &&
     a.innerB === b.innerB &&
     a.borderSize === b.borderSize &&
+    a.worldScale === b.worldScale &&
     a.centerlineHalfWidth === b.centerlineHalfWidth &&
+    a.centerlineWidthSig === b.centerlineWidthSig &&
+    a.centerlineWidthLength === b.centerlineWidthLength &&
     a.warpOuterSig === b.warpOuterSig &&
     a.warpInnerSig === b.warpInnerSig &&
     a.centerlineLoopRef === b.centerlineLoopRef &&
@@ -163,14 +185,93 @@ function getTrackBoundariesCached(trackDef, segments) {
 
 function getPreviewTrackData(preset) {
   const cached = previewTrackDataCache.get(preset.id);
-  if (cached && cached.trackRef === preset.track) return cached.data;
+  const signature = trackSignature(preset.track, TRACK_SEGMENTS);
+  if (cached && sameTrackSignature(cached.signature, signature))
+    return cached.data;
 
   const data = {
     boundaries: trackBoundaryPaths(preset.track, TRACK_SEGMENTS),
     curbs: initCurbSegments(preset.track),
   };
-  previewTrackDataCache.set(preset.id, { trackRef: preset.track, data });
+  previewTrackDataCache.set(preset.id, { signature, data });
   return data;
+}
+
+function applyWorldScaleTransform(trackDef = track) {
+  const worldScale = getTrackWorldScale(trackDef);
+  ctx.translate(trackDef.cx, trackDef.cy);
+  ctx.scale(worldScale, worldScale);
+  ctx.translate(-trackDef.cx, -trackDef.cy);
+}
+
+function transformPointByWorldScale(point, trackDef) {
+  const worldScale = getTrackWorldScale(trackDef);
+  return {
+    x: trackDef.cx + (point.x - trackDef.cx) * worldScale,
+    y: trackDef.cy + (point.y - trackDef.cy) * worldScale,
+  };
+}
+
+function expandBounds(bounds, x, y) {
+  bounds.minX = Math.min(bounds.minX, x);
+  bounds.minY = Math.min(bounds.minY, y);
+  bounds.maxX = Math.max(bounds.maxX, x);
+  bounds.maxY = Math.max(bounds.maxY, y);
+}
+
+function getPreviewBounds(preset, boundaries, curbs) {
+  const trackDef = preset.track;
+  const worldScale = getTrackWorldScale(trackDef);
+  const bounds = {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  };
+
+  for (const p of boundaries.outer || []) {
+    const scaled = transformPointByWorldScale(p, trackDef);
+    expandBounds(bounds, scaled.x, scaled.y);
+  }
+  for (const segment of curbs.outer || []) {
+    for (const p of segment.points || segment) {
+      const scaled = transformPointByWorldScale(p, trackDef);
+      expandBounds(bounds, scaled.x, scaled.y);
+    }
+  }
+  for (const segment of curbs.inner || []) {
+    for (const p of segment.points || segment) {
+      const scaled = transformPointByWorldScale(p, trackDef);
+      expandBounds(bounds, scaled.x, scaled.y);
+    }
+  }
+  for (const obj of preset.worldObjects || []) {
+    if (obj.type === "tree" || obj.type === "barrel") {
+      const radius = (Number(obj.r) || 0) * worldScale;
+      const center = transformPointByWorldScale(obj, trackDef);
+      expandBounds(bounds, center.x - radius, center.y - radius);
+      expandBounds(bounds, center.x + radius, center.y + radius);
+      continue;
+    }
+    if (obj.type === "pond") {
+      const radius =
+        Math.max(Number(obj.rx) || 0, Number(obj.ry) || 0) * worldScale;
+      const center = transformPointByWorldScale(obj, trackDef);
+      expandBounds(bounds, center.x - radius, center.y - radius);
+      expandBounds(bounds, center.x + radius, center.y + radius);
+    }
+  }
+
+  if (!Number.isFinite(bounds.minX)) {
+    return {
+      minX: preset.track.cx - 100,
+      minY: preset.track.cy - 100,
+      maxX: preset.track.cx + 100,
+      maxY: preset.track.cy + 100,
+    };
+  }
+
+  return bounds;
 }
 
 function drawPixelNoise() {
@@ -185,18 +286,22 @@ function drawPixelNoise() {
 function drawDecor(objects = worldObjects) {
   for (const obj of objects) {
     if (obj.type === "tree") {
+      const angle = obj.angle || 0;
       ctx.fillStyle = "#4a2f1e";
-      ctx.fillRect(obj.x - 4, obj.y + 8, 8, 16);
+      ctx.save();
+      ctx.translate(obj.x, obj.y);
+      ctx.rotate(angle);
+      ctx.fillRect(-4, 8, 8, 16);
       ctx.fillStyle = "#2f9c4a";
       const canopy = sampleClosedPath((a) => {
         const radius =
           obj.r *
           (1 +
-            0.2 * Math.sin(a * 3 + obj.x * 0.02) +
-            0.12 * Math.sin(a * 5 + obj.y * 0.02));
+            0.2 * Math.sin(a * 3 + obj.x * 0.02 + angle) +
+            0.12 * Math.sin(a * 5 + obj.y * 0.02 - angle * 0.7));
         return {
-          x: obj.x + Math.cos(a) * radius,
-          y: obj.y + Math.sin(a) * radius,
+          x: Math.cos(a) * radius,
+          y: Math.sin(a) * radius,
         };
       }, 40);
       ctx.beginPath();
@@ -205,42 +310,58 @@ function drawDecor(objects = worldObjects) {
       ctx.fillStyle = "#3dcf60";
       const highlight = sampleClosedPath((a) => {
         const radius =
-          obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08));
+          obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08 + angle));
         return {
-          x: obj.x - 8 + Math.cos(a) * radius,
-          y: obj.y - 6 + Math.sin(a) * radius,
+          x: -8 + Math.cos(a) * radius,
+          y: -6 + Math.sin(a) * radius,
         };
       }, 24);
       ctx.beginPath();
       drawPath(highlight);
       ctx.fill();
+      ctx.restore();
     }
 
     if (obj.type === "pond") {
+      const angle = obj.angle || 0;
       ctx.fillStyle = "#7aa1c2";
       const waterPath = sampleClosedPath((a) => {
         const radius = blobRadius(obj.rx, obj.ry, a, obj.seed || 0);
         return {
-          x: obj.x + Math.cos(a) * radius,
-          y: obj.y + Math.sin(a) * radius,
+          x: Math.cos(a) * radius,
+          y: Math.sin(a) * radius,
         };
       }, 64);
+      ctx.save();
+      ctx.translate(obj.x, obj.y);
+      ctx.rotate(angle);
       ctx.beginPath();
       drawPath(waterPath);
       ctx.fill();
       ctx.strokeStyle = "#8de2ff";
       ctx.lineWidth = 3;
       ctx.stroke();
+      ctx.restore();
     }
 
     if (obj.type === "barrel") {
+      const angle = obj.angle || 0;
+      ctx.save();
+      ctx.translate(obj.x, obj.y);
+      ctx.rotate(angle);
       ctx.fillStyle = "#d16f0d";
       ctx.beginPath();
-      ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI * 2);
+      ctx.arc(0, 0, obj.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#3a2a12";
       ctx.lineWidth = 2;
       ctx.stroke();
+      ctx.strokeStyle = "#ffe0a2";
+      ctx.beginPath();
+      ctx.moveTo(-obj.r * 0.7, 0);
+      ctx.lineTo(obj.r * 0.7, 0);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 }
@@ -392,43 +513,83 @@ function drawStartLine(trackDef = track) {
   ctx.restore();
 }
 
-function drawTrackSurface(trackDef, boundaries, segments, showCurbs) {
+function drawTrackSurface(
+  trackDef,
+  boundaries,
+  segments,
+  showCurbs,
+  objects = worldObjects,
+) {
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
   const centerlineTrack = isCenterlineTrack(trackDef);
 
+  ctx.save();
+  ctx.beginPath();
   if (centerlineTrack) {
-    const roadWidth = Math.max(24, trackDef.centerlineHalfWidth || 90) * 2;
-    if (boundaries.center.length) {
-      const asphaltPattern = getAsphaltPattern(ctx);
-      ctx.save();
-      ctx.strokeStyle = asphaltPattern || "#7f8c8d";
-      ctx.lineWidth = roadWidth;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(boundaries.center[0].x, boundaries.center[0].y);
-      for (let i = 1; i < boundaries.center.length; i++) {
-        ctx.lineTo(boundaries.center[i].x, boundaries.center[i].y);
+    const centerCount = boundaries.center?.length || 0;
+    const alignedCounts =
+      centerCount > 0 &&
+      centerCount === outerPath.length &&
+      centerCount === innerPath.length;
+    if (alignedCounts) {
+      for (let i = 0; i < centerCount; i++) {
+        const next = (i + 1) % centerCount;
+        ctx.moveTo(outerPath[i].x, outerPath[i].y);
+        ctx.lineTo(outerPath[next].x, outerPath[next].y);
+        ctx.lineTo(innerPath[next].x, innerPath[next].y);
+        ctx.lineTo(innerPath[i].x, innerPath[i].y);
+        ctx.closePath();
       }
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
+      ctx.clip();
+    } else {
+      drawPath(outerPath);
+      drawPath([...innerPath].reverse());
+      ctx.clip("evenodd");
     }
   } else {
-    ctx.save();
-    ctx.beginPath();
     drawPath(outerPath);
     drawPath([...innerPath].reverse());
     ctx.clip("evenodd");
-    drawAsphaltMaterial(ctx);
-    ctx.restore();
   }
+  drawAsphaltMaterial(ctx);
+  ctx.restore();
 
   if (showCurbs) {
-    segments.outer.forEach((segment) => {
+    const drawCurbSegment = (segment, defaultSign) => {
       const pts = segment.points || segment;
-      const sign = segment.outwardSign ?? -1;
+      const sign = segment.outwardSign ?? defaultSign;
+      if (centerlineTrack) {
+        const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
+        const runs = splitCurbRenderRuns(
+          pts,
+          sign,
+          trackDef,
+          objects,
+          widthCaps,
+        );
+        if (runs.length) {
+          const visibleRuns = runs.filter((run) =>
+            shouldRenderCurbSubsection(run, sign, trackDef, objects),
+          );
+          const hasVisibleCurb = visibleRuns.some((run) => run.kind === "curb");
+          for (const run of visibleRuns) {
+            if (run.kind === "guide") {
+              if (hasVisibleCurb) drawDottedCurbGuide(run.points);
+            } else {
+              drawStripedCurb(
+                run.points,
+                sign,
+                CURB_MIN_WIDTH,
+                CURB_MAX_WIDTH,
+                CURB_STRIPE_LENGTH,
+                run.widthCaps,
+              );
+            }
+          }
+          return;
+        }
+      }
       drawStripedCurb(
         pts,
         sign,
@@ -436,18 +597,9 @@ function drawTrackSurface(trackDef, boundaries, segments, showCurbs) {
         CURB_MAX_WIDTH,
         CURB_STRIPE_LENGTH,
       );
-    });
-    segments.inner.forEach((segment) => {
-      const pts = segment.points || segment;
-      const sign = segment.outwardSign ?? 1;
-      drawStripedCurb(
-        pts,
-        sign,
-        CURB_MIN_WIDTH,
-        CURB_MAX_WIDTH,
-        CURB_STRIPE_LENGTH,
-      );
-    });
+    };
+    segments.outer.forEach((segment) => drawCurbSegment(segment, -1));
+    segments.inner.forEach((segment) => drawCurbSegment(segment, 1));
   }
 
   if (!centerlineTrack) {
@@ -458,16 +610,276 @@ function drawTrackSurface(trackDef, boundaries, segments, showCurbs) {
   }
 }
 
+function splitCurbRenderRuns(
+  points,
+  sideSign,
+  trackDef = track,
+  objects = worldObjects,
+  widthCaps = null,
+) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const minCurbRunArcLength = CURB_STRIPE_LENGTH * 1.5;
+  const minGuideRunArcLength = CURB_STRIPE_LENGTH * 2;
+  const classes = points.map((_, index) => {
+    const cap = Array.isArray(widthCaps)
+      ? (widthCaps[index] ?? CURB_MAX_WIDTH)
+      : CURB_MAX_WIDTH;
+    if (cap > CURB_MIN_WIDTH * 0.25) return "curb";
+    const probe = curbOuterProbePoint(points, index, sideSign, CURB_MAX_WIDTH);
+    const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
+    return surface === "grass" ? "curb" : "guide";
+  });
+  smoothCurbRunClasses(points, classes, minGuideRunArcLength);
+  smoothCurbRunClasses(points, classes, minCurbRunArcLength);
+  const runs = [];
+  let currentKind = classes[0];
+  let currentPoints = [points[0]];
+  let currentCaps = [
+    Array.isArray(widthCaps)
+      ? (widthCaps[0] ?? CURB_MAX_WIDTH)
+      : CURB_MAX_WIDTH,
+  ];
+
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i];
+    const nextKind = classes[i];
+    const nextCap = Array.isArray(widthCaps)
+      ? (widthCaps[i] ?? CURB_MAX_WIDTH)
+      : CURB_MAX_WIDTH;
+    if (nextKind === currentKind) {
+      currentPoints.push(point);
+      currentCaps.push(nextCap);
+      continue;
+    }
+    currentPoints.push(point);
+    currentCaps.push(nextCap);
+    const completed = finalizeCurbRenderRun(
+      currentPoints,
+      currentCaps,
+      currentKind,
+      currentKind === "guide" ? minGuideRunArcLength : minCurbRunArcLength,
+    );
+    if (completed) runs.push(completed);
+    currentKind = nextKind;
+    currentPoints = [points[i - 1], point];
+    currentCaps = [
+      Array.isArray(widthCaps)
+        ? (widthCaps[i - 1] ?? CURB_MAX_WIDTH)
+        : CURB_MAX_WIDTH,
+      nextCap,
+    ];
+  }
+
+  const tail = finalizeCurbRenderRun(
+    currentPoints,
+    currentCaps,
+    currentKind,
+    currentKind === "guide" ? minGuideRunArcLength : minCurbRunArcLength,
+  );
+  if (tail) runs.push(tail);
+  return runs;
+}
+
+function shouldRenderCurbSubsection(
+  run,
+  sideSign,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  const points = run?.points;
+  if (!Array.isArray(points) || points.length < 2) return false;
+  let curbHits = 0;
+  let asphaltHits = 0;
+  let samples = 0;
+  const stride = Math.max(1, Math.floor(points.length / 8));
+  for (let i = 0; i < points.length; i += stride) {
+    const probe = curbOuterProbePoint(points, i, sideSign, CURB_MAX_WIDTH);
+    const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
+    if (surface === "asphalt") asphaltHits += 1;
+    else curbHits += 1;
+    samples += 1;
+  }
+  if (samples === 0) return false;
+  if (run.kind === "guide") return asphaltHits > 0 && curbHits > 0;
+  return curbHits > 0;
+}
+
+function buildCurbWidthCaps(
+  points,
+  sideSign,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const caps = points.map((_, index) => {
+    let sawGrassGap = false;
+    let lastGrassDistance = 0;
+    let previousDistance = 0;
+    const sampleCount = 12;
+
+    for (let step = 0; step <= sampleCount; step++) {
+      const distance = (step / sampleCount) * CURB_MAX_WIDTH;
+      const probe = curbOuterProbePoint(points, index, sideSign, distance);
+      const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
+
+      if (!sawGrassGap) {
+        if (surface === "grass") {
+          sawGrassGap = true;
+          lastGrassDistance = distance;
+        }
+      } else if (surface !== "grass") {
+        let lo = lastGrassDistance;
+        let hi = distance;
+        for (let refine = 0; refine < 8; refine++) {
+          const mid = (lo + hi) * 0.5;
+          const midProbe = curbOuterProbePoint(points, index, sideSign, mid);
+          const midSurface = surfaceAtForTrack(
+            midProbe.x,
+            midProbe.y,
+            trackDef,
+            objects,
+          );
+          if (midSurface === "grass") lo = mid;
+          else hi = mid;
+        }
+        return lo < CURB_MIN_WIDTH * 0.25 ? 0 : lo;
+      }
+
+      previousDistance = distance;
+    }
+
+    return sawGrassGap ? CURB_MAX_WIDTH : Math.max(0, previousDistance);
+  });
+
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 1; i < caps.length - 1; i++) {
+      caps[i] = Math.min(caps[i], (caps[i - 1] + caps[i] + caps[i + 1]) / 3);
+    }
+  }
+
+  return caps;
+}
+
+function smoothCurbRunClasses(points, classes, minArcLength) {
+  if (!Array.isArray(points) || points.length < 2 || !Array.isArray(classes))
+    return;
+  let start = 0;
+  while (start < classes.length) {
+    let end = start + 1;
+    while (end < classes.length && classes[end] === classes[start]) end++;
+    const previousKind = start > 0 ? classes[start - 1] : null;
+    const nextKind = end < classes.length ? classes[end] : null;
+    if (previousKind && previousKind === nextKind) {
+      let arcLen = 0;
+      for (let i = start; i < end; i++) {
+        const prevIndex = Math.max(0, i - 1);
+        arcLen += Math.hypot(
+          points[i].x - points[prevIndex].x,
+          points[i].y - points[prevIndex].y,
+        );
+      }
+      if (arcLen < minArcLength) {
+        for (let i = start; i < end; i++) classes[i] = previousKind;
+      }
+    }
+    start = end;
+  }
+}
+
+function curbOuterProbePoint(points, index, sideSign, width) {
+  const point = points[index];
+  let nx = 0;
+  let ny = 0;
+  if (index > 0) {
+    const dx = point.x - points[index - 1].x;
+    const dy = point.y - points[index - 1].y;
+    const len = Math.hypot(dx, dy) || 1;
+    nx -= dy / len;
+    ny += dx / len;
+  }
+  if (index < points.length - 1) {
+    const dx = points[index + 1].x - point.x;
+    const dy = points[index + 1].y - point.y;
+    const len = Math.hypot(dx, dy) || 1;
+    nx -= dy / len;
+    ny += dx / len;
+  }
+  const nlen = Math.hypot(nx, ny) || 1;
+  nx = (nx / nlen) * sideSign;
+  ny = (ny / nlen) * sideSign;
+  return {
+    x: point.x + nx * width,
+    y: point.y + ny * width,
+  };
+}
+
+function finalizeCurbRenderRun(points, widthCaps, kind, minRunArcLength) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  let arcLen = 0;
+  for (let i = 1; i < points.length; i++) {
+    arcLen += Math.hypot(
+      points[i].x - points[i - 1].x,
+      points[i].y - points[i - 1].y,
+    );
+  }
+  if (arcLen < minRunArcLength) return null;
+  return { kind, points, widthCaps };
+}
+
+function drawDottedCurbGuide(points) {
+  if (!Array.isArray(points) || points.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(248, 248, 248, 0.95)";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([8, 10]);
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawEditorHiddenCurbOverlay(segments) {
+  const drawRuns = (runs, palette) => {
+    runs.forEach((segment, index) => {
+      const pts = segment.points || segment;
+      if (!Array.isArray(pts) || pts.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = palette[index % palette.length];
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.setLineDash([12, 8]);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+  };
+
+  drawRuns(segments.outer || [], [
+    "rgba(160, 92, 255, 0.95)",
+    "rgba(72, 120, 255, 0.95)",
+  ]);
+  drawRuns(segments.inner || [], [
+    "rgba(208, 92, 255, 0.95)",
+    "rgba(66, 188, 255, 0.95)",
+  ]);
+}
+
 function drawTrack() {
-  ctx.fillStyle = "#2e8c42";
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  drawPixelNoise();
-
   const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
   const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
-  drawTrackSurface(track, boundaries, curbSegments, showCurbs);
+  drawTrackSurface(track, boundaries, curbSegments, showCurbs, worldObjects);
   if (state.mode === "editor" && !state.editor.showCurbs) {
+    drawEditorHiddenCurbOverlay(curbSegments);
     drawVertexAsterisks(boundaries.outer);
     drawVertexAsterisks(boundaries.inner);
   }
@@ -536,6 +948,7 @@ function drawDebugVectors() {
   const originY = physicsRuntime.debug.pivotY;
 
   ctx.save();
+  applyWorldScaleTransform(track);
   ctx.lineWidth = 3;
 
   ctx.strokeStyle = "#ffe167";
@@ -555,6 +968,7 @@ function drawDebugVectors() {
   ctx.moveTo(originX, originY);
   ctx.lineTo(originX + lateralWorldX * scale, originY + lateralWorldY * scale);
   ctx.stroke();
+  ctx.restore();
 
   const panelX = 20;
   const panelY = HEIGHT - TOP_BAR_HEIGHT - 126;
@@ -597,7 +1011,6 @@ function drawDebugVectors() {
     lineX,
     firstLineY + lineStep * 4,
   );
-  ctx.restore();
 }
 
 function drawStartSequenceOverlay() {
@@ -838,16 +1251,174 @@ function drawEditorTitleBar() {
 
   ctx.fillStyle = "#d8e8f7";
   ctx.font = "15px Verdana";
-  const compactInfo = [
-    "LMB draw",
-    "T/W/B add",
-    "R race",
-    "Space build",
-    "S save DB",
-    "Backspace undo",
-    "Esc back",
-  ].join("   ");
+  const compactInfo = ["LMB draw", "S save", "C curbs", "Esc back"].join("   ");
   ctx.fillText(compactInfo, x, 38);
+}
+
+function latestEditorValueLabel(preset) {
+  const target = state.editor.latestEditTarget;
+  if (!target) return "--";
+  if (target.kind === "object") {
+    const object = preset.worldObjects?.[target.objectIndex];
+    if (!object) return "--";
+    if (object.type === "pond")
+      return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
+    if (Number.isFinite(object.r)) return `${Math.round(object.r)}`;
+  }
+  if (target.kind === "stroke") {
+    const stroke = preset.centerlineStrokes?.[target.strokeIndex];
+    if (Number.isFinite(stroke?.[0]?.halfWidth))
+      return `${Math.round(stroke[0].halfWidth * 2)} px`;
+  }
+  return "--";
+}
+
+function drawToolbarButton(rect, text, { active = false } = {}) {
+  ctx.save();
+  ctx.fillStyle = active ? "#264c61" : "rgba(14, 27, 35, 0.82)";
+  ctx.strokeStyle = active ? "#9be9ff" : "rgba(184, 215, 232, 0.3)";
+  ctx.lineWidth = active ? 2 : 1.5;
+  ctx.beginPath();
+  ctx.roundRect(rect.x, rect.y, rect.width, rect.height, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f3fbff";
+  ctx.font = "bold 15px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(text, rect.x + rect.width * 0.5, rect.y + 17);
+  ctx.restore();
+}
+
+function drawEditorToolbar() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const layout = getEditorToolbarLayout();
+  const latestValue = latestEditorValueLabel(preset);
+  const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
+  const smoothingText = centerlineSmoothingLabel(
+    preset.track.centerlineSmoothingMode,
+  );
+  const activeToolLabel =
+    state.editor.activeTool === "road"
+      ? "ROAD"
+      : state.editor.activeTool === "pond"
+        ? "WATER"
+        : state.editor.activeTool.toUpperCase();
+
+  ctx.save();
+  ctx.fillStyle = "rgba(6, 14, 20, 0.86)";
+  ctx.beginPath();
+  ctx.roundRect(
+    layout.panel.x,
+    layout.panel.y,
+    layout.panel.width,
+    layout.panel.height,
+    10,
+  );
+  ctx.fill();
+  ctx.strokeStyle = "rgba(184, 215, 232, 0.26)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const titleGradient = ctx.createLinearGradient(
+    layout.titleBar.x,
+    layout.titleBar.y,
+    layout.titleBar.x,
+    layout.titleBar.y + layout.titleBar.height,
+  );
+  titleGradient.addColorStop(0, "#2e5568");
+  titleGradient.addColorStop(1, "#1d3948");
+  ctx.fillStyle = titleGradient;
+  ctx.beginPath();
+  ctx.roundRect(
+    layout.titleBar.x,
+    layout.titleBar.y,
+    layout.titleBar.width,
+    layout.titleBar.height,
+    10,
+  );
+  ctx.fill();
+
+  ctx.fillStyle = "#ffe167";
+  ctx.font = "bold 16px Verdana";
+  ctx.textAlign = "left";
+  ctx.fillText("✥", layout.titleBar.x + 12, layout.titleBar.y + 21);
+  ctx.fillStyle = "#f4fbff";
+  ctx.fillText("Tool", layout.titleBar.x + 36, layout.titleBar.y + 21);
+  ctx.fillStyle = "#9cb9c8";
+  ctx.font = "12px Verdana";
+  ctx.textAlign = "right";
+  ctx.fillText(
+    activeToolLabel,
+    layout.titleBar.x + layout.titleBar.width - 12,
+    layout.titleBar.y + 21,
+  );
+
+  for (const row of layout.rows) {
+    const active =
+      (row.id === "water" && state.editor.activeTool === "pond") ||
+      (row.id === "barrel" && state.editor.activeTool === "barrel") ||
+      (row.id === "tree" && state.editor.activeTool === "tree");
+    drawToolbarButton(row, "", { active });
+    ctx.fillStyle = "#dff7ff";
+    ctx.font = "bold 16px Verdana";
+    ctx.textAlign = "left";
+    ctx.fillText(row.icon, row.x + 10, row.y + 21);
+    ctx.fillStyle = "#f4fbff";
+    ctx.font = "bold 14px Verdana";
+    ctx.fillText(row.label, row.x + 36, row.y + 21);
+    ctx.fillStyle = "#9cb9c8";
+    ctx.font = "13px Verdana";
+    ctx.textAlign = "right";
+    ctx.fillText(`[${row.shortcut}]`, row.x + row.width - 10, row.y + 21);
+  }
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.font = "bold 14px Verdana";
+  ctx.textAlign = "left";
+  ctx.fillText("Size", layout.sizeLabel.x, layout.sizeLabel.y + 18);
+  drawToolbarButton(layout.sizeDecrease, "-");
+  drawToolbarButton(layout.sizeIncrease, "+");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    latestValue,
+    layout.sizeValue.x + layout.sizeValue.width * 0.5,
+    layout.sizeValue.y + 18,
+  );
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Rotate", layout.rotateLabel.x, layout.rotateLabel.y + 18);
+  drawToolbarButton(layout.rotateLeft, "↩");
+  drawToolbarButton(layout.rotateRight, "↪");
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Zoom", layout.zoomLabel.x, layout.zoomLabel.y + 18);
+  drawToolbarButton(layout.zoomOut, "-");
+  drawToolbarButton(layout.zoomIn, "+");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.font = "bold 12px Verdana";
+  ctx.fillText(
+    zoomText,
+    layout.zoomValue.x + layout.zoomValue.width * 0.5,
+    layout.zoomValue.y + 17,
+  );
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Smooth", layout.smoothingLabel.x, layout.smoothingLabel.y + 18);
+  drawToolbarButton(layout.smoothingPrev, "‹");
+  drawToolbarButton(layout.smoothingNext, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    smoothingText,
+    layout.smoothingValue.x + layout.smoothingValue.width * 0.5,
+    layout.smoothingValue.y + 17,
+  );
+  ctx.restore();
 }
 
 function drawFinishOverlay() {
@@ -900,6 +1471,7 @@ function drawFinishOverlay() {
     ctx.font = "20px Verdana";
   }
 
+  ctx.fillStyle = "#ffffff";
   ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 96);
 }
 
@@ -1001,10 +1573,6 @@ function drawMenu() {
     ctx.fillText(item, textX, y);
   });
 
-  ctx.font = "22px Verdana";
-  ctx.fillStyle = "#bfd8f7";
-  ctx.fillText("Use ↑ ↓ and Enter", WIDTH / 2 - 108, HEIGHT - 80);
-
   if (state.auth.authenticated && state.auth.displayName) {
     ctx.save();
     ctx.font = "16px Verdana";
@@ -1046,29 +1614,32 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   ctx.fillStyle = "#2e8c42";
   ctx.fillRect(innerX, innerY, innerSize, innerSize);
 
-  const outer = boundaries.outer;
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const p of outer) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
+  const { minX, minY, maxX, maxY } = getPreviewBounds(
+    preset,
+    boundaries,
+    curbs,
+  );
 
   const centerX = (minX + maxX) * 0.5;
   const centerY = (minY + maxY) * 0.5;
-  const scale = Math.min(innerSize / (maxX - minX), innerSize / (maxY - minY));
+  const scale = Math.min(
+    innerSize / Math.max(maxX - minX, 1),
+    innerSize / Math.max(maxY - minY, 1),
+  );
   const cardCenterX = innerX + innerSize * 0.5;
   const cardCenterY = innerY + innerSize * 0.5;
   ctx.save();
   ctx.translate(cardCenterX, cardCenterY);
   ctx.scale(scale, scale);
   ctx.translate(-centerX, -centerY);
-  drawTrackSurface(trackDef, boundaries, curbs, true);
+  applyWorldScaleTransform(trackDef);
+  drawTrackSurface(
+    trackDef,
+    boundaries,
+    curbs,
+    true,
+    preset.worldObjects || [],
+  );
   drawDecor(preset.worldObjects || []);
   drawRoadDetails(trackDef);
   drawStartLine(trackDef);
@@ -1113,14 +1684,6 @@ function drawLoginProviders() {
     const width = ctx.measureText(item).width;
     ctx.fillText(item, textX - width * 0.5, y);
   });
-
-  ctx.font = "22px Verdana";
-  ctx.fillStyle = "#bfd8f7";
-  ctx.fillText(
-    "Use ↑ ↓ and Enter. Esc goes back.",
-    WIDTH / 2 - 176,
-    HEIGHT - 80,
-  );
 }
 
 function drawTrackSelection() {
@@ -1199,16 +1762,19 @@ function drawTrackSelection() {
   ctx.font = "bold 40px Verdana";
   ctx.fillText("BACK", backX + 82, backY);
 
-  ctx.font = "20px Verdana";
-  ctx.fillStyle = "#c3d9ec";
-  ctx.fillText(
-    "Use \u2190 \u2192 to pick, \u2191/\u2193 for BACK, Enter to confirm",
-    WIDTH * 0.5 - 270,
-    HEIGHT - 70,
-  );
   const helpLines = [];
+  const deleteKeyLabel = (() => {
+    if (typeof navigator === "undefined") return "DEL";
+    const platform =
+      typeof navigator.userAgentData?.platform === "string"
+        ? navigator.userAgentData.platform
+        : typeof navigator.platform === "string"
+          ? navigator.platform
+          : "";
+    return /mac/i.test(platform) ? "BACKSPACE" : "DEL";
+  })();
   if (model.selectedTrackCanDelete)
-    helpLines.push("DEL deletes your selected draft track");
+    helpLines.push(`${deleteKeyLabel} deletes your selected draft track`);
   if (model.selectedTrackCanPublish) {
     helpLines.push(
       model.selectedTrackIsPublished
@@ -1220,8 +1786,11 @@ function drawTrackSelection() {
     helpLines.push("Press E to edit selected track");
   if (model.selectedTrackCanRename)
     helpLines.push("Press R to rename selected track");
+  ctx.font = "20px Verdana";
+  ctx.fillStyle = "#c3d9ec";
+  const helpStartY = HEIGHT - 42 - Math.max(0, helpLines.length - 1) * 28;
   for (let i = 0; i < helpLines.length; i++) {
-    ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, HEIGHT - 42 + i * 28);
+    ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, helpStartY + i * 28);
   }
 
   if (
@@ -1322,8 +1891,15 @@ function drawEditor() {
   ctx.rect(0, TOP_BAR_HEIGHT, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
   ctx.clip();
   ctx.translate(0, TOP_BAR_HEIGHT);
+  ctx.fillStyle = "#2e8c42";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
+  drawPixelNoise();
+  ctx.save();
+  applyWorldScaleTransform(track);
   drawTrack();
   drawEditorOverlay();
+  ctx.restore();
+  drawEditorToolbar();
   ctx.restore();
 }
 
@@ -1377,14 +1953,6 @@ function drawSettings() {
     }
     ctx.fillText(rowLabels[idx], textX, y);
   });
-
-  ctx.font = "20px Verdana";
-  ctx.fillStyle = "#d7e9f4";
-  ctx.fillText(
-    "Enter edits/chooses. Esc exits name edit.",
-    WIDTH / 2 - 205,
-    HEIGHT - 80,
-  );
 }
 
 function drawSnackbar() {
@@ -1499,8 +2067,7 @@ function drawModal() {
   const yesSelected = state.modal.selectedAction === "confirm";
   const cancelLabel = state.modal.cancelLabel || "No";
   const confirmLabel = state.modal.confirmLabel || "Yes";
-  const helpY = contentBottomY + 30;
-  const buttonY = contentBottomY + 44;
+  const buttonY = contentBottomY + 26;
   const buttonH = 48;
   const buttonGap = 16;
   const buttonPadX = 22;
@@ -1517,16 +2084,6 @@ function drawModal() {
   const rightEdge = x + panelW - 34;
   const yesX = rightEdge - confirmW;
   const noX = yesX - buttonGap - cancelW;
-
-  ctx.fillStyle = "#b7cce0";
-  ctx.font = "18px Verdana";
-  ctx.fillText(
-    state.modal.mode === "input"
-      ? "Type, Backspace, \u2190/\u2192 and Enter."
-      : "Use \u2190/\u2192 and Enter. No is default.",
-    x + 34,
-    helpY,
-  );
 
   ctx.fillStyle = noSelected ? "#2f4b61" : "#21394d";
   ctx.fillRect(noX, buttonY, cancelW, buttonH);
@@ -1571,10 +2128,16 @@ export function render() {
     ctx.rect(0, TOP_BAR_HEIGHT, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
     ctx.clip();
     ctx.translate(0, TOP_BAR_HEIGHT);
+    ctx.fillStyle = "#2e8c42";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
+    drawPixelNoise();
+    ctx.save();
+    applyWorldScaleTransform(track);
     drawTrack();
     drawParticles(ctx, { layer: "belowCar" });
     drawCar();
     drawParticles(ctx, { layer: "aboveCar" });
+    ctx.restore();
     drawDebugVectors();
     drawStartSequenceOverlay();
     ctx.restore();

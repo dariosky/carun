@@ -2,6 +2,8 @@ import {
   applyTrackPreset,
   canDeleteTrackPreset,
   canvas,
+  CENTERLINE_SMOOTHING_MODES,
+  DEFAULT_CENTERLINE_SMOOTHING_MODE,
   deleteOwnTrackFromApi,
   getMenuItems,
   getLoginProviderItems,
@@ -11,6 +13,7 @@ import {
   removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
   saveTrackPresetToDb,
+  saveMenuMusicEnabled,
   setTrackPresetMetadata,
   physicsConfig,
   sanitizePlayerName,
@@ -18,6 +21,8 @@ import {
   saveTrackPreset,
   savePlayerName,
   trackOptions,
+  track,
+  normalizeCenterlineSmoothingMode,
 } from "./parameters.js";
 import { keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, resetRace } from "./physics.js";
@@ -29,11 +34,242 @@ import {
   setTrackPublished,
   updateAuthDisplayName,
 } from "./api.js";
-import { syncMenuMusicForMode, unlockMenuMusic } from "./audio.js";
+import {
+  isMenuMusicEnabled,
+  setMenuMusicEnabled,
+  syncMenuMusicForMode,
+  unlockMenuMusic,
+} from "./audio.js";
 import { emitFinishConfetti } from "./particles.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const TRACK_SELECT_VISIBLE_CARDS = 4;
+const EDITOR_TOOL_ROWS = [
+  { id: "undo", label: "Undo", icon: "⟲", shortcut: "Backspace" },
+  { id: "race", label: "Race", icon: "🏁", shortcut: "R" },
+  { id: "water", label: "Water", icon: "≈", shortcut: "W" },
+  { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
+  { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
+  { id: "build", label: "Build", icon: "▦", shortcut: "Space" },
+];
+const EDITOR_TOOLBAR_WIDTH = 252;
+const EDITOR_TOOLBAR_TITLE_HEIGHT = 32;
+const EDITOR_TOOLBAR_ROW_HEIGHT = 32;
+const EDITOR_TOOLBAR_SECTION_HEIGHT = 38;
+const EDITOR_DEFAULT_HALF_WIDTH = 60;
+const EDITOR_ZOOM_STEP = 0.1;
+const EDITOR_MIN_WORLD_SCALE = 0.5;
+const EDITOR_MAX_WORLD_SCALE = 1.75;
+const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
+
+function clampWorldScale(value) {
+  return Math.max(
+    EDITOR_MIN_WORLD_SCALE,
+    Math.min(EDITOR_MAX_WORLD_SCALE, value),
+  );
+}
+
+function loadEditorToolbarPosition() {
+  try {
+    const raw = localStorage.getItem(EDITOR_TOOLBAR_POSITION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) return null;
+    return { x: Number(parsed.x), y: Number(parsed.y) };
+  } catch {
+    return null;
+  }
+}
+
+function saveEditorToolbarPosition() {
+  try {
+    localStorage.setItem(
+      EDITOR_TOOLBAR_POSITION_STORAGE_KEY,
+      JSON.stringify({
+        x: Math.round(state.editor.toolbar.x),
+        y: Math.round(state.editor.toolbar.y),
+      }),
+    );
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function clampEditorToolbarPosition() {
+  const toolbar = state.editor.toolbar;
+  const layout = getEditorToolbarLayout();
+  toolbar.x = Math.max(
+    10,
+    Math.min(toolbar.x, canvas.width - layout.panel.width - 10),
+  );
+  toolbar.y = Math.max(
+    10,
+    Math.min(
+      toolbar.y,
+      canvas.height - EDITOR_TOP_BAR_HEIGHT - layout.panel.height - 10,
+    ),
+  );
+}
+
+function pointInRect(x, y, rect) {
+  return (
+    rect &&
+    x >= rect.x &&
+    x <= rect.x + rect.width &&
+    y >= rect.y &&
+    y <= rect.y + rect.height
+  );
+}
+
+function getDefaultStrokeHalfWidth(preset) {
+  const latestStroke =
+    preset?.centerlineStrokes?.[preset.centerlineStrokes.length - 1];
+  const latestPoint = latestStroke?.[latestStroke.length - 1];
+  if (Number.isFinite(latestPoint?.halfWidth)) return latestPoint.halfWidth;
+  return Number.isFinite(preset?.track?.centerlineHalfWidth)
+    ? preset.track.centerlineHalfWidth
+    : EDITOR_DEFAULT_HALF_WIDTH;
+}
+
+function syncLatestEditorTarget(preset) {
+  const stack = preset?.editStack || [];
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const entry = stack[i];
+    if (entry.kind === "object" && preset.worldObjects[entry.objectIndex]) {
+      state.editor.latestEditTarget = {
+        kind: "object",
+        objectIndex: entry.objectIndex,
+      };
+      return;
+    }
+    if (
+      entry.kind === "stroke" &&
+      preset.centerlineStrokes[entry.strokeIndex]
+    ) {
+      state.editor.latestEditTarget = {
+        kind: "stroke",
+        strokeIndex: entry.strokeIndex,
+      };
+      return;
+    }
+  }
+  state.editor.latestEditTarget = null;
+}
+
+function setEditorTool(nextTool) {
+  state.editor.activeTool = nextTool;
+}
+
+function toggleEditorTool(nextTool) {
+  setEditorTool(state.editor.activeTool === nextTool ? "road" : nextTool);
+}
+
+export function getEditorToolbarLayout() {
+  const toolbar = state.editor.toolbar;
+  const panel = {
+    x: toolbar.x,
+    y: toolbar.y,
+    width: toolbar.width || EDITOR_TOOLBAR_WIDTH,
+    height:
+      EDITOR_TOOLBAR_TITLE_HEIGHT +
+      EDITOR_TOOL_ROWS.length * EDITOR_TOOLBAR_ROW_HEIGHT +
+      EDITOR_TOOLBAR_SECTION_HEIGHT * 4 +
+      24,
+  };
+  const titleBar = {
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: EDITOR_TOOLBAR_TITLE_HEIGHT,
+  };
+  const rows = EDITOR_TOOL_ROWS.map((tool, index) => ({
+    ...tool,
+    x: panel.x + 12,
+    y: titleBar.y + titleBar.height + 8 + index * EDITOR_TOOLBAR_ROW_HEIGHT,
+    width: panel.width - 24,
+    height: EDITOR_TOOLBAR_ROW_HEIGHT - 2,
+  }));
+  const sizeTop = rows[rows.length - 1].y + EDITOR_TOOLBAR_ROW_HEIGHT + 8;
+  const rotateTop = sizeTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const zoomTop = rotateTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const smoothingTop = zoomTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  return {
+    panel,
+    titleBar,
+    rows,
+    sizeLabel: { x: panel.x + 14, y: sizeTop, width: 56, height: 28 },
+    sizeDecrease: { x: panel.x + 92, y: sizeTop + 2, width: 30, height: 24 },
+    sizeIncrease: {
+      x: panel.x + panel.width - 42,
+      y: sizeTop + 2,
+      width: 30,
+      height: 24,
+    },
+    sizeValue: {
+      x: panel.x + 132,
+      y: sizeTop,
+      width: panel.width - 184,
+      height: 28,
+    },
+    rotateLabel: { x: panel.x + 14, y: rotateTop, width: 60, height: 28 },
+    rotateLeft: { x: panel.x + 102, y: rotateTop + 2, width: 40, height: 24 },
+    rotateRight: { x: panel.x + 154, y: rotateTop + 2, width: 40, height: 24 },
+    zoomLabel: { x: panel.x + 14, y: zoomTop, width: 60, height: 28 },
+    zoomOut: { x: panel.x + 102, y: zoomTop + 2, width: 40, height: 24 },
+    zoomIn: { x: panel.x + 154, y: zoomTop + 2, width: 40, height: 24 },
+    zoomValue: { x: panel.x + 196, y: zoomTop, width: 42, height: 28 },
+    smoothingLabel: {
+      x: panel.x + 14,
+      y: smoothingTop,
+      width: 76,
+      height: 28,
+    },
+    smoothingPrev: {
+      x: panel.x + 112,
+      y: smoothingTop + 2,
+      width: 30,
+      height: 24,
+    },
+    smoothingNext: {
+      x: panel.x + panel.width - 40,
+      y: smoothingTop + 2,
+      width: 30,
+      height: 24,
+    },
+    smoothingValue: {
+      x: panel.x + 148,
+      y: smoothingTop,
+      width: 58,
+      height: 28,
+    },
+  };
+}
+
+function editorToolbarActionAt(x, y) {
+  const layout = getEditorToolbarLayout();
+  if (!pointInRect(x, y, layout.panel)) return null;
+  if (pointInRect(x, y, layout.titleBar)) return { type: "drag" };
+  for (const row of layout.rows) {
+    if (pointInRect(x, y, row)) return { type: "action", id: row.id };
+  }
+  if (pointInRect(x, y, layout.sizeDecrease))
+    return { type: "action", id: "sizeDown" };
+  if (pointInRect(x, y, layout.sizeIncrease))
+    return { type: "action", id: "sizeUp" };
+  if (pointInRect(x, y, layout.rotateLeft))
+    return { type: "action", id: "rotateLeft" };
+  if (pointInRect(x, y, layout.rotateRight))
+    return { type: "action", id: "rotateRight" };
+  if (pointInRect(x, y, layout.zoomOut))
+    return { type: "action", id: "zoomOut" };
+  if (pointInRect(x, y, layout.zoomIn)) return { type: "action", id: "zoomIn" };
+  if (pointInRect(x, y, layout.smoothingPrev))
+    return { type: "action", id: "smoothingPrev" };
+  if (pointInRect(x, y, layout.smoothingNext))
+    return { type: "action", id: "smoothingNext" };
+  return { type: "panel" };
+}
 
 function currentMenuItems() {
   return getMenuItems(state.auth.authenticated);
@@ -81,13 +317,16 @@ export function getSettingsRenderLayout(measureTextWidth) {
     0,
     Math.min(state.settingsIndex, settingsItems.length - 1),
   );
-  const rowGap = 74;
+  const rowGap = 66;
   const startY = 338;
 
   const rowLabels = settingsItems.map((item) => {
     if (item === "PLAYER NAME") {
       const suffix = state.editingName ? "_" : "";
       return `${item}: ${state.playerName}${suffix}`;
+    }
+    if (item === "MENU MUSIC") {
+      return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
     }
     if (item === "DEBUG MODE") {
       return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
@@ -217,28 +456,45 @@ function raceMenuIndex() {
   return anonymousIdx >= 0 ? anonymousIdx : 0;
 }
 
-function setTrackInUrl(trackId) {
-  const cleanTrackId = typeof trackId === "string" ? trackId.trim() : "";
-  if (!cleanTrackId) return;
+function replaceAppUrl({ pathname, trackId = null } = {}) {
   const url = new URL(window.location.href);
-  url.searchParams.set("track", cleanTrackId);
+  url.pathname = pathname || url.pathname;
+  url.searchParams.delete("track");
   window.history.replaceState(
     {},
     "",
-    `${url.pathname}?${url.searchParams.toString()}${url.hash}`,
+    `${url.pathname}${url.search ? url.search : ""}${url.hash}`,
   );
 }
 
+function setTrackSelectUrl() {
+  replaceAppUrl({ pathname: "/tracks" });
+}
+
+function setTrackEditorUrl(trackId) {
+  const cleanTrackId = typeof trackId === "string" ? trackId.trim() : "";
+  if (!cleanTrackId) return;
+  replaceAppUrl({
+    pathname: `/tracks/edit/${encodeURIComponent(cleanTrackId)}`,
+  });
+}
+
+function setMainMenuUrl() {
+  replaceAppUrl({ pathname: "/" });
+}
+
+function setTrackInUrl(trackId) {
+  const cleanTrackId = typeof trackId === "string" ? trackId.trim() : "";
+  if (!cleanTrackId) return;
+  replaceAppUrl({ pathname: `/tracks/${encodeURIComponent(cleanTrackId)}` });
+}
+
 function clearTrackInUrl(trackId) {
-  const url = new URL(window.location.href);
-  if (url.searchParams.get("track") !== trackId) return;
-  url.searchParams.delete("track");
-  const query = url.searchParams.toString();
-  window.history.replaceState(
-    {},
-    "",
-    `${url.pathname}${query ? `?${query}` : ""}${url.hash}`,
-  );
+  const currentPath =
+    typeof window !== "undefined" ? window.location.pathname : "";
+  const expectedPath = `/tracks/${encodeURIComponent(trackId)}`;
+  if (currentPath !== expectedPath) return;
+  replaceAppUrl({ pathname: "/tracks" });
 }
 
 function openConfirmModal({
@@ -322,6 +578,7 @@ function returnToTrackSelect() {
     state.selectedTrackIndex = 0;
   }
   state.mode = "trackSelect";
+  setTrackSelectUrl();
   syncMenuMusicForMode(state.mode);
   state.trackSelectIndex = state.selectedTrackIndex;
   syncTrackSelectWindow();
@@ -333,9 +590,34 @@ function updateEditorCursorFromEvent(event) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
-  state.editor.cursorX = (event.clientX - rect.left) * scaleX;
-  state.editor.cursorY =
-    (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
+  const screenX = (event.clientX - rect.left) * scaleX;
+  const screenY = (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
+  const worldScale = clampWorldScale(Number(track.worldScale) || 1);
+  state.editor.cursorScreenX = screenX;
+  state.editor.cursorScreenY = screenY;
+  state.editor.cursorX = track.cx + (screenX - track.cx) / worldScale;
+  state.editor.cursorY = track.cy + (screenY - track.cy) / worldScale;
+}
+
+function rebuildEditorTrackGeometry() {
+  const generated = regenerateTrackFromCenterlineStrokes(
+    state.editor.trackIndex,
+  );
+  if (!generated) return false;
+  applyTrackPreset(state.editor.trackIndex);
+  setCurbSegments(initCurbSegments());
+  return true;
+}
+
+function startEditorRace() {
+  state.selectedTrackIndex = state.editor.trackIndex;
+  applyTrackPreset(state.editor.trackIndex);
+  setCurbSegments(initCurbSegments());
+  state.mode = "racing";
+  syncMenuMusicForMode(state.mode);
+  resetRace();
+  const selected = trackOptions[state.selectedTrackIndex];
+  if (selected) setTrackInUrl(selected.id);
 }
 
 function placeEditorObject(type) {
@@ -347,9 +629,16 @@ function placeEditorObject(type) {
   if (y < 0) return;
 
   if (type === "tree") {
-    const tree = { type: "tree", x, y, r: 22 + Math.random() * 6 };
+    const tree = { type: "tree", x, y, r: 24, angle: 0 };
     preset.worldObjects.push(tree);
-    preset.editStack.push({ kind: "object" });
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
@@ -358,21 +647,146 @@ function placeEditorObject(type) {
       type: "pond",
       x,
       y,
-      rx: 58 + Math.random() * 24,
-      ry: 30 + Math.random() * 18,
+      rx: 78,
+      ry: 44,
       seed: Math.random() * 2 - 1,
+      angle: 0,
     };
     preset.worldObjects.push(pond);
-    preset.editStack.push({ kind: "object" });
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
   if (type === "barrel") {
-    const barrel = { type: "barrel", x, y, r: 12 };
+    const barrel = { type: "barrel", x, y, r: 12, angle: 0 };
     preset.worldObjects.push(barrel);
-    preset.editStack.push({ kind: "object" });
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
     applyTrackPreset(state.editor.trackIndex);
   }
+}
+
+function adjustLatestEditorSize(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!state.editor.latestEditTarget) syncLatestEditorTarget(preset);
+  const target = state.editor.latestEditTarget;
+  if (!target) return;
+
+  if (target.kind === "object") {
+    const object = preset.worldObjects[target.objectIndex];
+    if (!object) {
+      syncLatestEditorTarget(preset);
+      return;
+    }
+    if (object.type === "pond") {
+      object.rx = Math.max(28, Math.min(180, object.rx + direction * 8));
+      object.ry = Math.max(16, Math.min(110, object.ry + direction * 5));
+    }
+    if (object.type === "tree") {
+      object.r = Math.max(12, Math.min(44, object.r + direction * 2));
+    }
+    if (object.type === "barrel") {
+      object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
+    }
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+
+  if (target.kind === "stroke") {
+    const stroke = preset.centerlineStrokes[target.strokeIndex];
+    if (!stroke?.length) {
+      syncLatestEditorTarget(preset);
+      return;
+    }
+    for (const point of stroke) {
+      const nextWidth =
+        (Number.isFinite(point.halfWidth)
+          ? point.halfWidth
+          : getDefaultStrokeHalfWidth(preset)) +
+        direction * 4;
+      point.halfWidth = Math.max(24, Math.min(120, nextWidth));
+    }
+    rebuildEditorTrackGeometry();
+  }
+}
+
+function rotateLatestEditorObject(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!state.editor.latestEditTarget) syncLatestEditorTarget(preset);
+  const target = state.editor.latestEditTarget;
+  if (!target || target.kind !== "object") return;
+  const object = preset.worldObjects[target.objectIndex];
+  if (!object) {
+    syncLatestEditorTarget(preset);
+    return;
+  }
+  object.angle =
+    ((object.angle || 0) + direction * (Math.PI / 12)) % (Math.PI * 2);
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustEditorZoom(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  const current = clampWorldScale(Number(preset.track.worldScale) || 1);
+  const next = clampWorldScale(
+    Number((current + direction * EDITOR_ZOOM_STEP).toFixed(2)),
+  );
+  if (next === current) return;
+  preset.track.worldScale = next;
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustEditorSmoothing(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  const current = normalizeCenterlineSmoothingMode(
+    preset.track.centerlineSmoothingMode,
+  );
+  const index = CENTERLINE_SMOOTHING_MODES.indexOf(current);
+  const nextIndex = Math.max(
+    0,
+    Math.min(CENTERLINE_SMOOTHING_MODES.length - 1, index + direction),
+  );
+  if (nextIndex === index) return;
+  preset.track.centerlineSmoothingMode = CENTERLINE_SMOOTHING_MODES[nextIndex];
+  if (!rebuildEditorTrackGeometry()) {
+    applyTrackPreset(state.editor.trackIndex);
+  }
+}
+
+function performEditorToolbarAction(actionId) {
+  if (actionId === "undo") undoLastEditorAddition();
+  if (actionId === "race") startEditorRace();
+  if (actionId === "water") toggleEditorTool("pond");
+  if (actionId === "barrel") toggleEditorTool("barrel");
+  if (actionId === "tree") toggleEditorTool("tree");
+  if (actionId === "build") rebuildEditorTrackGeometry();
+  if (actionId === "sizeDown") adjustLatestEditorSize(-1);
+  if (actionId === "sizeUp") adjustLatestEditorSize(1);
+  if (actionId === "rotateLeft") rotateLatestEditorObject(-1);
+  if (actionId === "rotateRight") rotateLatestEditorObject(1);
+  if (actionId === "zoomOut") adjustEditorZoom(-1);
+  if (actionId === "zoomIn") adjustEditorZoom(1);
+  if (actionId === "smoothingPrev") adjustEditorSmoothing(-1);
+  if (actionId === "smoothingNext") adjustEditorSmoothing(1);
 }
 
 function undoLastEditorAddition() {
@@ -387,6 +801,7 @@ function undoLastEditorAddition() {
       applyTrackPreset(state.editor.trackIndex);
       setCurbSegments(initCurbSegments());
     }
+    syncLatestEditorTarget(preset);
     return;
   }
 
@@ -400,6 +815,7 @@ function undoLastEditorAddition() {
 
   applyTrackPreset(state.editor.trackIndex);
   setCurbSegments(initCurbSegments());
+  syncLatestEditorTarget(preset);
 }
 
 function trackSelectCardCount() {
@@ -410,7 +826,7 @@ function trackSelectBackIndex() {
   return trackSelectCardCount();
 }
 
-async function saveEditorTrack() {
+async function saveEditorTrack(requestedName) {
   const trackIndex = state.editor.trackIndex;
   const previousPreset = getTrackPreset(trackIndex);
   const previousId = previousPreset.id;
@@ -420,6 +836,7 @@ async function saveEditorTrack() {
   try {
     const imported = await saveTrackPresetToDb(trackIndex, {
       currentUserId: state.auth.userId,
+      name: requestedName,
     });
     if (!imported) {
       showSnackbar("Save failed", { seconds: 2, kind: "error" });
@@ -436,7 +853,7 @@ async function saveEditorTrack() {
       state.selectedTrackIndex = importedIndex;
       state.trackSelectIndex = importedIndex;
       syncTrackSelectWindow();
-      setTrackInUrl(imported.id);
+      setTrackEditorUrl(imported.id);
     }
     showSnackbar("Saved to DB", { kind: "success" });
   } catch (error) {
@@ -447,9 +864,46 @@ async function saveEditorTrack() {
   }
 }
 
+function openTrackNameModal({
+  initialValue = "",
+  confirmLabel = "Save",
+  onSubmit,
+}) {
+  openInputModal({
+    title: "Track name",
+    message: "Enter the track name.",
+    confirmLabel,
+    cancelLabel: "Cancel",
+    initialValue,
+    maxLength: 36,
+    onSubmit,
+  });
+}
+
+function promptSaveEditorTrack() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (preset?.fromDb) {
+    void saveEditorTrack();
+    return;
+  }
+  openTrackNameModal({
+    initialValue: preset?.name || "",
+    confirmLabel: "Save",
+    onSubmit: async (rawName) => {
+      await saveEditorTrack(rawName);
+    },
+  });
+}
+
 function toggleDebugMode() {
   physicsConfig.flags.DEBUG_MODE = !physicsConfig.flags.DEBUG_MODE;
   saveDebugMode(physicsConfig.flags.DEBUG_MODE);
+}
+
+function toggleMenuMusic() {
+  const nextValue = !isMenuMusicEnabled();
+  saveMenuMusicEnabled(nextValue);
+  setMenuMusicEnabled(nextValue);
 }
 
 function createEmptyTrackAndEdit() {
@@ -469,6 +923,9 @@ function createEmptyTrackAndEdit() {
       borderSize: 22,
       centerlineLoop: null,
       centerlineHalfWidth: 60,
+      centerlineWidthProfile: null,
+      worldScale: 1,
+      centerlineSmoothingMode: DEFAULT_CENTERLINE_SMOOTHING_MODE,
     },
     checkpoints: [
       { angle: 0 },
@@ -498,17 +955,26 @@ function createEmptyTrackAndEdit() {
   enterEditor(idx);
 }
 
-function enterEditor(trackIndex) {
+export function enterEditor(trackIndex) {
   state.selectedTrackIndex = trackIndex;
   applyTrackPreset(trackIndex);
   setCurbSegments(initCurbSegments());
   state.mode = "editor";
   syncMenuMusicForMode(state.mode);
   state.editor.trackIndex = trackIndex;
+  state.editor.activeTool = "road";
   state.editor.drawing = false;
   state.editor.activeStroke = [];
+  state.editor.toolbar.dragging = false;
+  const savedToolbarPosition = loadEditorToolbarPosition();
+  if (savedToolbarPosition) {
+    state.editor.toolbar.x = savedToolbarPosition.x;
+    state.editor.toolbar.y = savedToolbarPosition.y;
+  }
+  clampEditorToolbarPosition();
   const preset = getTrackPreset(trackIndex);
-  if (preset) setTrackInUrl(preset.id);
+  syncLatestEditorTarget(preset);
+  if (preset) setTrackEditorUrl(preset.id);
 }
 
 function activateSelection() {
@@ -543,6 +1009,7 @@ function activateSelection() {
         state.selectedTrackIndex = 0;
       }
       state.mode = "trackSelect";
+      setTrackSelectUrl();
       syncMenuMusicForMode(state.mode);
       state.trackSelectIndex = state.selectedTrackIndex;
       syncTrackSelectWindow();
@@ -581,6 +1048,7 @@ function activateSelection() {
     const backIndex = trackSelectBackIndex();
     if (state.trackSelectIndex === backIndex) {
       state.mode = "menu";
+      setMainMenuUrl();
       syncMenuMusicForMode(state.mode);
       state.menuIndex = raceMenuIndex();
     } else {
@@ -600,6 +1068,10 @@ function activateSelection() {
     const selectedSetting = currentSettingsItems()[state.settingsIndex];
     if (selectedSetting === "PLAYER NAME") {
       state.editingName = !state.editingName;
+      return;
+    }
+    if (selectedSetting === "MENU MUSIC") {
+      toggleMenuMusic();
       return;
     }
     if (selectedSetting === "DEBUG MODE") {
@@ -651,7 +1123,13 @@ function onKeyDown(e) {
   const key = e.key.toLowerCase();
   const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
 
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) {
+  if (
+    ["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key) ||
+    (key === "backspace" &&
+      (state.mode === "trackSelect" ||
+        state.mode === "editor" ||
+        state.modal.open))
+  ) {
     e.preventDefault();
   }
 
@@ -819,6 +1297,7 @@ function onKeyDown(e) {
 
   if (state.mode === "trackSelect" && key === "escape") {
     state.mode = "menu";
+    setMainMenuUrl();
     syncMenuMusicForMode(state.mode);
     state.menuIndex = raceMenuIndex();
     return;
@@ -900,13 +1379,9 @@ function onKeyDown(e) {
   ) {
     const preset = selectedTrackPreset();
     if (!selectedTrackCanRename() || !preset) return;
-    openInputModal({
-      title: "Rename Track",
-      message: "Enter a new name for the selected track.",
-      confirmLabel: "Save",
-      cancelLabel: "Cancel",
+    openTrackNameModal({
       initialValue: preset.name || "",
-      maxLength: 36,
+      confirmLabel: "Save",
       onSubmit: async (rawName) => {
         const nextName = typeof rawName === "string" ? rawName.trim() : "";
         const updatedTrack = await renameTrack(preset.id, nextName);
@@ -951,7 +1426,7 @@ function onKeyDown(e) {
     return;
   }
   if (
-    (key === "delete" || key === "del") &&
+    (key === "delete" || key === "del" || key === "backspace") &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex >= 0 &&
     state.trackSelectIndex < trackOptions.length
@@ -974,6 +1449,10 @@ function onKeyDown(e) {
         try {
           await deleteOwnTrackFromApi(preset.id);
           removeTrackPresetById(preset.id, { removePersisted: true });
+          showSnackbar(`Track ${preset.name} deleted`, {
+            seconds: 1.8,
+            kind: "success",
+          });
           if (trackOptions.length > 0) {
             state.trackSelectIndex = Math.max(
               0,
@@ -1004,32 +1483,31 @@ function onKeyDown(e) {
       state.editor.showCurbs = !state.editor.showCurbs;
       return;
     }
-    if (key === "t") placeEditorObject("tree");
-    if (key === "w") placeEditorObject("pond");
-    if (key === "b") placeEditorObject("barrel");
+    if (key === "t") {
+      if (e.repeat) return;
+      toggleEditorTool("tree");
+      return;
+    }
+    if (key === "w") {
+      if (e.repeat) return;
+      toggleEditorTool("pond");
+      return;
+    }
+    if (key === "b") {
+      if (e.repeat) return;
+      toggleEditorTool("barrel");
+      return;
+    }
     if (key === "r") {
-      state.selectedTrackIndex = state.editor.trackIndex;
-      applyTrackPreset(state.editor.trackIndex);
-      setCurbSegments(initCurbSegments());
-      state.mode = "racing";
-      syncMenuMusicForMode(state.mode);
-      resetRace();
-      const selected = trackOptions[state.selectedTrackIndex];
-      if (selected) setTrackInUrl(selected.id);
+      startEditorRace();
       return;
     }
     if (key === "s") {
-      saveEditorTrack();
+      promptSaveEditorTrack();
       return;
     }
     if (key === " ") {
-      const generated = regenerateTrackFromCenterlineStrokes(
-        state.editor.trackIndex,
-      );
-      if (generated) {
-        applyTrackPreset(state.editor.trackIndex);
-        setCurbSegments(initCurbSegments());
-      }
+      rebuildEditorTrackGeometry();
       return;
     }
   }
@@ -1137,6 +1615,13 @@ export function initInputHandlers() {
     { once: true },
   );
   window.addEventListener(
+    "pointerdown",
+    () => {
+      void unlockMenuMusic();
+    },
+    { once: true },
+  );
+  window.addEventListener(
     "touchstart",
     () => {
       void unlockMenuMusic();
@@ -1146,13 +1631,26 @@ export function initInputHandlers() {
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("mousemove", (event) => {
     updateEditorCursorFromEvent(event);
+    if (state.mode === "editor" && state.editor.toolbar.dragging) {
+      state.editor.toolbar.x =
+        state.editor.cursorScreenX - state.editor.toolbar.dragOffsetX;
+      state.editor.toolbar.y =
+        state.editor.cursorScreenY - state.editor.toolbar.dragOffsetY;
+      clampEditorToolbarPosition();
+      saveEditorToolbarPosition();
+      return;
+    }
     if (!state.editor.drawing || state.mode !== "editor") return;
     const points = state.editor.activeStroke;
     const last = points[points.length - 1];
     const x = state.editor.cursorX;
     const y = state.editor.cursorY;
     if (!last || Math.hypot(x - last.x, y - last.y) > 4) {
-      points.push({ x, y });
+      points.push({
+        x,
+        y,
+        halfWidth: last?.halfWidth || EDITOR_DEFAULT_HALF_WIDTH,
+      });
     }
   });
   window.addEventListener("mousedown", (event) => {
@@ -1160,13 +1658,42 @@ export function initInputHandlers() {
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
     if (state.editor.cursorY < 0) return;
+    const toolbarHit = editorToolbarActionAt(
+      state.editor.cursorScreenX,
+      state.editor.cursorScreenY,
+    );
+    if (toolbarHit?.type === "drag") {
+      state.editor.toolbar.dragging = true;
+      state.editor.toolbar.dragOffsetX =
+        state.editor.cursorScreenX - state.editor.toolbar.x;
+      state.editor.toolbar.dragOffsetY =
+        state.editor.cursorScreenY - state.editor.toolbar.y;
+      return;
+    }
+    if (toolbarHit?.type === "action") {
+      performEditorToolbarAction(toolbarHit.id);
+      return;
+    }
+    if (toolbarHit?.type === "panel") return;
+    if (state.editor.activeTool !== "road") {
+      placeEditorObject(state.editor.activeTool);
+      return;
+    }
+    const preset = getTrackPreset(state.editor.trackIndex);
+    const halfWidth = getDefaultStrokeHalfWidth(preset);
     state.editor.drawing = true;
     state.editor.activeStroke = [
-      { x: state.editor.cursorX, y: state.editor.cursorY },
+      { x: state.editor.cursorX, y: state.editor.cursorY, halfWidth },
     ];
   });
   window.addEventListener("mouseup", (event) => {
     if (state.mode !== "editor" || event.button !== 0) return;
+    if (state.editor.toolbar.dragging) {
+      state.editor.toolbar.dragging = false;
+      clampEditorToolbarPosition();
+      saveEditorToolbarPosition();
+      return;
+    }
     if (!state.editor.drawing) return;
     state.editor.drawing = false;
     const stroke = state.editor.activeStroke;
@@ -1174,8 +1701,23 @@ export function initInputHandlers() {
     if (stroke.length < 2) return;
     const preset = getTrackPreset(state.editor.trackIndex);
     if (!preset.centerlineStrokes) preset.centerlineStrokes = [];
-    preset.centerlineStrokes.push(stroke.map((p) => ({ x: p.x, y: p.y })));
+    preset.centerlineStrokes.push(
+      stroke.map((p) => ({
+        x: p.x,
+        y: p.y,
+        halfWidth: Number.isFinite(p.halfWidth)
+          ? p.halfWidth
+          : EDITOR_DEFAULT_HALF_WIDTH,
+      })),
+    );
     if (!preset.editStack) preset.editStack = [];
-    preset.editStack.push({ kind: "stroke" });
+    preset.editStack.push({
+      kind: "stroke",
+      strokeIndex: preset.centerlineStrokes.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "stroke",
+      strokeIndex: preset.centerlineStrokes.length - 1,
+    };
   });
 }

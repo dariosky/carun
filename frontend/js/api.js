@@ -91,6 +91,27 @@ export async function saveTrackToDb(name, trackPayload) {
   return payload;
 }
 
+export async function updateTrackInDb(trackId, { name, trackPayload } = {}) {
+  const body = {};
+  if (typeof name === "string") body.name = name;
+  if (trackPayload && typeof trackPayload === "object")
+    body.track_payload_json = trackPayload;
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Save failed";
+    throw new Error(message);
+  }
+  if (!isObject(payload)) throw new Error("Save failed");
+  return payload;
+}
+
 export async function fetchTrackById(trackId) {
   const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
     method: "GET",
@@ -156,20 +177,12 @@ export async function setTrackPublished(trackId, isPublished) {
 }
 
 export async function renameTrack(trackId, name) {
-  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-  const payload = await parseJsonSafe(response);
-  if (!response.ok) {
-    const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Rename failed";
+  try {
+    return await updateTrackInDb(trackId, { name });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Rename failed";
     throw new Error(message);
   }
-  if (!isObject(payload)) throw new Error("Rename failed");
-  return payload;
 }
 
 export async function deleteTrackById(trackId) {

@@ -4,6 +4,7 @@ import {
   fetchTrackById,
   fetchTracks,
   saveTrackToDb,
+  updateTrackInDb,
 } from "./api.js";
 
 const canvas = document.getElementById("game");
@@ -16,6 +17,7 @@ export const HEIGHT = canvas.height;
 
 const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
 const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
+const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
 
 export function sanitizePlayerName(raw) {
   if (typeof raw !== "string") return "PLAYER";
@@ -62,6 +64,25 @@ export function saveDebugMode(enabled) {
   }
 }
 
+export function loadMenuMusicEnabled(defaultValue = true) {
+  try {
+    const raw = localStorage.getItem(MENU_MUSIC_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return defaultValue;
+}
+
+export function saveMenuMusicEnabled(enabled) {
+  try {
+    localStorage.setItem(MENU_MUSIC_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
 export function getMenuItems(authenticated) {
   return authenticated
     ? ["RACE", "SETTINGS"]
@@ -74,10 +95,12 @@ export function getLoginProviderItems() {
 
 export function getSettingsItems(authenticated) {
   return authenticated
-    ? ["PLAYER NAME", "DEBUG MODE", "LOGOUT", "BACK"]
-    : ["PLAYER NAME", "DEBUG MODE", "BACK"];
+    ? ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "LOGOUT", "BACK"]
+    : ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "BACK"];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
+export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
+export const DEFAULT_CENTERLINE_SMOOTHING_MODE = "light";
 const TRACK_PRESETS = [
   {
     id: "classic",
@@ -100,6 +123,8 @@ const TRACK_PRESETS = [
         { f: 5, amp: 0.015, phase: 1.4 },
       ],
       borderSize: 22,
+      worldScale: 1,
+      centerlineSmoothingMode: DEFAULT_CENTERLINE_SMOOTHING_MODE,
     },
     checkpoints: [
       { angle: 0 },
@@ -108,19 +133,36 @@ const TRACK_PRESETS = [
       { angle: Math.PI * 1.5 },
     ],
     worldObjects: [
-      { type: "tree", x: 150, y: 90, r: 26 },
-      { type: "tree", x: 1080, y: 76, r: 24 },
-      { type: "tree", x: 172, y: 536, r: 23 },
-      { type: "tree", x: 1110, y: 520, r: 22 },
-      { type: "pond", x: 650, y: 290, rx: 95, ry: 52, seed: 0.8 },
-      { type: "pond", x: 215, y: 280, rx: 60, ry: 34, seed: -0.55 },
-      { type: "barrel", x: 447, y: 93, r: 13 },
-      { type: "barrel", x: 847, y: 507, r: 13 },
+      { type: "tree", x: 150, y: 90, r: 26, angle: 0 },
+      { type: "tree", x: 1080, y: 76, r: 24, angle: 0 },
+      { type: "tree", x: 172, y: 536, r: 23, angle: 0 },
+      { type: "tree", x: 1110, y: 520, r: 22, angle: 0 },
+      { type: "pond", x: 650, y: 290, rx: 95, ry: 52, seed: 0.8, angle: 0 },
+      { type: "pond", x: 215, y: 280, rx: 60, ry: 34, seed: -0.55, angle: 0 },
+      { type: "barrel", x: 447, y: 93, r: 13, angle: 0 },
+      { type: "barrel", x: 847, y: 507, r: 13, angle: 0 },
     ],
     centerlineStrokes: [],
     editStack: [],
   },
 ];
+
+function cloneCenterlinePoint(point, fallbackHalfWidth = 60) {
+  return {
+    x: Number(point?.x) || 0,
+    y: Number(point?.y) || 0,
+    halfWidth: Number.isFinite(point?.halfWidth)
+      ? Number(point.halfWidth)
+      : fallbackHalfWidth,
+  };
+}
+
+function cloneWorldObject(obj) {
+  return {
+    ...obj,
+    angle: Number.isFinite(obj?.angle) ? Number(obj.angle) : 0,
+  };
+}
 
 function cloneTrackData(trackData) {
   return {
@@ -130,7 +172,22 @@ function cloneTrackData(trackData) {
     centerlineLoop: Array.isArray(trackData.centerlineLoop)
       ? trackData.centerlineLoop.map((p) => ({ x: p.x, y: p.y }))
       : null,
+    centerlineWidthProfile: Array.isArray(trackData.centerlineWidthProfile)
+      ? trackData.centerlineWidthProfile.map((value) => Number(value) || 0)
+      : null,
+    worldScale: Number.isFinite(trackData.worldScale)
+      ? Number(trackData.worldScale)
+      : 1,
+    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(
+      trackData.centerlineSmoothingMode,
+    ),
   };
+}
+
+export function normalizeCenterlineSmoothingMode(raw) {
+  return CENTERLINE_SMOOTHING_MODES.includes(raw)
+    ? raw
+    : DEFAULT_CENTERLINE_SMOOTHING_MODE;
 }
 
 function clonePresetData(preset) {
@@ -161,9 +218,14 @@ function clonePresetData(preset) {
     fromDb: Boolean(preset.fromDb),
     track: cloneTrackData(preset.track),
     checkpoints: (preset.checkpoints || []).map((cp) => ({ ...cp })),
-    worldObjects: (preset.worldObjects || []).map((obj) => ({ ...obj })),
+    worldObjects: (preset.worldObjects || []).map(cloneWorldObject),
     centerlineStrokes: (preset.centerlineStrokes || []).map((stroke) =>
-      stroke.map((p) => ({ x: p.x, y: p.y })),
+      stroke.map((p) =>
+        cloneCenterlinePoint(
+          p,
+          Number(preset.track?.centerlineHalfWidth) || 60,
+        ),
+      ),
     ),
     editStack: (preset.editStack || []).map((entry) => ({ ...entry })),
   };
@@ -200,6 +262,22 @@ function normalizeTrackPresetData(raw) {
   safeTrack.borderSize = Number.isFinite(safeTrack.borderSize)
     ? safeTrack.borderSize
     : 22;
+  safeTrack.centerlineHalfWidth = Number.isFinite(safeTrack.centerlineHalfWidth)
+    ? Number(safeTrack.centerlineHalfWidth)
+    : 60;
+  safeTrack.centerlineWidthProfile = Array.isArray(
+    safeTrack.centerlineWidthProfile,
+  )
+    ? safeTrack.centerlineWidthProfile.map((value) =>
+        Number.isFinite(value) ? Number(value) : safeTrack.centerlineHalfWidth,
+      )
+    : null;
+  safeTrack.worldScale = Number.isFinite(safeTrack.worldScale)
+    ? Number(safeTrack.worldScale)
+    : 1;
+  safeTrack.centerlineSmoothingMode = normalizeCenterlineSmoothingMode(
+    safeTrack.centerlineSmoothingMode,
+  );
 
   return {
     id,
@@ -259,11 +337,15 @@ function normalizeTrackPresetData(raw) {
       ? raw.checkpoints.map((cp) => ({ angle: Number(cp.angle) || 0 }))
       : [],
     worldObjects: Array.isArray(raw.worldObjects)
-      ? raw.worldObjects.map((obj) => ({ ...obj }))
+      ? raw.worldObjects.map(cloneWorldObject)
       : [],
     centerlineStrokes: Array.isArray(raw.centerlineStrokes)
       ? raw.centerlineStrokes.map((stroke) =>
-          Array.isArray(stroke) ? stroke.map((p) => ({ x: p.x, y: p.y })) : [],
+          Array.isArray(stroke)
+            ? stroke.map((p) =>
+                cloneCenterlinePoint(p, safeTrack.centerlineHalfWidth),
+              )
+            : [],
         )
       : [],
     editStack: Array.isArray(raw.editStack)
@@ -301,10 +383,17 @@ function applyPersistedTrackEdits() {
     if (Array.isArray(saved.checkpoints))
       preset.checkpoints = saved.checkpoints.map((cp) => ({ ...cp }));
     if (Array.isArray(saved.worldObjects))
-      preset.worldObjects = saved.worldObjects.map((obj) => ({ ...obj }));
+      preset.worldObjects = saved.worldObjects.map(cloneWorldObject);
     if (Array.isArray(saved.centerlineStrokes)) {
       preset.centerlineStrokes = saved.centerlineStrokes.map((stroke) =>
-        Array.isArray(stroke) ? stroke.map((p) => ({ x: p.x, y: p.y })) : [],
+        Array.isArray(stroke)
+          ? stroke.map((p) =>
+              cloneCenterlinePoint(
+                p,
+                Number(saved.track?.centerlineHalfWidth) || 60,
+              ),
+            )
+          : [],
       );
     }
     if (Array.isArray(saved.editStack)) {
@@ -382,7 +471,7 @@ export const checkpoints = activePreset.checkpoints.map((cp) => ({ ...cp }));
 export const CHECKPOINT_WIDTH_MULTIPLIER = 2;
 
 export const worldObjects = activePreset.worldObjects.map((obj) => ({
-  ...obj,
+  ...cloneWorldObject(obj),
 }));
 
 export function getTrackPreset(index) {
@@ -466,13 +555,16 @@ export function applyTrackPreset(index) {
     warpOuter: preset.track.warpOuter.map((w) => ({ ...w })),
     warpInner: preset.track.warpInner.map((w) => ({ ...w })),
     centerlineLoop,
+    centerlineWidthProfile: Array.isArray(preset.track.centerlineWidthProfile)
+      ? preset.track.centerlineWidthProfile.map((value) => Number(value) || 0)
+      : null,
   });
 
   checkpoints.length = 0;
   checkpoints.push(...preset.checkpoints.map((cp) => ({ ...cp })));
 
   worldObjects.length = 0;
-  worldObjects.push(...preset.worldObjects.map((obj) => ({ ...obj })));
+  worldObjects.push(...preset.worldObjects.map(cloneWorldObject));
 }
 
 function ellipseRadiusAtAngle(angle, a, b) {
@@ -493,13 +585,55 @@ function appendBridge(points, from, to, spacing = 10) {
   const steps = Math.max(1, Math.floor(distance / spacing));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
+    const fromHalfWidth = Number.isFinite(from.halfWidth) ? from.halfWidth : 60;
+    const toHalfWidth = Number.isFinite(to.halfWidth)
+      ? to.halfWidth
+      : fromHalfWidth;
     points.push({ x: from.x + dx * t, y: from.y + dy * t });
+    points[points.length - 1].halfWidth =
+      fromHalfWidth + (toHalfWidth - fromHalfWidth) * t;
   }
 }
 
-// Tunable cleanup amount applied when converting drawn centerline strokes
-// into the final closed loop. Higher values remove more jitter and corners.
-const CENTERLINE_SMOOTHING_COEFFICIENT = 0.1;
+const CENTERLINE_SMOOTHING_CONFIG = {
+  raw: {
+    simplifyEpsilon: 1.3,
+    tinyMoveCutoff: 0.75,
+    laplacianPasses: 1,
+    laplacianStrength: 0.16,
+    chaikinIterations: 0,
+  },
+  light: {
+    simplifyEpsilon: 2.2,
+    tinyMoveCutoff: 1.1,
+    laplacianPasses: 1,
+    laplacianStrength: 0.22,
+    chaikinIterations: 1,
+  },
+  smooth: {
+    simplifyEpsilon: 3.8,
+    tinyMoveCutoff: 1.8,
+    laplacianPasses: 2,
+    laplacianStrength: 0.3,
+    chaikinIterations: 2,
+  },
+};
+
+export function centerlineSmoothingLabel(mode) {
+  const normalized = normalizeCenterlineSmoothingMode(mode);
+  return normalized === "raw"
+    ? "RAW"
+    : normalized === "smooth"
+      ? "SMOOTH"
+      : "LIGHT";
+}
+
+function getCenterlineSmoothingConfig(trackDef) {
+  const mode = normalizeCenterlineSmoothingMode(
+    trackDef?.centerlineSmoothingMode,
+  );
+  return CENTERLINE_SMOOTHING_CONFIG[mode];
+}
 
 function chaikinSmoothClosed(points, iterations = 2) {
   if (!Array.isArray(points) || points.length < 3) return points || [];
@@ -861,14 +995,22 @@ export function getConnectedCenterlinePoints(strokes) {
   const segments = connectedSegmentsFromStrokes(strokes);
   if (!segments.length) return [];
 
-  const points = segments[0].map((p) => ({ x: p.x, y: p.y }));
+  const points = segments[0].map((p) => ({
+    x: p.x,
+    y: p.y,
+    halfWidth: Number.isFinite(p.halfWidth) ? p.halfWidth : 60,
+  }));
   for (let i = 1; i < segments.length; i++) {
     const prevEnd = points[points.length - 1];
     const nextStart = segments[i][0];
     appendBridge(points, prevEnd, nextStart);
     for (let j = 1; j < segments[i].length; j++) {
       const p = segments[i][j];
-      points.push({ x: p.x, y: p.y });
+      points.push({
+        x: p.x,
+        y: p.y,
+        halfWidth: Number.isFinite(p.halfWidth) ? p.halfWidth : 60,
+      });
     }
   }
 
@@ -883,12 +1025,14 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   const rawLoop = getConnectedCenterlinePoints(preset.centerlineStrokes);
   if (rawLoop.length < 6) return false;
   const anchor = rawLoop[0];
-  const amount = clamp(CENTERLINE_SMOOTHING_COEFFICIENT, 0, 1);
-  const simplifyEpsilon = 3 + amount * 11;
-  const tinyMoveCutoff = 1.25 + amount * 4.75;
-  const laplacianPasses = Math.round(2 + amount * 5);
-  const laplacianStrength = 0.35 + amount * 0.4;
-  const chaikinIterations = Math.round(2 + amount * 3);
+  const smoothingConfig = getCenterlineSmoothingConfig(preset.track);
+  const {
+    simplifyEpsilon,
+    tinyMoveCutoff,
+    laplacianPasses,
+    laplacianStrength,
+    chaikinIterations,
+  } = smoothingConfig;
 
   const simplifiedLoop = simplifyClosedLoop(rawLoop, simplifyEpsilon);
   const prunedLoop = pruneTinyMovesClosed(simplifiedLoop, tinyMoveCutoff);
@@ -899,6 +1043,10 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   );
   const smoothedLoop = chaikinSmoothClosed(laplacianLoop, chaikinIterations);
   const loopPoints = resampleClosedLoop(smoothedLoop, 220);
+  const rawHalfWidths = resampleCenterlineHalfWidths(
+    rawLoop,
+    loopPoints.length,
+  );
   if (loopPoints.length > 0 && anchor) {
     let bestIdx = 0;
     let bestDist = Infinity;
@@ -915,8 +1063,13 @@ export function regenerateTrackFromCenterlineStrokes(index) {
       const rotated = loopPoints
         .slice(bestIdx)
         .concat(loopPoints.slice(0, bestIdx));
+      const rotatedWidths = rawHalfWidths
+        .slice(bestIdx)
+        .concat(rawHalfWidths.slice(0, bestIdx));
       loopPoints.length = 0;
       loopPoints.push(...rotated);
+      rawHalfWidths.length = 0;
+      rawHalfWidths.push(...rotatedWidths);
     }
   }
   if (loopPoints.length < 20) return false;
@@ -1015,6 +1168,12 @@ export function regenerateTrackFromCenterlineStrokes(index) {
     warpOuter: fitWarpProfile(angles, outerScales, frequencies, 0.22),
     warpInner: fitWarpProfile(angles, innerScales, frequencies, 0.24),
     centerlineHalfWidth: Number(halfWidth.toFixed(1)),
+    centerlineWidthProfile: rawHalfWidths.map((value) =>
+      Number(value.toFixed(1)),
+    ),
+    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(
+      preset.track.centerlineSmoothingMode,
+    ),
     startAngle: 0,
     centerlineLoop: loopPoints.map((p) => ({
       x: Number(p.x.toFixed(1)),
@@ -1023,6 +1182,46 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   };
 
   return true;
+}
+
+function resampleCenterlineHalfWidths(points, sampleCount) {
+  if (!Array.isArray(points) || !points.length) return [];
+  if (points.length === 1) {
+    return new Array(sampleCount).fill(
+      Number.isFinite(points[0].halfWidth) ? points[0].halfWidth : 60,
+    );
+  }
+
+  const cumulative = new Float64Array(points.length + 1);
+  for (let i = 1; i <= points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i % points.length];
+    cumulative[i] = cumulative[i - 1] + Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const total = cumulative[points.length];
+  if (total <= 1e-6) {
+    const fallback = Number.isFinite(points[0].halfWidth)
+      ? points[0].halfWidth
+      : 60;
+    return new Array(sampleCount).fill(fallback);
+  }
+
+  const samples = new Array(sampleCount);
+  for (let i = 0; i < sampleCount; i++) {
+    const distance = (i / sampleCount) * total;
+    let seg = 0;
+    while (seg < points.length - 1 && cumulative[seg + 1] < distance) seg++;
+    const segStart = cumulative[seg];
+    const segEnd = cumulative[seg + 1];
+    const t =
+      segEnd > segStart ? (distance - segStart) / (segEnd - segStart) : 0;
+    const a = points[seg];
+    const b = points[(seg + 1) % points.length];
+    const widthA = Number.isFinite(a.halfWidth) ? a.halfWidth : 60;
+    const widthB = Number.isFinite(b.halfWidth) ? b.halfWidth : widthA;
+    samples[i] = widthA + (widthB - widthA) * t;
+  }
+  return samples;
 }
 
 export function exportTrackPresetData(index) {
@@ -1146,31 +1345,38 @@ export async function loadTrackPresetFromApi(
 
 export async function saveTrackPresetToDb(
   index,
-  { currentUserId = null } = {},
+  { currentUserId = null, name: requestedName = "" } = {},
 ) {
   const presetData = exportTrackPresetData(index);
   const name =
-    typeof presetData.name === "string" && presetData.name.trim()
-      ? presetData.name.trim()
-      : `Track ${Date.now()}`;
-  const createdTrack = await saveTrackToDb(name, presetData);
+    typeof requestedName === "string" && requestedName.trim()
+      ? requestedName.trim().slice(0, 36)
+      : typeof presetData.name === "string" && presetData.name.trim()
+        ? presetData.name.trim()
+        : `Track ${Date.now()}`;
+  const savedTrack =
+    presetData.fromDb &&
+    typeof presetData.id === "string" &&
+    presetData.id.trim()
+      ? await updateTrackInDb(presetData.id, { name, trackPayload: presetData })
+      : await saveTrackToDb(name, presetData);
   const mergedPreset = {
     ...presetData,
-    id: createdTrack.id,
-    name: createdTrack.name,
-    source: createdTrack.source || "user",
-    ownerUserId: createdTrack.owner_user_id || null,
-    ownerDisplayName: createdTrack.owner_display_name || null,
-    bestLapMs: Number.isFinite(createdTrack.best_lap_ms)
-      ? Number(createdTrack.best_lap_ms)
+    id: savedTrack.id,
+    name: savedTrack.name,
+    source: savedTrack.source || "user",
+    ownerUserId: savedTrack.owner_user_id || null,
+    ownerDisplayName: savedTrack.owner_display_name || null,
+    bestLapMs: Number.isFinite(savedTrack.best_lap_ms)
+      ? Number(savedTrack.best_lap_ms)
       : null,
-    bestLapDisplayName: createdTrack.best_lap_display_name || null,
-    bestRaceMs: Number.isFinite(createdTrack.best_race_ms)
-      ? Number(createdTrack.best_race_ms)
+    bestLapDisplayName: savedTrack.best_lap_display_name || null,
+    bestRaceMs: Number.isFinite(savedTrack.best_race_ms)
+      ? Number(savedTrack.best_race_ms)
       : null,
-    bestRaceDisplayName: createdTrack.best_race_display_name || null,
-    isPublished: Boolean(createdTrack.is_published),
-    shareToken: createdTrack.share_token || null,
+    bestRaceDisplayName: savedTrack.best_race_display_name || null,
+    isPublished: Boolean(savedTrack.is_published),
+    shareToken: savedTrack.share_token || null,
     canDelete: true,
     fromDb: true,
   };

@@ -3,7 +3,7 @@ from base64 import b64encode
 from uuid import UUID
 
 from app.config import get_settings
-from app.models import BestLap, BestRace, Track, User
+from app.models import BestLap, BestRace, LapEvent, Track, User
 from itsdangerous import TimestampSigner
 from sqlmodel import Session, select
 
@@ -242,6 +242,36 @@ def test_published_tracks_cannot_be_deleted(client, session):
 
     assert response.status_code == 409
     assert response.json()["detail"] == "Published tracks cannot be deleted"
+
+
+def test_deleting_track_removes_related_race_data(client, session):
+    owner = create_user(session, "OWNER")
+    track = create_track(session, "Draft", owner=owner, is_published=False)
+    track_id = track.id
+    session.add(BestLap(user_id=owner.id, track_id=track_id, lap_ms=11111, build_version="test"))
+    session.add(BestRace(user_id=owner.id, track_id=track_id, race_ms=33333, build_version="test"))
+    session.add(
+        LapEvent(
+            user_id=owner.id,
+            track_id=track_id,
+            lap_ms=12000,
+            accepted=True,
+            reason=None,
+            lap_data_checksum="abc123",
+            build_version="test",
+        )
+    )
+    session.commit()
+
+    login_as(client, owner)
+    response = client.delete(f"/api/tracks/{track_id}")
+
+    assert response.status_code == 204
+    session.expire_all()
+    assert session.get(Track, track_id) is None
+    assert session.exec(select(BestLap).where(BestLap.track_id == track_id)).first() is None
+    assert session.exec(select(BestRace).where(BestRace.track_id == track_id)).first() is None
+    assert session.exec(select(LapEvent).where(LapEvent.track_id == track_id)).first() is None
 
 
 def test_leaderboard_hides_unpublished_tracks_from_non_owner(client, session):

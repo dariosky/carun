@@ -72,16 +72,33 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 
 ## Current Code Layout
 
-- `index.html`: canvas shell + module entry script
-- `js/main.js`: startup wiring
-- `js/parameters.js`: constants/config/static parameters
-- `js/state.js`: mutable runtime state
-- `js/menus.js`: menu/settings flow + keyboard handlers
-- `js/physics.js`: car physics + race progression
-- `js/track.js`: track geometry, surfaces, and collision helpers
-- `js/render.js`: world/UI rendering
-- `js/game-loop.js`: frame loop timing
-- `js/utils.js`: shared helpers
+- `frontend/index.html`: main canvas app shell + module entry script
+- `frontend/styles.css`: global app styling
+- `frontend/js/main.js`: startup wiring, bootstrap, and main loop setup
+- `frontend/js/parameters.js`: config, presets, static parameters, and menu option data
+- `frontend/js/state.js`: mutable runtime state
+- `frontend/js/menus.js`: menu/settings/editor flow + keyboard/mouse handlers
+- `frontend/js/physics.js`: car physics, checkpoints, laps, and race progression
+- `frontend/js/track.js`: track geometry, surfaces, props, and collision helpers
+- `frontend/js/render.js`: world rendering, menu rendering, and HUD drawing
+- `frontend/js/game-loop.js`: frame loop timing
+- `frontend/js/audio.js`: menu music control
+- `frontend/js/game-audio.js`: race audio wiring
+- `frontend/js/audio/`: synths, shared audio utilities, and audio manager
+- `frontend/js/api.js`: frontend API client for auth, tracks, and leaderboard data
+- `frontend/js/snackbar.js`: transient UI notifications
+- `frontend/js/particles.js`: confetti and particle effects
+- `frontend/assets/`: static images and branding assets
+- `frontend/sounds/`: music and sound assets
+- `frontend/tests/`: frontend unit tests
+- `backend/app/main.py`: FastAPI app entrypoint
+- `backend/app/api/`: backend HTTP routes
+- `backend/app/models/`: SQLAlchemy models
+- `backend/app/schemas/`: API schema definitions
+- `backend/alembic/`: database migrations
+- `backend/tests/`: backend and integration tests
+- `docs/`: project documentation for menus/editor and related flows
+- `scripts/`: local tooling and deployment helpers
 
 ## Definition of Done for Gameplay Changes
 

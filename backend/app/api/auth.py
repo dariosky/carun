@@ -9,8 +9,10 @@ from sqlmodel import Session
 from ..auth_utils import (
     build_facebook_login_url,
     build_google_login_url,
+    canonicalize_local_oauth_request,
     exchange_facebook_code_for_userinfo,
     exchange_google_code_for_userinfo,
+    oauth_redirect_uri,
     pop_oauth_state,
     update_user_display_name,
     upsert_user_from_oauth,
@@ -63,6 +65,9 @@ def me(request: Request, session: Session = Depends(get_session)):
 
 @router.get("/google/login")
 def google_login(request: Request):
+    canonical_redirect = canonicalize_local_oauth_request(request)
+    if canonical_redirect is not None:
+        return canonical_redirect
     return RedirectResponse(build_google_login_url(request), status_code=302)
 
 
@@ -79,7 +84,9 @@ async def google_callback(
         return _auth_failed_redirect("Login state verification failed")
 
     try:
-        payload = await exchange_google_code_for_userinfo(code)
+        payload = await exchange_google_code_for_userinfo(
+            code, redirect_uri=oauth_redirect_uri(request, "google")
+        )
         user = upsert_user_from_oauth(session, "google", payload)
     except HTTPException as exc:
         detail = str(exc.detail) if hasattr(exc, "detail") else "Google login failed"
@@ -95,6 +102,9 @@ async def google_callback(
 
 @router.get("/facebook/login")
 def facebook_login(request: Request):
+    canonical_redirect = canonicalize_local_oauth_request(request)
+    if canonical_redirect is not None:
+        return canonical_redirect
     return RedirectResponse(build_facebook_login_url(request), status_code=302)
 
 
@@ -111,7 +121,9 @@ async def facebook_callback(
         return _auth_failed_redirect("Login state verification failed")
 
     try:
-        payload = await exchange_facebook_code_for_userinfo(code)
+        payload = await exchange_facebook_code_for_userinfo(
+            code, redirect_uri=oauth_redirect_uri(request, "facebook")
+        )
         user = upsert_user_from_oauth(session, "facebook", payload)
     except HTTPException as exc:
         detail = str(exc.detail) if hasattr(exc, "detail") else "Facebook login failed"

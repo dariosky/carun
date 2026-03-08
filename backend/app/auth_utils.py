@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -42,11 +43,6 @@ def validate_google_oauth_config() -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Google OAuth misconfigured: GOOGLE_CLIENT_SECRET is missing",
         )
-    if not settings.google_redirect_uri.strip():
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth misconfigured: GOOGLE_REDIRECT_URI is missing",
-        )
 
 
 def validate_facebook_oauth_config() -> None:
@@ -60,11 +56,6 @@ def validate_facebook_oauth_config() -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Facebook OAuth misconfigured: FACEBOOK_CLIENT_SECRET is missing",
-        )
-    if not settings.facebook_redirect_uri.strip():
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Facebook OAuth misconfigured: FACEBOOK_REDIRECT_URI is missing",
         )
 
 
@@ -117,14 +108,39 @@ def pop_oauth_state(request: Request, provider: Provider) -> str | None:
     return value
 
 
+def _oauth_redirect_uri(request: Request, provider: Provider) -> str:
+    settings = get_settings()
+    configured = (
+        settings.google_redirect_uri if provider == "google" else settings.facebook_redirect_uri
+    ).strip()
+    if configured:
+        return configured
+
+    route_name = "google_callback" if provider == "google" else "facebook_callback"
+    return str(request.url_for(route_name))
+
+
+def oauth_redirect_uri(request: Request, provider: Provider) -> str:
+    return _oauth_redirect_uri(request, provider)
+
+
+def canonicalize_local_oauth_request(request: Request) -> RedirectResponse | None:
+    if request.url.hostname != "127.0.0.1":
+        return None
+
+    canonical_url = request.url.replace(netloc=f"localhost:{request.url.port}")
+    return RedirectResponse(str(canonical_url), status_code=302)
+
+
 def build_google_login_url(request: Request) -> str:
     settings = get_settings()
     validate_google_oauth_config()
     state = _store_oauth_state(request, "google")
+    redirect_uri = _oauth_redirect_uri(request, "google")
 
     query = {
         "client_id": settings.google_client_id,
-        "redirect_uri": settings.google_redirect_uri,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
@@ -138,10 +154,11 @@ def build_facebook_login_url(request: Request) -> str:
     settings = get_settings()
     validate_facebook_oauth_config()
     state = _store_oauth_state(request, "facebook")
+    redirect_uri = _oauth_redirect_uri(request, "facebook")
 
     query = {
         "client_id": settings.facebook_client_id,
-        "redirect_uri": settings.facebook_redirect_uri,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": "email,public_profile",
         "state": state,
@@ -149,7 +166,7 @@ def build_facebook_login_url(request: Request) -> str:
     return f"{FACEBOOK_AUTH_ENDPOINT}?{urlencode(query)}"
 
 
-async def exchange_google_code_for_userinfo(code: str) -> dict:
+async def exchange_google_code_for_userinfo(code: str, redirect_uri: str) -> dict:
     settings = get_settings()
     validate_google_oauth_config()
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -159,7 +176,7 @@ async def exchange_google_code_for_userinfo(code: str) -> dict:
                 "code": code,
                 "client_id": settings.google_client_id,
                 "client_secret": settings.google_client_secret,
-                "redirect_uri": settings.google_redirect_uri,
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },
         )
@@ -188,7 +205,7 @@ async def exchange_google_code_for_userinfo(code: str) -> dict:
         return user_res.json()
 
 
-async def exchange_facebook_code_for_userinfo(code: str) -> dict:
+async def exchange_facebook_code_for_userinfo(code: str, redirect_uri: str) -> dict:
     settings = get_settings()
     validate_facebook_oauth_config()
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -197,7 +214,7 @@ async def exchange_facebook_code_for_userinfo(code: str) -> dict:
             params={
                 "client_id": settings.facebook_client_id,
                 "client_secret": settings.facebook_client_secret,
-                "redirect_uri": settings.facebook_redirect_uri,
+                "redirect_uri": redirect_uri,
                 "code": code,
             },
         )

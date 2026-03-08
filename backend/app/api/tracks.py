@@ -3,19 +3,18 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, or_, select
+from sqlmodel import Session, delete, or_, select
 
 from ..db import get_session
 from ..deps import get_current_user, get_optional_current_user
-from ..models import BestLap, BestRace, Track, User
+from ..models import BestLap, BestRace, LapEvent, Track, User
 from ..schemas import (
     TrackCreateRequest,
     TrackDetailResponse,
     TrackPublishRequest,
-    TrackRenameRequest,
     TrackResponse,
     TrackShareResponse,
+    TrackUpdateRequest,
 )
 
 router = APIRouter(prefix="/api/tracks", tags=["tracks"])
@@ -217,9 +216,9 @@ def get_track_by_id(
 
 
 @router.patch("/{track_id}", response_model=TrackResponse)
-def rename_track(
+def update_track(
     track_id: str,
-    payload: TrackRenameRequest,
+    payload: TrackUpdateRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -231,13 +230,20 @@ def rename_track(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
 
-    trimmed_name = payload.name.strip()
-    if not trimmed_name:
+    if payload.name is None and payload.track_payload_json is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Track name required"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No track changes provided"
         )
 
-    track.name = trimmed_name
+    if payload.name is not None:
+        trimmed_name = payload.name.strip()
+        if not trimmed_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Track name required"
+            )
+        track.name = trimmed_name
+    if payload.track_payload_json is not None:
+        track.track_payload_json = payload.track_payload_json
     track.updated_at = datetime.utcnow()
     session.add(track)
     session.commit()
@@ -262,12 +268,8 @@ def delete_track(
             detail="Published tracks cannot be deleted",
         )
 
+    session.exec(delete(BestLap).where(BestLap.track_id == track.id))
+    session.exec(delete(BestRace).where(BestRace.track_id == track.id))
+    session.exec(delete(LapEvent).where(LapEvent.track_id == track.id))
     session.delete(track)
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Track cannot be deleted because it has related race data",
-        )
+    session.commit()

@@ -19,10 +19,10 @@ class Settings(BaseSettings):
 
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    google_redirect_uri: str = ""
     facebook_client_id: str = ""
     facebook_client_secret: str = ""
-    facebook_redirect_uri: str = "http://localhost:8000/api/auth/facebook/callback"
+    facebook_redirect_uri: str = ""
     admin_email: str = "admin@example.com"
 
     frontend_dir: Path = ROOT_DIR / "frontend"

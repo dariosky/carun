@@ -1,13 +1,14 @@
 import { startGameLoop } from "./game-loop.js";
-import { initInputHandlers } from "./menus.js";
+import { enterEditor, initInputHandlers } from "./menus.js";
 import {
+  applyTrackPreset,
   loadSharedTrackFromApi,
   loadTrackPresetFromApi,
   loadVisibleTracksFromApi,
   sanitizePlayerName,
   trackOptions,
 } from "./parameters.js";
-import { updateRace } from "./physics.js";
+import { resetRace, updateRace } from "./physics.js";
 import { render } from "./render.js";
 import { showSnackbar, tickSnackbar } from "./snackbar.js";
 import { setCurbSegments, state } from "./state.js";
@@ -17,6 +18,15 @@ import { fetchAuthMe } from "./api.js";
 import { initAudio, syncMenuMusicForMode } from "./audio.js";
 import { gameAudio } from "./game-audio.js";
 import { updateParticles } from "./particles.js";
+
+function decodePathSegment(value) {
+  if (typeof value !== "string" || !value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
+}
 
 function updateMenuTagline(dt) {
   const rotation = state.menuTagline;
@@ -73,8 +83,21 @@ try {
 
 await loadVisibleTracksFromApi({ currentUserId: state.auth.userId });
 const currentUrl = new URL(window.location.href);
+const trackEditMatch = currentUrl.pathname.match(
+  /^\/tracks\/edit\/([^/]+)\/?$/,
+);
+const editTrackIdFromPath = decodePathSegment(trackEditMatch?.[1] || "");
+const raceTrackMatch = currentUrl.pathname.match(/^\/tracks\/([^/]+)\/?$/);
+const raceTrackIdFromPath =
+  !editTrackIdFromPath && raceTrackMatch?.[1]
+    ? decodePathSegment(raceTrackMatch[1])
+    : "";
+const trackSelectFromPath =
+  currentUrl.pathname === "/tracks" || currentUrl.pathname === "/tracks/";
 const shareFromUrl = currentUrl.searchParams.get("share");
 const trackFromUrl = currentUrl.searchParams.get("track");
+const requestedTrackId =
+  editTrackIdFromPath || raceTrackIdFromPath || trackFromUrl || "";
 if (shareFromUrl) {
   try {
     await loadSharedTrackFromApi(shareFromUrl, {
@@ -83,9 +106,9 @@ if (shareFromUrl) {
   } catch {
     showSnackbar("Track not found", { seconds: 1.8, kind: "error" });
   }
-} else if (trackFromUrl) {
+} else if (requestedTrackId) {
   try {
-    await loadTrackPresetFromApi(trackFromUrl, {
+    await loadTrackPresetFromApi(requestedTrackId, {
       currentUserId: state.auth.userId,
     });
   } catch {
@@ -95,8 +118,8 @@ if (shareFromUrl) {
 if (trackOptions.length > 0) {
   const targetTrackId = shareFromUrl
     ? trackOptions[trackOptions.length - 1]?.id || ""
-    : trackFromUrl
-      ? trackFromUrl.toLowerCase()
+    : requestedTrackId
+      ? requestedTrackId.toLowerCase()
       : "";
   const targetIndex = targetTrackId
     ? trackOptions.findIndex((opt) => opt.id === targetTrackId)
@@ -108,13 +131,26 @@ if (trackOptions.length > 0) {
     Math.min(state.selectedTrackIndex, Math.max(0, trackOptions.length - 4)),
   );
 }
-setCurbSegments(initCurbSegments());
+if (editTrackIdFromPath) {
+  enterEditor(state.selectedTrackIndex);
+} else if (raceTrackIdFromPath) {
+  applyTrackPreset(state.selectedTrackIndex);
+  setCurbSegments(initCurbSegments());
+  resetRace();
+  state.mode = "racing";
+  syncMenuMusicForMode(state.mode);
+} else if (trackSelectFromPath) {
+  state.mode = "trackSelect";
+}
+if (!editTrackIdFromPath && !raceTrackIdFromPath) {
+  setCurbSegments(initCurbSegments());
+}
 
 initAudio();
 gameAudio.resumeOnUserGesture();
 initInputHandlers();
 render();
-syncMenuMusicForMode(state.mode, { immediate: true });
+syncMenuMusicForMode(state.mode);
 
 startGameLoop({
   update(dt) {

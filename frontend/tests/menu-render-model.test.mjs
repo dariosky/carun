@@ -44,6 +44,10 @@ function setupDomStubs() {
     history: { replaceState: noop },
     addEventListener: noop,
   };
+  globalThis.localStorage = {
+    getItem: () => null,
+    setItem: noop,
+  };
   globalThis.document = {
     getElementById: () => fakeCanvas,
     createElement: () => fakeCanvas,
@@ -72,6 +76,7 @@ const {
   loadVisibleTracksFromApi,
   physicsConfig,
   removeTrackPresetById,
+  saveTrackPresetToDb,
   trackOptions,
 } = await import("../js/parameters.js");
 const {
@@ -136,11 +141,12 @@ test("settings render layout uses longest rendered row label", () => {
   const layout = getSettingsRenderLayout((text) => text.length * 10);
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
+    "MENU MUSIC",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",
   ]);
-  assert.equal(layout.rowGap, 74);
+  assert.equal(layout.rowGap, 66);
   assert.equal(layout.startY, 338);
 
   const longestRow = "PLAYER NAME: SUPERLONGNAME";
@@ -331,4 +337,156 @@ test("visible tracks from API replace local presets and keep published flags", a
   );
   assert.equal(systemTrack?.isPublished, true);
   assert.equal(userTrack?.isPublished, true);
+});
+
+test("saveTrackPresetToDb sends the submitted track name", async () => {
+  const imported = importTrackPresetData({
+    id: "save-name-local",
+    name: "OLD NAME",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: {
+      cx: 640,
+      cy: 360,
+      outerA: 480,
+      outerB: 250,
+      innerA: 320,
+      innerB: 150,
+      warpOuter: [],
+      warpInner: [],
+      borderSize: 22,
+    },
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (path, options = {}) => {
+    if (path !== "/api/tracks") throw new Error(`Unexpected path: ${path}`);
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      async json() {
+        return {
+          id: "33333333-3333-3333-3333-333333333333",
+          name: requestBody.name,
+          source: "user",
+          owner_user_id: "user-1",
+          owner_display_name: "USER 1",
+          best_lap_ms: null,
+          best_lap_display_name: null,
+          best_race_ms: null,
+          best_race_display_name: null,
+          is_published: false,
+          share_token: null,
+        };
+      },
+    };
+  };
+
+  try {
+    const saved = await saveTrackPresetToDb(
+      trackOptions.findIndex((track) => track.id === "save-name-local"),
+      {
+        currentUserId: "user-1",
+        name: "NEW NAME",
+      },
+    );
+    assert.equal(requestBody?.name, "NEW NAME");
+    assert.equal(saved?.name, "NEW NAME");
+  } finally {
+    globalThis.fetch = originalFetch;
+    removeTrackPresetById("save-name-local", { removePersisted: false });
+    removeTrackPresetById("33333333-3333-3333-3333-333333333333", {
+      removePersisted: false,
+    });
+  }
+});
+
+test("saveTrackPresetToDb updates existing db tracks instead of creating duplicates", async () => {
+  const imported = importTrackPresetData({
+    id: "44444444-4444-4444-4444-444444444444",
+    name: "EXISTING TRACK",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: true,
+    fromDb: true,
+    track: {
+      cx: 640,
+      cy: 360,
+      outerA: 480,
+      outerB: 250,
+      innerA: 320,
+      innerB: 150,
+      warpOuter: [],
+      warpInner: [],
+      borderSize: 22,
+    },
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const originalFetch = globalThis.fetch;
+  let requestPath = null;
+  let requestMethod = null;
+  let requestBody = null;
+  globalThis.fetch = async (path, options = {}) => {
+    requestPath = path;
+    requestMethod = options.method;
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      async json() {
+        return {
+          id: "44444444-4444-4444-4444-444444444444",
+          name: requestBody.name,
+          source: "user",
+          owner_user_id: "user-1",
+          owner_display_name: "USER 1",
+          best_lap_ms: null,
+          best_lap_display_name: null,
+          best_race_ms: null,
+          best_race_display_name: null,
+          is_published: false,
+          share_token: null,
+        };
+      },
+    };
+  };
+
+  try {
+    const saved = await saveTrackPresetToDb(
+      trackOptions.findIndex(
+        (track) => track.id === "44444444-4444-4444-4444-444444444444",
+      ),
+      {
+        currentUserId: "user-1",
+        name: "UPDATED TRACK",
+      },
+    );
+    assert.equal(
+      requestPath,
+      "/api/tracks/44444444-4444-4444-4444-444444444444",
+    );
+    assert.equal(requestMethod, "PATCH");
+    assert.equal(requestBody?.name, "UPDATED TRACK");
+    assert.equal(saved?.id, "44444444-4444-4444-4444-444444444444");
+    assert.equal(saved?.name, "UPDATED TRACK");
+  } finally {
+    globalThis.fetch = originalFetch;
+    removeTrackPresetById("44444444-4444-4444-4444-444444444444", {
+      removePersisted: false,
+    });
+  }
 });

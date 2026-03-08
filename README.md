@@ -89,12 +89,9 @@ The deploy script uploads `.env.prod` to `${APP_DIR}/.env`, then runs remote `gi
 
 ## TODO
 
+- ~~Improve the editor so building and tweaking tracks is faster and less clunky.~~
 - Add some 3D elements, especially bridges, while keeping the overall map mostly top-down.
-- Improve the editor so building and tweaking tracks is faster and less clunky.
 - Keep refining the physics so the car feels sharper, more readable, and more fun to drive.
-- Fix the handbrake so it creates controlled slides instead of awkward behavior.
-- Make grass faster and more interesting as a surface instead of feeling overly punishing.
-- Add oil, snow, and sand surfaces with distinct grip and handling behavior.
-- Add sound effects and music to give races more feedback and energy.
+- Add oil, snow, and sand surfaces with distinct grip and handling behavior.≤
 - Add AI players to make solo races feel more alive and competitive.
 - Add multiplayer support for head-to-head racing.

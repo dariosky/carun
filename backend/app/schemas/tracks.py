@@ -16,6 +16,11 @@ class TrackRenameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class TrackUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    track_payload_json: dict | None = None
+
+
 class TrackResponse(BaseModel):
     id: str
     slug: str | None = None
