@@ -30,6 +30,7 @@ import {
   state,
 } from "./state.js";
 import {
+  getEditorTopBarLayout,
   getEditorToolbarLayout,
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
@@ -284,7 +285,19 @@ function drawPixelNoise() {
 }
 
 function drawDecor(objects = worldObjects) {
-  for (const obj of objects) {
+  const flash = state.editor.selectionFlash;
+  const selectedObjectIndex =
+    state.mode === "editor" && state.editor.latestEditTarget?.kind === "object"
+      ? state.editor.latestEditTarget.objectIndex
+      : -1;
+  for (const [index, obj] of objects.entries()) {
+    const shouldFlash =
+      state.mode === "editor" &&
+      selectedObjectIndex === index &&
+      flash.kind === "object" &&
+      flash.index === index &&
+      flash.time > 0 &&
+      Math.floor(flash.time / 0.08) % 2 === 0;
     if (obj.type === "tree") {
       const angle = obj.angle || 0;
       ctx.fillStyle = "#4a2f1e";
@@ -319,6 +332,13 @@ function drawDecor(objects = worldObjects) {
       ctx.beginPath();
       drawPath(highlight);
       ctx.fill();
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        drawPath(canopy);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -341,6 +361,11 @@ function drawDecor(objects = worldObjects) {
       ctx.strokeStyle = "#8de2ff";
       ctx.lineWidth = 3;
       ctx.stroke();
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -361,6 +386,13 @@ function drawDecor(objects = worldObjects) {
       ctx.moveTo(-obj.r * 0.7, 0);
       ctx.lineTo(obj.r * 0.7, 0);
       ctx.stroke();
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, 0, obj.r + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
@@ -1222,6 +1254,8 @@ function drawTitleBar() {
 
 function drawEditorTitleBar() {
   const preset = getTrackPreset(state.editor.trackIndex);
+  const topBarLayout = getEditorTopBarLayout();
+  ctx.save();
 
   const gradient = ctx.createLinearGradient(0, 0, 0, TOP_BAR_HEIGHT);
   gradient.addColorStop(0, "#1f3342");
@@ -1235,29 +1269,63 @@ function drawEditorTitleBar() {
   ctx.lineTo(WIDTH, TOP_BAR_HEIGHT - 1);
   ctx.stroke();
 
-  let x = 18;
-  ctx.fillStyle = "#ffe167";
-  ctx.font = "bold 28px Verdana";
-  ctx.fillText("Carun", x, 38);
-  x += ctx.measureText("Carun").width + 10;
+  const leftPad = 18;
+  const brandBox = { x: leftPad, y: 8, width: 320, height: 40 };
+  if (appLogoReady) ctx.drawImage(appLogo, brandBox.x, brandBox.y + 2, 36, 36);
 
-  if (appLogoReady) ctx.drawImage(appLogo, x, 6, 44, 44);
-  x += 56;
+  ctx.fillStyle = "#ffe167";
+  ctx.font = "bold 11px Verdana";
+  ctx.textAlign = "left";
+  ctx.fillText("EDITOR", brandBox.x + 48, 20);
 
   ctx.fillStyle = "#f4fbff";
-  ctx.font = "bold 18px Verdana";
-  ctx.fillText(`EDITOR: ${preset.name}`, x, 38);
-  x += ctx.measureText(`EDITOR: ${preset.name}`).width + 16;
+  ctx.font = "bold 20px Verdana";
+  const trackName = String(preset.name || "UNTITLED").slice(0, 24);
+  ctx.fillText(trackName, brandBox.x + 48, 40);
 
-  ctx.fillStyle = "#d8e8f7";
-  ctx.font = "15px Verdana";
-  const compactInfo = ["LMB draw", "S save", "C curbs", "Esc back"].join("   ");
-  ctx.fillText(compactInfo, x, 38);
+  const helpText = ["S save", "C curbs", "Esc back"].join("   ");
+  const helpX = brandBox.x + brandBox.width + 18;
+  const helpW = Math.max(120, topBarLayout.race.x - helpX - 18);
+  if (helpW > 140) {
+    ctx.fillStyle = "rgba(13, 25, 33, 0.62)";
+    ctx.beginPath();
+    ctx.roundRect(helpX, 10, helpW, 36, 8);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(184, 215, 232, 0.18)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#c9d9e7";
+    ctx.font = "13px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(helpText, helpX + helpW * 0.5, 33);
+  }
+
+  const drawTopBarButton = (rect, label, shortcut) => {
+    ctx.fillStyle = "rgba(16, 33, 45, 0.92)";
+    ctx.strokeStyle = "rgba(184, 215, 232, 0.28)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.width, rect.height, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#f4fbff";
+    ctx.font = "bold 15px Verdana";
+    ctx.textAlign = "left";
+    ctx.fillText(label, rect.x + 12, rect.y + 22);
+    ctx.fillStyle = "#9cb9c8";
+    ctx.font = "12px Verdana";
+    ctx.textAlign = "right";
+    ctx.fillText(`[${shortcut}]`, rect.x + rect.width - 10, rect.y + 21);
+  };
+
+  drawTopBarButton(topBarLayout.race, "Race", topBarLayout.race.shortcut);
+  drawTopBarButton(topBarLayout.build, "Build", topBarLayout.build.shortcut);
+  ctx.restore();
 }
 
-function latestEditorValueLabel(preset) {
+function selectedObjectValueLabel(preset) {
   const target = state.editor.latestEditTarget;
-  if (!target) return "--";
+  if (target?.kind !== "object") return "--";
   if (target.kind === "object") {
     const object = preset.worldObjects?.[target.objectIndex];
     if (!object) return "--";
@@ -1265,11 +1333,44 @@ function latestEditorValueLabel(preset) {
       return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
     if (Number.isFinite(object.r)) return `${Math.round(object.r)}`;
   }
-  if (target.kind === "stroke") {
-    const stroke = preset.centerlineStrokes?.[target.strokeIndex];
-    if (Number.isFinite(stroke?.[0]?.halfWidth))
-      return `${Math.round(stroke[0].halfWidth * 2)} px`;
+  return "--";
+}
+
+function selectedObjectLabel(preset) {
+  const objects = preset.worldObjects || [];
+  if (!objects.length) return "--";
+  const iconForType = (type) =>
+    type === "pond"
+      ? "≈"
+      : type === "barrel"
+        ? "◉"
+        : type === "tree"
+          ? "♣"
+          : "•";
+  const target = state.editor.latestEditTarget;
+  if (target?.kind !== "object" || !objects[target.objectIndex]) {
+    const last = objects[objects.length - 1];
+    return `${objects.length}/${objects.length} ${iconForType(last.type)}`;
   }
+  return `${target.objectIndex + 1}/${objects.length} ${iconForType(objects[target.objectIndex].type)}`;
+}
+
+function selectedRoadLabel(preset) {
+  const strokes = preset.centerlineStrokes || [];
+  if (!strokes.length) return "--";
+  const target = state.editor.latestEditTarget;
+  if (target?.kind !== "stroke" || !strokes[target.strokeIndex]) {
+    return `${strokes.length}/${strokes.length}`;
+  }
+  return `${target.strokeIndex + 1}/${strokes.length}`;
+}
+
+function selectedRoadWidthLabel(preset) {
+  const target = state.editor.latestEditTarget;
+  if (target?.kind !== "stroke") return "--";
+  const stroke = preset.centerlineStrokes?.[target.strokeIndex];
+  if (Number.isFinite(stroke?.[0]?.halfWidth))
+    return `${Math.round(stroke[0].halfWidth * 2)} px`;
   return "--";
 }
 
@@ -1292,17 +1393,21 @@ function drawToolbarButton(rect, text, { active = false } = {}) {
 function drawEditorToolbar() {
   const preset = getTrackPreset(state.editor.trackIndex);
   const layout = getEditorToolbarLayout();
-  const latestValue = latestEditorValueLabel(preset);
-  const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
+  const objectValue = selectedObjectValueLabel(preset);
+  const objectLabel = selectedObjectLabel(preset);
+  const roadLabel = selectedRoadLabel(preset);
+  const roadWidth = selectedRoadWidthLabel(preset);
   const smoothingText = centerlineSmoothingLabel(
     preset.track.centerlineSmoothingMode,
   );
+  const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
   const activeToolLabel =
     state.editor.activeTool === "road"
       ? "ROAD"
       : state.editor.activeTool === "pond"
         ? "WATER"
         : state.editor.activeTool.toUpperCase();
+  const toolbarHeaderLabel = state.editor.toolbar.hoverLabel || activeToolLabel;
 
   ctx.save();
   ctx.fillStyle = "rgba(6, 14, 20, 0.86)";
@@ -1348,49 +1453,88 @@ function drawEditorToolbar() {
   ctx.font = "12px Verdana";
   ctx.textAlign = "right";
   ctx.fillText(
-    activeToolLabel,
+    toolbarHeaderLabel,
     layout.titleBar.x + layout.titleBar.width - 12,
     layout.titleBar.y + 21,
   );
 
-  for (const row of layout.rows) {
+  ctx.fillStyle = "#9cb9c8";
+  ctx.font = "bold 12px Verdana";
+  ctx.textAlign = "left";
+  ctx.fillText("OBJECTS", layout.objectHeader.x, layout.objectHeader.y + 15);
+
+  for (const row of layout.objectToolButtons) {
     const active =
       (row.id === "water" && state.editor.activeTool === "pond") ||
       (row.id === "barrel" && state.editor.activeTool === "barrel") ||
       (row.id === "tree" && state.editor.activeTool === "tree");
     drawToolbarButton(row, "", { active });
     ctx.fillStyle = "#dff7ff";
-    ctx.font = "bold 16px Verdana";
-    ctx.textAlign = "left";
-    ctx.fillText(row.icon, row.x + 10, row.y + 21);
-    ctx.fillStyle = "#f4fbff";
-    ctx.font = "bold 14px Verdana";
-    ctx.fillText(row.label, row.x + 36, row.y + 21);
-    ctx.fillStyle = "#9cb9c8";
-    ctx.font = "13px Verdana";
-    ctx.textAlign = "right";
-    ctx.fillText(`[${row.shortcut}]`, row.x + row.width - 10, row.y + 21);
+    ctx.font = "bold 20px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(row.icon, row.x + row.width * 0.5, row.y + 22);
   }
 
-  ctx.fillStyle = "#f0f8ff";
-  ctx.font = "bold 14px Verdana";
-  ctx.textAlign = "left";
-  ctx.fillText("Size", layout.sizeLabel.x, layout.sizeLabel.y + 18);
-  drawToolbarButton(layout.sizeDecrease, "-");
-  drawToolbarButton(layout.sizeIncrease, "+");
+  drawToolbarButton(layout.objectPrev, "‹");
+  drawToolbarButton(layout.objectNext, "›");
   ctx.fillStyle = "#d7ebf7";
   ctx.textAlign = "center";
   ctx.fillText(
-    latestValue,
-    layout.sizeValue.x + layout.sizeValue.width * 0.5,
-    layout.sizeValue.y + 18,
+    objectLabel,
+    layout.objectValue.x + layout.objectValue.width * 0.5,
+    layout.objectValue.y + 18,
   );
+
+  for (const button of layout.objectActionButtons) {
+    drawToolbarButton(button, "", { active: false });
+    ctx.fillStyle = "#dff7ff";
+    ctx.font = "bold 18px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(button.icon, button.x + button.width * 0.5, button.y + 19);
+  }
+
+  ctx.fillStyle = "#9cb9c8";
+  ctx.font = "bold 12px Verdana";
+  ctx.textAlign = "left";
+  ctx.fillText("ROAD", layout.roadHeader.x, layout.roadHeader.y + 15);
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.font = "bold 14px Verdana";
+  ctx.fillText("Pick", layout.roadSelectLabel.x, layout.roadSelectLabel.y + 18);
+  drawToolbarButton(layout.roadPrev, "‹");
+  drawToolbarButton(layout.roadNext, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    roadLabel,
+    layout.roadValue.x + layout.roadValue.width * 0.5,
+    layout.roadValue.y + 18,
+  );
+
+  for (const button of layout.roadActionButtons) {
+    drawToolbarButton(button, "", { active: false });
+    ctx.fillStyle = "#dff7ff";
+    ctx.font = "bold 18px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(button.icon, button.x + button.width * 0.5, button.y + 19);
+  }
 
   ctx.fillStyle = "#f0f8ff";
   ctx.textAlign = "left";
-  ctx.fillText("Rotate", layout.rotateLabel.x, layout.rotateLabel.y + 18);
-  drawToolbarButton(layout.rotateLeft, "↩");
-  drawToolbarButton(layout.rotateRight, "↪");
+  ctx.fillText(
+    "Smooth",
+    layout.roadSmoothLabel.x,
+    layout.roadSmoothLabel.y + 18,
+  );
+  drawToolbarButton(layout.roadSmoothPrev, "‹");
+  drawToolbarButton(layout.roadSmoothNext, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    smoothingText,
+    layout.roadSmoothValue.x + layout.roadSmoothValue.width * 0.5,
+    layout.roadSmoothValue.y + 17,
+  );
 
   ctx.fillStyle = "#f0f8ff";
   ctx.textAlign = "left";
@@ -1404,19 +1548,6 @@ function drawEditorToolbar() {
     zoomText,
     layout.zoomValue.x + layout.zoomValue.width * 0.5,
     layout.zoomValue.y + 17,
-  );
-
-  ctx.fillStyle = "#f0f8ff";
-  ctx.textAlign = "left";
-  ctx.fillText("Smooth", layout.smoothingLabel.x, layout.smoothingLabel.y + 18);
-  drawToolbarButton(layout.smoothingPrev, "‹");
-  drawToolbarButton(layout.smoothingNext, "›");
-  ctx.fillStyle = "#d7ebf7";
-  ctx.textAlign = "center";
-  ctx.fillText(
-    smoothingText,
-    layout.smoothingValue.x + layout.smoothingValue.width * 0.5,
-    layout.smoothingValue.y + 17,
   );
   ctx.restore();
 }
@@ -1864,8 +1995,27 @@ function drawEditorOverlay() {
   const strokes = preset.centerlineStrokes || [];
   const connectedLoop = getConnectedCenterlinePoints(strokes);
   drawStroke(connectedLoop, "rgba(96, 248, 255, 0.78)", 2);
-  for (const stroke of strokes) {
-    drawStroke(stroke, "rgba(245, 241, 88, 0.9)", 4);
+  const flash = state.editor.selectionFlash;
+  const selectedStrokeIndex =
+    state.editor.latestEditTarget?.kind === "stroke"
+      ? state.editor.latestEditTarget.strokeIndex
+      : -1;
+  for (const [index, stroke] of strokes.entries()) {
+    const baseColor =
+      index % 2 === 0
+        ? "rgba(255, 163, 72, 0.92)"
+        : "rgba(120, 228, 255, 0.92)";
+    const shouldFlash =
+      selectedStrokeIndex === index &&
+      flash.kind === "stroke" &&
+      flash.index === index &&
+      flash.time > 0 &&
+      Math.floor(flash.time / 0.08) % 2 === 0;
+    drawStroke(
+      stroke,
+      shouldFlash ? "rgba(255, 225, 103, 0.98)" : baseColor,
+      4,
+    );
   }
   drawStroke(state.editor.activeStroke, "rgba(255, 255, 255, 0.95)", 3);
 

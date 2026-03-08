@@ -45,6 +45,16 @@ function updateMenuTagline(dt) {
   }
 }
 
+function updateEditorSelectionFlash(dt) {
+  const flash = state.editor?.selectionFlash;
+  if (!flash || flash.time <= 0) return;
+  flash.time = Math.max(0, flash.time - dt);
+  if (flash.time === 0) {
+    flash.kind = null;
+    flash.index = -1;
+  }
+}
+
 const appUrl = new URL(window.location.href);
 const authResult = appUrl.searchParams.get("auth");
 const authError = appUrl.searchParams.get("auth_error");
@@ -155,6 +165,7 @@ syncMenuMusicForMode(state.mode);
 startGameLoop({
   update(dt) {
     updateMenuTagline(dt);
+    updateEditorSelectionFlash(dt);
     tickSnackbar(dt);
     const shouldPlayRaceAudio = state.mode === "racing" && !state.paused;
     if (shouldPlayRaceAudio && !raceAudioActive) {

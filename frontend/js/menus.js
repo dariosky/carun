@@ -44,18 +44,16 @@ import { emitFinishConfetti } from "./particles.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const TRACK_SELECT_VISIBLE_CARDS = 4;
-const EDITOR_TOOL_ROWS = [
-  { id: "undo", label: "Undo", icon: "⟲", shortcut: "Backspace" },
-  { id: "race", label: "Race", icon: "🏁", shortcut: "R" },
+const EDITOR_OBJECT_PLACE_TOOLS = [
   { id: "water", label: "Water", icon: "≈", shortcut: "W" },
   { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
   { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
-  { id: "build", label: "Build", icon: "▦", shortcut: "Space" },
 ];
 const EDITOR_TOOLBAR_WIDTH = 252;
 const EDITOR_TOOLBAR_TITLE_HEIGHT = 32;
 const EDITOR_TOOLBAR_ROW_HEIGHT = 32;
 const EDITOR_TOOLBAR_SECTION_HEIGHT = 38;
+const EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT = 22;
 const EDITOR_DEFAULT_HALF_WIDTH = 60;
 const EDITOR_ZOOM_STEP = 0.1;
 const EDITOR_MIN_WORLD_SCALE = 0.5;
@@ -165,17 +163,56 @@ function toggleEditorTool(nextTool) {
   setEditorTool(state.editor.activeTool === nextTool ? "road" : nextTool);
 }
 
+function triggerEditorSelectionFlash(kind, index) {
+  state.editor.selectionFlash.kind = kind;
+  state.editor.selectionFlash.index = Number.isInteger(index) ? index : -1;
+  state.editor.selectionFlash.time = 0.48;
+}
+
+export function getEditorTopBarLayout() {
+  const buttonWidth = 120;
+  const buttonHeight = 34;
+  const buttonY = 11;
+  const gap = 12;
+  const build = {
+    x: canvas.width - 18 - buttonWidth,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    id: "build",
+    label: "Build",
+    shortcut: "Space",
+  };
+  const race = {
+    x: build.x - gap - buttonWidth,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    id: "race",
+    label: "Race",
+    shortcut: "R",
+  };
+  return { race, build };
+}
+
 export function getEditorToolbarLayout() {
   const toolbar = state.editor.toolbar;
+  const panelHeight =
+    EDITOR_TOOLBAR_TITLE_HEIGHT +
+    EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
+    EDITOR_TOOLBAR_ROW_HEIGHT * 2 +
+    EDITOR_TOOLBAR_SECTION_HEIGHT * 2 +
+    14 +
+    EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
+    EDITOR_TOOLBAR_SECTION_HEIGHT * 3 +
+    14 +
+    EDITOR_TOOLBAR_SECTION_HEIGHT +
+    20;
   const panel = {
     x: toolbar.x,
     y: toolbar.y,
     width: toolbar.width || EDITOR_TOOLBAR_WIDTH,
-    height:
-      EDITOR_TOOLBAR_TITLE_HEIGHT +
-      EDITOR_TOOL_ROWS.length * EDITOR_TOOLBAR_ROW_HEIGHT +
-      EDITOR_TOOLBAR_SECTION_HEIGHT * 4 +
-      24,
+    height: panelHeight,
   };
   const titleBar = {
     x: panel.x,
@@ -183,66 +220,141 @@ export function getEditorToolbarLayout() {
     width: panel.width,
     height: EDITOR_TOOLBAR_TITLE_HEIGHT,
   };
-  const rows = EDITOR_TOOL_ROWS.map((tool, index) => ({
+  const objectHeader = {
+    x: panel.x + 14,
+    y: titleBar.y + titleBar.height + 8,
+    width: panel.width - 28,
+    height: EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT,
+  };
+  const objectToolRowY = objectHeader.y + objectHeader.height + 4;
+  const objectToolButtonGap = 10;
+  const objectToolButtonWidth =
+    (panel.width - 24 - objectToolButtonGap * 2) / 3;
+  const objectToolButtons = EDITOR_OBJECT_PLACE_TOOLS.map((tool, index) => ({
     ...tool,
-    x: panel.x + 12,
-    y: titleBar.y + titleBar.height + 8 + index * EDITOR_TOOLBAR_ROW_HEIGHT,
-    width: panel.width - 24,
+    x: panel.x + 12 + index * (objectToolButtonWidth + objectToolButtonGap),
+    y: objectToolRowY,
+    width: objectToolButtonWidth,
     height: EDITOR_TOOLBAR_ROW_HEIGHT - 2,
   }));
-  const sizeTop = rows[rows.length - 1].y + EDITOR_TOOLBAR_ROW_HEIGHT + 8;
-  const rotateTop = sizeTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
-  const zoomTop = rotateTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
-  const smoothingTop = zoomTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const objectSelectTop = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT + 8;
+  const objectActionTop = objectSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const objectActionGap = 8;
+  const objectActionButtonWidth = (panel.width - 24 - objectActionGap * 4) / 5;
+  const objectActionButtons = [
+    { id: "objectDelete", icon: "🗑️", label: "Delete" },
+    { id: "objectSizeDown", icon: "−", label: "Size -" },
+    { id: "objectSizeUp", icon: "+", label: "Size +" },
+    { id: "rotateLeft", icon: "↩", label: "Rotate Left" },
+    { id: "rotateRight", icon: "↪", label: "Rotate Right" },
+  ].map((button, index) => ({
+    ...button,
+    x: panel.x + 12 + index * (objectActionButtonWidth + objectActionGap),
+    y: objectActionTop + 2,
+    width: objectActionButtonWidth,
+    height: 24,
+  }));
+  const roadHeaderTop = objectActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
+  const roadSelectTop = roadHeaderTop + EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT + 4;
+  const roadActionTop = roadSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const roadActionGap = 8;
+  const roadActionButtonWidth = (panel.width - 24 - roadActionGap * 2) / 3;
+  const roadActionButtons = [
+    { id: "roadDelete", icon: "🗑️", label: "Delete Segment" },
+    { id: "roadSizeDown", icon: "−", label: "Width -" },
+    { id: "roadSizeUp", icon: "+", label: "Width +" },
+  ].map((button, index) => ({
+    ...button,
+    x: panel.x + 12 + index * (roadActionButtonWidth + roadActionGap),
+    y: roadActionTop + 2,
+    width: roadActionButtonWidth,
+    height: 24,
+  }));
+  const roadSmoothTop = roadActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const zoomTop = roadSmoothTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
   return {
     panel,
     titleBar,
-    rows,
-    sizeLabel: { x: panel.x + 14, y: sizeTop, width: 56, height: 28 },
-    sizeDecrease: { x: panel.x + 92, y: sizeTop + 2, width: 30, height: 24 },
-    sizeIncrease: {
-      x: panel.x + panel.width - 42,
-      y: sizeTop + 2,
+    objectHeader,
+    objectToolButtons,
+    objectActionButtons,
+    objectPrev: {
+      x: panel.x + 14,
+      y: objectSelectTop + 2,
       width: 30,
       height: 24,
     },
-    sizeValue: {
+    objectNext: {
+      x: panel.x + panel.width - 42,
+      y: objectSelectTop + 2,
+      width: 30,
+      height: 24,
+    },
+    objectValue: {
+      x: panel.x + 52,
+      y: objectSelectTop,
+      width: panel.width - 104,
+      height: 28,
+    },
+    roadHeader: {
+      x: panel.x + 14,
+      y: roadHeaderTop,
+      width: panel.width - 28,
+      height: EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT,
+    },
+    roadSelectLabel: {
+      x: panel.x + 14,
+      y: roadSelectTop,
+      width: 56,
+      height: 28,
+    },
+    roadPrev: {
+      x: panel.x + 92,
+      y: roadSelectTop + 2,
+      width: 30,
+      height: 24,
+    },
+    roadNext: {
+      x: panel.x + panel.width - 42,
+      y: roadSelectTop + 2,
+      width: 30,
+      height: 24,
+    },
+    roadValue: {
       x: panel.x + 132,
-      y: sizeTop,
+      y: roadSelectTop,
       width: panel.width - 184,
       height: 28,
     },
-    rotateLabel: { x: panel.x + 14, y: rotateTop, width: 60, height: 28 },
-    rotateLeft: { x: panel.x + 102, y: rotateTop + 2, width: 40, height: 24 },
-    rotateRight: { x: panel.x + 154, y: rotateTop + 2, width: 40, height: 24 },
+    roadActionButtons,
+    roadSmoothLabel: {
+      x: panel.x + 14,
+      y: roadSmoothTop,
+      width: 76,
+      height: 28,
+    },
+    roadSmoothPrev: {
+      x: panel.x + 112,
+      y: roadSmoothTop + 2,
+      width: 30,
+      height: 24,
+    },
+    roadSmoothNext: {
+      x: panel.x + panel.width - 40,
+      y: roadSmoothTop + 2,
+      width: 30,
+      height: 24,
+    },
+    roadSmoothValue: {
+      x: panel.x + 148,
+      y: roadSmoothTop,
+      width: 58,
+      height: 28,
+    },
     zoomLabel: { x: panel.x + 14, y: zoomTop, width: 60, height: 28 },
     zoomOut: { x: panel.x + 102, y: zoomTop + 2, width: 40, height: 24 },
     zoomIn: { x: panel.x + 154, y: zoomTop + 2, width: 40, height: 24 },
     zoomValue: { x: panel.x + 196, y: zoomTop, width: 42, height: 28 },
-    smoothingLabel: {
-      x: panel.x + 14,
-      y: smoothingTop,
-      width: 76,
-      height: 28,
-    },
-    smoothingPrev: {
-      x: panel.x + 112,
-      y: smoothingTop + 2,
-      width: 30,
-      height: 24,
-    },
-    smoothingNext: {
-      x: panel.x + panel.width - 40,
-      y: smoothingTop + 2,
-      width: 30,
-      height: 24,
-    },
-    smoothingValue: {
-      x: panel.x + 148,
-      y: smoothingTop,
-      width: 58,
-      height: 28,
-    },
   };
 }
 
@@ -250,25 +362,83 @@ function editorToolbarActionAt(x, y) {
   const layout = getEditorToolbarLayout();
   if (!pointInRect(x, y, layout.panel)) return null;
   if (pointInRect(x, y, layout.titleBar)) return { type: "drag" };
-  for (const row of layout.rows) {
+  for (const row of layout.objectToolButtons) {
     if (pointInRect(x, y, row)) return { type: "action", id: row.id };
   }
-  if (pointInRect(x, y, layout.sizeDecrease))
-    return { type: "action", id: "sizeDown" };
-  if (pointInRect(x, y, layout.sizeIncrease))
-    return { type: "action", id: "sizeUp" };
-  if (pointInRect(x, y, layout.rotateLeft))
-    return { type: "action", id: "rotateLeft" };
-  if (pointInRect(x, y, layout.rotateRight))
-    return { type: "action", id: "rotateRight" };
+  for (const button of layout.objectActionButtons) {
+    if (pointInRect(x, y, button)) return { type: "action", id: button.id };
+  }
+  if (pointInRect(x, y, layout.objectPrev))
+    return { type: "action", id: "objectPrev" };
+  if (pointInRect(x, y, layout.objectNext))
+    return { type: "action", id: "objectNext" };
+  if (pointInRect(x, y, layout.roadPrev))
+    return { type: "action", id: "roadPrev" };
+  if (pointInRect(x, y, layout.roadNext))
+    return { type: "action", id: "roadNext" };
+  for (const button of layout.roadActionButtons) {
+    if (pointInRect(x, y, button)) return { type: "action", id: button.id };
+  }
+  if (pointInRect(x, y, layout.roadSmoothPrev))
+    return { type: "action", id: "roadSmoothPrev" };
+  if (pointInRect(x, y, layout.roadSmoothNext))
+    return { type: "action", id: "roadSmoothNext" };
   if (pointInRect(x, y, layout.zoomOut))
     return { type: "action", id: "zoomOut" };
   if (pointInRect(x, y, layout.zoomIn)) return { type: "action", id: "zoomIn" };
-  if (pointInRect(x, y, layout.smoothingPrev))
-    return { type: "action", id: "smoothingPrev" };
-  if (pointInRect(x, y, layout.smoothingNext))
-    return { type: "action", id: "smoothingNext" };
   return { type: "panel" };
+}
+
+function editorTopBarActionAt(x, y) {
+  const layout = getEditorTopBarLayout();
+  if (pointInRect(x, y, layout.race)) return layout.race.id;
+  if (pointInRect(x, y, layout.build)) return layout.build.id;
+  return null;
+}
+
+function editorToolbarActionLabel(actionId) {
+  switch (actionId) {
+    case "objectDelete":
+      return "Delete";
+    case "water":
+      return "Water";
+    case "barrel":
+      return "Barrel";
+    case "tree":
+      return "Tree";
+    case "objectPrev":
+      return "Previous Object";
+    case "objectNext":
+      return "Next Object";
+    case "objectSizeDown":
+      return "Size -";
+    case "objectSizeUp":
+      return "Size +";
+    case "rotateLeft":
+      return "Rotate Left";
+    case "rotateRight":
+      return "Rotate Right";
+    case "roadPrev":
+      return "Previous Segment";
+    case "roadNext":
+      return "Next Segment";
+    case "roadDelete":
+      return "Delete Segment";
+    case "roadSizeDown":
+      return "Width -";
+    case "roadSizeUp":
+      return "Width +";
+    case "roadSmoothPrev":
+      return "Smoothing -";
+    case "roadSmoothNext":
+      return "Smoothing +";
+    case "zoomOut":
+      return "Zoom Out";
+    case "zoomIn":
+      return "Zoom In";
+    default:
+      return "";
+  }
 }
 
 function currentMenuItems() {
@@ -639,6 +809,7 @@ function placeEditorObject(type) {
       kind: "object",
       objectIndex: preset.worldObjects.length - 1,
     };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
@@ -661,6 +832,7 @@ function placeEditorObject(type) {
       kind: "object",
       objectIndex: preset.worldObjects.length - 1,
     };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
@@ -675,68 +847,201 @@ function placeEditorObject(type) {
       kind: "object",
       objectIndex: preset.worldObjects.length - 1,
     };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
     applyTrackPreset(state.editor.trackIndex);
   }
 }
 
-function adjustLatestEditorSize(direction) {
+function cycleSelectionIndex(count, currentIndex, direction) {
+  if (!count) return null;
+  if (
+    !Number.isInteger(currentIndex) ||
+    currentIndex < 0 ||
+    currentIndex >= count
+  )
+    return count - 1;
+  return (currentIndex + direction + count) % count;
+}
+
+function selectEditorObject(direction) {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const count = preset.worldObjects?.length || 0;
+  if (!count) {
+    if (state.editor.latestEditTarget?.kind === "object")
+      state.editor.latestEditTarget = null;
+    return;
+  }
+  const currentIndex =
+    state.editor.latestEditTarget?.kind === "object"
+      ? state.editor.latestEditTarget.objectIndex
+      : null;
+  const nextIndex = cycleSelectionIndex(count, currentIndex, direction);
+  state.editor.latestEditTarget = {
+    kind: "object",
+    objectIndex: nextIndex,
+  };
+  triggerEditorSelectionFlash("object", nextIndex);
+}
+
+function selectEditorRoad(direction) {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const count = preset.centerlineStrokes?.length || 0;
+  if (!count) {
+    if (state.editor.latestEditTarget?.kind === "stroke")
+      state.editor.latestEditTarget = null;
+    return;
+  }
+  const currentIndex =
+    state.editor.latestEditTarget?.kind === "stroke"
+      ? state.editor.latestEditTarget.strokeIndex
+      : null;
+  const nextIndex = cycleSelectionIndex(count, currentIndex, direction);
+  state.editor.latestEditTarget = {
+    kind: "stroke",
+    strokeIndex: nextIndex,
+  };
+  triggerEditorSelectionFlash("stroke", nextIndex);
+}
+
+function objectSelectionTarget(preset) {
+  const target = state.editor.latestEditTarget;
+  if (target?.kind === "object" && preset.worldObjects?.[target.objectIndex]) {
+    return target;
+  }
+  if (preset.worldObjects?.length) {
+    return { kind: "object", objectIndex: preset.worldObjects.length - 1 };
+  }
+  return null;
+}
+
+function roadSelectionTarget(preset) {
+  const target = state.editor.latestEditTarget;
+  if (
+    target?.kind === "stroke" &&
+    preset.centerlineStrokes?.[target.strokeIndex]
+  ) {
+    return target;
+  }
+  if (preset.centerlineStrokes?.length) {
+    return { kind: "stroke", strokeIndex: preset.centerlineStrokes.length - 1 };
+  }
+  return null;
+}
+
+function reindexEditorStack(preset, kind, removedIndex) {
+  if (!Array.isArray(preset.editStack)) return;
+  const key = kind === "object" ? "objectIndex" : "strokeIndex";
+  preset.editStack = preset.editStack.flatMap((entry) => {
+    if (entry.kind !== kind) return [entry];
+    if (entry[key] === removedIndex) return [];
+    if (entry[key] > removedIndex) return [{ ...entry, [key]: entry[key] - 1 }];
+    return [entry];
+  });
+}
+
+function shiftEditorStackForInsert(preset, kind, insertedIndex) {
+  if (!Array.isArray(preset.editStack)) return;
+  const key = kind === "object" ? "objectIndex" : "strokeIndex";
+  preset.editStack = preset.editStack.map((entry) => {
+    if (entry.kind !== kind) return entry;
+    if (entry[key] >= insertedIndex) return { ...entry, [key]: entry[key] + 1 };
+    return entry;
+  });
+}
+
+function deleteSelectedEditorTarget(kind) {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
-  if (!state.editor.latestEditTarget) syncLatestEditorTarget(preset);
-  const target = state.editor.latestEditTarget;
+  const target =
+    kind === "object"
+      ? objectSelectionTarget(preset)
+      : roadSelectionTarget(preset);
   if (!target) return;
-
   if (target.kind === "object") {
-    const object = preset.worldObjects[target.objectIndex];
-    if (!object) {
+    if (!preset.worldObjects?.[target.objectIndex]) return;
+    preset.worldObjects.splice(target.objectIndex, 1);
+    reindexEditorStack(preset, "object", target.objectIndex);
+    if (preset.worldObjects.length) {
+      state.editor.latestEditTarget = {
+        kind: "object",
+        objectIndex: Math.min(
+          target.objectIndex,
+          preset.worldObjects.length - 1,
+        ),
+      };
+    } else {
       syncLatestEditorTarget(preset);
-      return;
-    }
-    if (object.type === "pond") {
-      object.rx = Math.max(28, Math.min(180, object.rx + direction * 8));
-      object.ry = Math.max(16, Math.min(110, object.ry + direction * 5));
-    }
-    if (object.type === "tree") {
-      object.r = Math.max(12, Math.min(44, object.r + direction * 2));
-    }
-    if (object.type === "barrel") {
-      object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
     }
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
-
-  if (target.kind === "stroke") {
-    const stroke = preset.centerlineStrokes[target.strokeIndex];
-    if (!stroke?.length) {
-      syncLatestEditorTarget(preset);
-      return;
-    }
-    for (const point of stroke) {
-      const nextWidth =
-        (Number.isFinite(point.halfWidth)
-          ? point.halfWidth
-          : getDefaultStrokeHalfWidth(preset)) +
-        direction * 4;
-      point.halfWidth = Math.max(24, Math.min(120, nextWidth));
-    }
-    rebuildEditorTrackGeometry();
+  if (!preset.centerlineStrokes?.[target.strokeIndex]) return;
+  preset.centerlineStrokes.splice(target.strokeIndex, 1);
+  reindexEditorStack(preset, "stroke", target.strokeIndex);
+  if (preset.centerlineStrokes.length) {
+    state.editor.latestEditTarget = {
+      kind: "stroke",
+      strokeIndex: Math.min(
+        target.strokeIndex,
+        preset.centerlineStrokes.length - 1,
+      ),
+    };
+  } else {
+    syncLatestEditorTarget(preset);
   }
+  rebuildEditorTrackGeometry();
 }
 
-function rotateLatestEditorObject(direction) {
+function adjustSelectedObjectSize(direction) {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
-  if (!state.editor.latestEditTarget) syncLatestEditorTarget(preset);
-  const target = state.editor.latestEditTarget;
-  if (!target || target.kind !== "object") return;
+  const target = objectSelectionTarget(preset);
+  if (!target) return;
   const object = preset.worldObjects[target.objectIndex];
-  if (!object) {
-    syncLatestEditorTarget(preset);
-    return;
+  if (!object) return;
+  if (object.type === "pond") {
+    object.rx = Math.max(28, Math.min(180, object.rx + direction * 8));
+    object.ry = Math.max(16, Math.min(110, object.ry + direction * 5));
   }
+  if (object.type === "tree") {
+    object.r = Math.max(12, Math.min(44, object.r + direction * 2));
+  }
+  if (object.type === "barrel") {
+    object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
+  }
+  state.editor.latestEditTarget = target;
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustSelectedRoadWidth(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const target = roadSelectionTarget(preset);
+  if (!target) return;
+  const stroke = preset.centerlineStrokes[target.strokeIndex];
+  if (!stroke?.length) return;
+  for (const point of stroke) {
+    const nextWidth =
+      (Number.isFinite(point.halfWidth)
+        ? point.halfWidth
+        : getDefaultStrokeHalfWidth(preset)) +
+      direction * 4;
+    point.halfWidth = Math.max(24, Math.min(120, nextWidth));
+  }
+  state.editor.latestEditTarget = target;
+  rebuildEditorTrackGeometry();
+}
+
+function rotateSelectedEditorObject(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const target = objectSelectionTarget(preset);
+  if (!target) return;
+  const object = preset.worldObjects[target.objectIndex];
+  if (!object) return;
   object.angle =
     ((object.angle || 0) + direction * (Math.PI / 12)) % (Math.PI * 2);
+  state.editor.latestEditTarget = target;
   applyTrackPreset(state.editor.trackIndex);
 }
 
@@ -773,49 +1078,30 @@ function adjustEditorSmoothing(direction) {
 }
 
 function performEditorToolbarAction(actionId) {
-  if (actionId === "undo") undoLastEditorAddition();
-  if (actionId === "race") startEditorRace();
+  if (actionId === "objectDelete") deleteSelectedEditorTarget("object");
   if (actionId === "water") toggleEditorTool("pond");
   if (actionId === "barrel") toggleEditorTool("barrel");
   if (actionId === "tree") toggleEditorTool("tree");
-  if (actionId === "build") rebuildEditorTrackGeometry();
-  if (actionId === "sizeDown") adjustLatestEditorSize(-1);
-  if (actionId === "sizeUp") adjustLatestEditorSize(1);
-  if (actionId === "rotateLeft") rotateLatestEditorObject(-1);
-  if (actionId === "rotateRight") rotateLatestEditorObject(1);
+  if (actionId === "objectPrev") selectEditorObject(-1);
+  if (actionId === "objectNext") selectEditorObject(1);
+  if (actionId === "objectSizeDown") adjustSelectedObjectSize(-1);
+  if (actionId === "objectSizeUp") adjustSelectedObjectSize(1);
+  if (actionId === "rotateLeft") rotateSelectedEditorObject(-1);
+  if (actionId === "rotateRight") rotateSelectedEditorObject(1);
+  if (actionId === "roadPrev") selectEditorRoad(-1);
+  if (actionId === "roadNext") selectEditorRoad(1);
+  if (actionId === "roadDelete") deleteSelectedEditorTarget("stroke");
+  if (actionId === "roadSizeDown") adjustSelectedRoadWidth(-1);
+  if (actionId === "roadSizeUp") adjustSelectedRoadWidth(1);
+  if (actionId === "roadSmoothPrev") adjustEditorSmoothing(-1);
+  if (actionId === "roadSmoothNext") adjustEditorSmoothing(1);
   if (actionId === "zoomOut") adjustEditorZoom(-1);
   if (actionId === "zoomIn") adjustEditorZoom(1);
-  if (actionId === "smoothingPrev") adjustEditorSmoothing(-1);
-  if (actionId === "smoothingNext") adjustEditorSmoothing(1);
 }
 
-function undoLastEditorAddition() {
-  if (state.mode !== "editor") return;
-  const preset = getTrackPreset(state.editor.trackIndex);
-  if (!preset.editStack) preset.editStack = [];
-
-  // Legacy/imported tracks can have strokes without an aligned editStack.
-  if (preset.editStack.length === 0) {
-    if (preset.centerlineStrokes && preset.centerlineStrokes.length) {
-      preset.centerlineStrokes.pop();
-      applyTrackPreset(state.editor.trackIndex);
-      setCurbSegments(initCurbSegments());
-    }
-    syncLatestEditorTarget(preset);
-    return;
-  }
-
-  const lastAction = preset.editStack.pop();
-  if (lastAction.kind === "object" && preset.worldObjects.length) {
-    preset.worldObjects.pop();
-  }
-  if (lastAction.kind === "stroke" && preset.centerlineStrokes.length) {
-    preset.centerlineStrokes.pop();
-  }
-
-  applyTrackPreset(state.editor.trackIndex);
-  setCurbSegments(initCurbSegments());
-  syncLatestEditorTarget(preset);
+function performEditorTopBarAction(actionId) {
+  if (actionId === "race") startEditorRace();
+  if (actionId === "build") rebuildEditorTrackGeometry();
 }
 
 function trackSelectCardCount() {
@@ -1323,7 +1609,9 @@ function onKeyDown(e) {
   }
   if (state.mode === "editor" && key === "backspace") {
     if (e.repeat) return;
-    undoLastEditorAddition();
+    if (state.editor.latestEditTarget?.kind === "stroke")
+      deleteSelectedEditorTarget("stroke");
+    else deleteSelectedEditorTarget("object");
     return;
   }
 
@@ -1640,6 +1928,18 @@ export function initInputHandlers() {
       saveEditorToolbarPosition();
       return;
     }
+    if (state.mode === "editor") {
+      const toolbarHit = editorToolbarActionAt(
+        state.editor.cursorScreenX,
+        state.editor.cursorScreenY,
+      );
+      state.editor.toolbar.hoverLabel =
+        toolbarHit?.type === "action"
+          ? editorToolbarActionLabel(toolbarHit.id)
+          : "";
+    } else {
+      state.editor.toolbar.hoverLabel = "";
+    }
     if (!state.editor.drawing || state.mode !== "editor") return;
     const points = state.editor.activeStroke;
     const last = points[points.length - 1];
@@ -1657,6 +1957,14 @@ export function initInputHandlers() {
     void unlockMenuMusic();
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
+    const topBarAction = editorTopBarActionAt(
+      state.editor.cursorScreenX,
+      state.editor.cursorScreenY + EDITOR_TOP_BAR_HEIGHT,
+    );
+    if (topBarAction) {
+      performEditorTopBarAction(topBarAction);
+      return;
+    }
     if (state.editor.cursorY < 0) return;
     const toolbarHit = editorToolbarActionAt(
       state.editor.cursorScreenX,
@@ -1701,23 +2009,34 @@ export function initInputHandlers() {
     if (stroke.length < 2) return;
     const preset = getTrackPreset(state.editor.trackIndex);
     if (!preset.centerlineStrokes) preset.centerlineStrokes = [];
-    preset.centerlineStrokes.push(
-      stroke.map((p) => ({
-        x: p.x,
-        y: p.y,
-        halfWidth: Number.isFinite(p.halfWidth)
-          ? p.halfWidth
-          : EDITOR_DEFAULT_HALF_WIDTH,
-      })),
-    );
+    const nextStroke = stroke.map((p) => ({
+      x: p.x,
+      y: p.y,
+      halfWidth: Number.isFinite(p.halfWidth)
+        ? p.halfWidth
+        : EDITOR_DEFAULT_HALF_WIDTH,
+    }));
+    const selectedStrokeIndex =
+      state.editor.latestEditTarget?.kind === "stroke"
+        ? state.editor.latestEditTarget.strokeIndex
+        : null;
+    const insertIndex =
+      Number.isInteger(selectedStrokeIndex) &&
+      selectedStrokeIndex >= 0 &&
+      selectedStrokeIndex < preset.centerlineStrokes.length
+        ? selectedStrokeIndex + 1
+        : preset.centerlineStrokes.length;
+    preset.centerlineStrokes.splice(insertIndex, 0, nextStroke);
     if (!preset.editStack) preset.editStack = [];
+    shiftEditorStackForInsert(preset, "stroke", insertIndex);
     preset.editStack.push({
       kind: "stroke",
-      strokeIndex: preset.centerlineStrokes.length - 1,
+      strokeIndex: insertIndex,
     });
     state.editor.latestEditTarget = {
       kind: "stroke",
-      strokeIndex: preset.centerlineStrokes.length - 1,
+      strokeIndex: insertIndex,
     };
+    triggerEditorSelectionFlash("stroke", insertIndex);
   });
 }

@@ -67,8 +67,14 @@ export const state = {
       dragging: false,
       dragOffsetX: 0,
       dragOffsetY: 0,
+      hoverLabel: "",
     },
     latestEditTarget: null,
+    selectionFlash: {
+      kind: null,
+      index: -1,
+      time: 0,
+    },
   },
   snackbar: {
     text: "",
