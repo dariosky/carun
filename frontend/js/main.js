@@ -147,6 +147,8 @@ if (editTrackIdFromPath) {
   applyTrackPreset(state.selectedTrackIndex);
   setCurbSegments(initCurbSegments());
   resetRace();
+  state.raceReturn.mode = "trackSelect";
+  state.raceReturn.editorTrackIndex = null;
   state.mode = "racing";
   syncMenuMusicForMode(state.mode);
 } else if (trackSelectFromPath) {

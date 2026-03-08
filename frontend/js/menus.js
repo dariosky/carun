@@ -812,6 +812,25 @@ function returnToTrackSelect() {
   state.pauseMenuIndex = 0;
 }
 
+function setRaceReturnTarget(mode, editorTrackIndex = null) {
+  state.raceReturn.mode = mode;
+  state.raceReturn.editorTrackIndex =
+    mode === "editor" && Number.isInteger(editorTrackIndex)
+      ? editorTrackIndex
+      : null;
+}
+
+function returnFromRace() {
+  const { mode, editorTrackIndex } = state.raceReturn;
+  state.paused = false;
+  state.pauseMenuIndex = 0;
+  if (mode === "editor" && Number.isInteger(editorTrackIndex)) {
+    enterEditor(editorTrackIndex);
+    return;
+  }
+  returnToTrackSelect();
+}
+
 function updateEditorCursorFromEvent(event) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
@@ -839,6 +858,7 @@ function startEditorRace() {
   state.selectedTrackIndex = state.editor.trackIndex;
   applyTrackPreset(state.editor.trackIndex);
   setCurbSegments(initCurbSegments());
+  setRaceReturnTarget("editor", state.editor.trackIndex);
   state.mode = "racing";
   syncMenuMusicForMode(state.mode);
   resetRace();
@@ -1391,6 +1411,7 @@ function activateSelection() {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
       setCurbSegments(initCurbSegments());
+      setRaceReturnTarget("trackSelect");
       state.mode = "racing";
       syncMenuMusicForMode(state.mode);
       resetRace();
@@ -1448,10 +1469,14 @@ function activateSelection() {
   }
 
   if (state.mode === "racing" && state.finished) {
-    state.mode = "menu";
-    syncMenuMusicForMode(state.mode);
-    state.paused = false;
-    state.pauseMenuIndex = 0;
+    if (state.raceReturn.mode === "editor") {
+      returnFromRace();
+    } else {
+      state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
+      state.paused = false;
+      state.pauseMenuIndex = 0;
+    }
   }
 }
 
@@ -1586,10 +1611,13 @@ function onKeyDown(e) {
 
   if (state.mode === "racing") {
     if (state.finished && key === "escape") {
-      state.mode = "menu";
-      syncMenuMusicForMode(state.mode);
-      state.paused = false;
-      state.pauseMenuIndex = 0;
+      if (state.raceReturn.mode === "editor") returnFromRace();
+      else {
+        state.mode = "menu";
+        syncMenuMusicForMode(state.mode);
+        state.paused = false;
+        state.pauseMenuIndex = 0;
+      }
       clearRaceInputs();
       return;
     }
@@ -1622,7 +1650,7 @@ function onKeyDown(e) {
         if (state.pauseMenuIndex === 0) {
           state.paused = false;
         } else {
-          returnToTrackSelect();
+          returnFromRace();
           clearRaceInputs();
         }
       }

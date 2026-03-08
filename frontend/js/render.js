@@ -563,6 +563,21 @@ function drawTrackSurface(
     const drawCurbSegment = (segment, defaultSign) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? defaultSign;
+      const stripeScale = Number.isFinite(segment.stripeScale)
+        ? segment.stripeScale
+        : 1;
+      const scaledMinWidth = Math.max(
+        CURB_MIN_WIDTH,
+        CURB_MIN_WIDTH * stripeScale,
+      );
+      const scaledMaxWidth = Math.max(
+        scaledMinWidth + 1,
+        CURB_MAX_WIDTH * stripeScale,
+      );
+      if (segment.renderStyle === "dotted") {
+        drawDottedCurbGuide(pts);
+        return;
+      }
       const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
       const runs = splitCurbRenderRuns(pts, sign, trackDef, objects, widthCaps);
       if (runs.length) {
@@ -577,8 +592,8 @@ function drawTrackSurface(
             drawStripedCurb(
               run.points,
               sign,
-              CURB_MIN_WIDTH,
-              CURB_MAX_WIDTH,
+              scaledMinWidth,
+              scaledMaxWidth,
               CURB_STRIPE_LENGTH,
               run.widthCaps,
             );
@@ -589,8 +604,8 @@ function drawTrackSurface(
       drawStripedCurb(
         pts,
         sign,
-        CURB_MIN_WIDTH,
-        CURB_MAX_WIDTH,
+        scaledMinWidth,
+        scaledMaxWidth,
         CURB_STRIPE_LENGTH,
       );
     };
@@ -818,11 +833,11 @@ function finalizeCurbRenderRun(points, widthCaps, kind, minRunArcLength) {
 function drawDottedCurbGuide(points) {
   if (!Array.isArray(points) || points.length < 2) return;
   ctx.save();
-  ctx.strokeStyle = "rgba(248, 248, 248, 0.95)";
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+  ctx.lineWidth = 4;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.setLineDash([8, 10]);
+  ctx.setLineDash([6, 8]);
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   for (let i = 1; i < points.length; i++) {

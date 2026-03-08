@@ -32,6 +32,10 @@ export const state = {
     inFlight: false,
     completed: false,
   },
+  raceReturn: {
+    mode: "trackSelect",
+    editorTrackIndex: null,
+  },
   finishCelebration: {
     bestLap: false,
     bestRace: false,

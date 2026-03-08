@@ -671,7 +671,8 @@ function buildCurbSegments(trackDef = track) {
     throw new Error("Insufficient centerline samples for curb generation.");
   }
 
-  const curbOffsets = sampleCenterlineWidthSeries(trackDef, segmentCount).map(
+  const roadHalfWidths = sampleCenterlineWidthSeries(trackDef, segmentCount);
+  const curbOffsets = roadHalfWidths.map(
     (halfWidth) => halfWidth - trackDef.borderSize + CURB_OUTSET,
   );
   const outer = offsetLoopVariable(center, curbOffsets);
@@ -722,9 +723,20 @@ function buildCurbSegments(trackDef = track) {
     innerSpace[i] = Math.hypot(inner[i].x - c.x, inner[i].y - c.y);
   }
 
-  // Minimum space required for a curb to look good (must fit at least
-  // a few stripe widths without looking cramped).
-  const minCurbSpace = CURB_MAX_WIDTH * 1.5;
+  // Scale curb size by local road width and by turn intensity so narrow roads
+  // can still show smaller curbs while stronger turns keep more visual weight.
+  const minCurbSpaces = new Float64Array(segmentCount);
+  const curvatureRange = Math.max(curvatureThreshold * 2.1, 1e-6);
+  for (let i = 0; i < segmentCount; i++) {
+    const curvatureT = clamp(
+      (absCurvatures[i] - curvatureThreshold) / curvatureRange,
+      0,
+      1,
+    );
+    const widthByRoad = roadHalfWidths[i] * (0.28 + curvatureT * 0.24);
+    const targetWidth = clamp(widthByRoad, CURB_MIN_WIDTH, CURB_MAX_WIDTH);
+    minCurbSpaces[i] = targetWidth * (1.1 + (1 - curvatureT) * 0.45);
+  }
 
   // ── Per-sample curb eligibility (separate per side) ────────────────
   // A sample is eligible for a curb on a given side when:
@@ -733,8 +745,10 @@ function buildCurbSegments(trackDef = track) {
   //   3. The curvature sign means this side is the OUTSIDE of the turn
   //      (where curbs naturally sit and have room), OR the curvature is
   //      very high (hairpin) where both sides get curbs if space allows.
-  const outerEligible = new Uint8Array(segmentCount);
-  const innerEligible = new Uint8Array(segmentCount);
+  const outerPrimary = new Uint8Array(segmentCount);
+  const innerPrimary = new Uint8Array(segmentCount);
+  const outerSecondary = new Uint8Array(segmentCount);
+  const innerSecondary = new Uint8Array(segmentCount);
 
   // Higher threshold for "inside-of-turn" curbs (need stronger curvature
   // to justify a curb on the compressed side).
@@ -748,23 +762,17 @@ function buildCurbSegments(trackDef = track) {
     const outerIsOutside = signedCurvatures[i] > 0;
 
     // Outer side eligibility
-    if (outerSpace[i] >= minCurbSpace) {
-      if (
-        outerIsOutside ||
-        absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost
-      ) {
-        outerEligible[i] = 1;
-      }
+    if (outerSpace[i] >= minCurbSpaces[i]) {
+      if (outerIsOutside) outerPrimary[i] = 1;
+      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost)
+        outerSecondary[i] = 1;
     }
 
     // Inner side eligibility
-    if (innerSpace[i] >= minCurbSpace) {
-      if (
-        !outerIsOutside ||
-        absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost
-      ) {
-        innerEligible[i] = 1;
-      }
+    if (innerSpace[i] >= minCurbSpaces[i]) {
+      if (!outerIsOutside) innerPrimary[i] = 1;
+      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost)
+        innerSecondary[i] = 1;
     }
   }
 
@@ -781,14 +789,22 @@ function buildCurbSegments(trackDef = track) {
     return expanded;
   };
 
-  const outerExpanded = expandMask(outerEligible);
-  const innerExpanded = expandMask(innerEligible);
+  const outerPrimaryExpanded = expandMask(outerPrimary);
+  const innerPrimaryExpanded = expandMask(innerPrimary);
+  const outerSecondaryExpanded = expandMask(outerSecondary);
+  const innerSecondaryExpanded = expandMask(innerSecondary);
 
   // Re-check space constraint after expansion (don't let expansion push
   // curbs into cramped areas).
   for (let i = 0; i < segmentCount; i++) {
-    if (outerExpanded[i] && outerSpace[i] < minCurbSpace) outerExpanded[i] = 0;
-    if (innerExpanded[i] && innerSpace[i] < minCurbSpace) innerExpanded[i] = 0;
+    if (outerPrimaryExpanded[i] && outerSpace[i] < minCurbSpaces[i])
+      outerPrimaryExpanded[i] = 0;
+    if (innerPrimaryExpanded[i] && innerSpace[i] < minCurbSpaces[i])
+      innerPrimaryExpanded[i] = 0;
+    if (outerSecondaryExpanded[i] && outerSpace[i] < minCurbSpaces[i])
+      outerSecondaryExpanded[i] = 0;
+    if (innerSecondaryExpanded[i] && innerSpace[i] < minCurbSpaces[i])
+      innerSecondaryExpanded[i] = 0;
   }
 
   // ── Collect contiguous runs and filter by minimum arc length ───────
@@ -805,7 +821,7 @@ function buildCurbSegments(trackDef = track) {
   centroidX /= segmentCount;
   centroidY /= segmentCount;
 
-  const collectRuns = (points, mask, isOuter) => {
+  const collectRuns = (points, mask, isOuter, renderStyle, stripeScale = 1) => {
     const runs = [];
     const allTrue = mask.every((v) => v);
     if (allTrue) {
@@ -881,13 +897,19 @@ function buildCurbSegments(trackDef = track) {
         //   dot > 0 means sideSign=+1 normal points toward centroid → need +1.
         const outwardSign = isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
 
-        return { points: simplified, outwardSign };
+        return { points: simplified, outwardSign, renderStyle, stripeScale };
       });
   };
 
   return {
-    outer: collectRuns(outer, outerExpanded, true),
-    inner: collectRuns(inner, innerExpanded, false),
+    outer: [
+      ...collectRuns(outer, outerPrimaryExpanded, true, "striped", 1.15),
+      ...collectRuns(outer, outerSecondaryExpanded, true, "dotted", 1),
+    ],
+    inner: [
+      ...collectRuns(inner, innerPrimaryExpanded, false, "striped", 1.15),
+      ...collectRuns(inner, innerSecondaryExpanded, false, "dotted", 1),
+    ],
   };
 }
 
