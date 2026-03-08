@@ -72,9 +72,11 @@ setupDomStubs();
 const { state } = await import("../js/state.js");
 const {
   canDeleteTrackPreset,
+  getTrackPreset,
   importTrackPresetData,
   loadVisibleTracksFromApi,
   physicsConfig,
+  regenerateTrackFromCenterlineStrokes,
   removeTrackPresetById,
   saveTrackPresetToDb,
   trackOptions,
@@ -86,6 +88,36 @@ const {
   getSettingsHeaderRenderModel,
   getTrackSelectRenderModel,
 } = await import("../js/menus.js");
+
+function makeTrackData({
+  cx = 640,
+  cy = 360,
+  halfWidth = 60,
+  borderSize = 22,
+  worldScale = 1,
+  centerlineSmoothingMode = "light",
+} = {}) {
+  return {
+    cx,
+    cy,
+    borderSize,
+    centerlineHalfWidth: halfWidth,
+    centerlineWidthProfile: new Array(8).fill(halfWidth),
+    centerlineSmoothingMode,
+    worldScale,
+    startAngle: 0,
+    centerlineLoop: [
+      { x: cx - 220, y: cy - 120 },
+      { x: cx - 80, y: cy - 180 },
+      { x: cx + 90, y: cy - 170 },
+      { x: cx + 210, y: cy - 70 },
+      { x: cx + 220, y: cy + 120 },
+      { x: cx + 80, y: cy + 180 },
+      { x: cx - 90, y: cy + 170 },
+      { x: cx - 210, y: cy + 70 },
+    ],
+  };
+}
 
 test("main menu model switches items by auth state", () => {
   state.auth.authenticated = false;
@@ -204,17 +236,7 @@ test("track selector render model windows large catalogs and exposes admin actio
       isPublished: i !== 2,
       canDelete: false,
       fromDb: true,
-      track: {
-        cx: 640,
-        cy: 360,
-        outerA: 480,
-        outerB: 250,
-        innerA: 320,
-        innerB: 150,
-        warpOuter: [],
-        warpInner: [],
-        borderSize: 22,
-      },
+      track: makeTrackData(),
       checkpoints: [],
       worldObjects: [],
       centerlineStrokes: [],
@@ -264,17 +286,7 @@ test("visible tracks from API replace local presets and keep published flags", a
             track_payload_json: {
               id: "neve2",
               name: "NEVE 2",
-              track: {
-                cx: 640,
-                cy: 360,
-                outerA: 520,
-                outerB: 320,
-                innerA: 360,
-                innerB: 200,
-                warpOuter: [],
-                warpInner: [],
-                borderSize: 22,
-              },
+              track: makeTrackData({ cx: 640, cy: 360 }),
               checkpoints: [],
               worldObjects: [],
             },
@@ -290,17 +302,7 @@ test("visible tracks from API replace local presets and keep published flags", a
             track_payload_json: {
               id: "user-track",
               name: "USER TRACK",
-              track: {
-                cx: 630,
-                cy: 350,
-                outerA: 510,
-                outerB: 310,
-                innerA: 350,
-                innerB: 210,
-                warpOuter: [],
-                warpInner: [],
-                borderSize: 22,
-              },
+              track: makeTrackData({ cx: 630, cy: 350 }),
               checkpoints: [],
               worldObjects: [],
             },
@@ -317,7 +319,7 @@ test("visible tracks from API replace local presets and keep published flags", a
   }
 
   assert.equal(
-    trackOptions.some((t) => t.id === "classic"),
+    trackOptions.some((t) => t.id === "bootstrap"),
     false,
   );
   assert.equal(
@@ -348,17 +350,7 @@ test("saveTrackPresetToDb sends the submitted track name", async () => {
     isPublished: false,
     canDelete: false,
     fromDb: false,
-    track: {
-      cx: 640,
-      cy: 360,
-      outerA: 480,
-      outerB: 250,
-      innerA: 320,
-      innerB: 150,
-      warpOuter: [],
-      warpInner: [],
-      borderSize: 22,
-    },
+    track: makeTrackData(),
     checkpoints: [],
     worldObjects: [],
     centerlineStrokes: [],
@@ -419,17 +411,7 @@ test("saveTrackPresetToDb updates existing db tracks instead of creating duplica
     isPublished: false,
     canDelete: true,
     fromDb: true,
-    track: {
-      cx: 640,
-      cy: 360,
-      outerA: 480,
-      outerB: 250,
-      innerA: 320,
-      innerB: 150,
-      warpOuter: [],
-      warpInner: [],
-      borderSize: 22,
-    },
+    track: makeTrackData(),
     checkpoints: [],
     worldObjects: [],
     centerlineStrokes: [],
@@ -489,4 +471,60 @@ test("saveTrackPresetToDb updates existing db tracks instead of creating duplica
       removePersisted: false,
     });
   }
+});
+
+test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke order", () => {
+  const imported = importTrackPresetData({
+    id: "width-align-local",
+    name: "WIDTH ALIGN",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ centerlineSmoothingMode: "raw" }),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [
+      [
+        { x: 100, y: 100, halfWidth: 44 },
+        { x: 200, y: 100, halfWidth: 44 },
+        { x: 300, y: 100, halfWidth: 44 },
+      ],
+      [
+        { x: 300, y: 220, halfWidth: 64 },
+        { x: 300, y: 320, halfWidth: 64 },
+        { x: 300, y: 420, halfWidth: 64 },
+      ],
+      [
+        { x: 180, y: 420, halfWidth: 32 },
+        { x: 80, y: 420, halfWidth: 32 },
+        { x: 20, y: 360, halfWidth: 32 },
+      ],
+      [
+        { x: 20, y: 260, halfWidth: 52 },
+        { x: 60, y: 180, halfWidth: 52 },
+        { x: 100, y: 100, halfWidth: 52 },
+      ],
+    ],
+    editStack: [
+      { kind: "stroke", strokeIndex: 0 },
+      { kind: "stroke", strokeIndex: 1 },
+      { kind: "stroke", strokeIndex: 2 },
+      { kind: "stroke", strokeIndex: 3 },
+    ],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex(
+    (track) => track.id === imported.id,
+  );
+  assert.ok(trackIndex >= 0);
+  assert.equal(regenerateTrackFromCenterlineStrokes(trackIndex), true);
+
+  const rebuilt = getTrackPreset(trackIndex);
+  assert.ok(rebuilt.track.centerlineWidthProfile.length > 0);
+  assert.ok(Math.abs(rebuilt.track.centerlineWidthProfile[0] - 44) < 4);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
 });

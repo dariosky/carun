@@ -45,7 +45,6 @@ import {
   drawStripedCurb,
   getTrackWorldScale,
   initCurbSegments,
-  isCenterlineTrack,
   pointOnCenterLine,
   sampleCenterlineHalfWidth,
   sampleClosedPath,
@@ -110,15 +109,6 @@ function ensurePixelNoiseOverlay() {
   return pixelNoiseOverlay;
 }
 
-function warpProfileSignature(waves) {
-  let sum = 0;
-  for (let i = 0; i < waves.length; i++) {
-    const w = waves[i];
-    sum += (w.f || 0) * 1.7 + (w.amp || 0) * 17 + (w.phase || 0) * 9;
-  }
-  return Number(sum.toFixed(5));
-}
-
 function widthProfileSignature(values) {
   if (!Array.isArray(values) || !values.length) return 0;
   let sum = 0;
@@ -133,10 +123,6 @@ function trackSignature(trackDef, segments) {
     segments,
     cx: trackDef.cx,
     cy: trackDef.cy,
-    outerA: trackDef.outerA,
-    outerB: trackDef.outerB,
-    innerA: trackDef.innerA,
-    innerB: trackDef.innerB,
     borderSize: trackDef.borderSize,
     worldScale: getTrackWorldScale(trackDef),
     centerlineHalfWidth: trackDef.centerlineHalfWidth,
@@ -144,8 +130,6 @@ function trackSignature(trackDef, segments) {
     centerlineWidthLength: Array.isArray(trackDef.centerlineWidthProfile)
       ? trackDef.centerlineWidthProfile.length
       : 0,
-    warpOuterSig: warpProfileSignature(trackDef.warpOuter || []),
-    warpInnerSig: warpProfileSignature(trackDef.warpInner || []),
     centerlineLoopRef: trackDef.centerlineLoop,
     centerlineLoopLength: trackDef.centerlineLoop
       ? trackDef.centerlineLoop.length
@@ -159,17 +143,11 @@ function sameTrackSignature(a, b) {
     a.segments === b.segments &&
     a.cx === b.cx &&
     a.cy === b.cy &&
-    a.outerA === b.outerA &&
-    a.outerB === b.outerB &&
-    a.innerA === b.innerA &&
-    a.innerB === b.innerB &&
     a.borderSize === b.borderSize &&
     a.worldScale === b.worldScale &&
     a.centerlineHalfWidth === b.centerlineHalfWidth &&
     a.centerlineWidthSig === b.centerlineWidthSig &&
     a.centerlineWidthLength === b.centerlineWidthLength &&
-    a.warpOuterSig === b.warpOuterSig &&
-    a.warpInnerSig === b.warpInnerSig &&
     a.centerlineLoopRef === b.centerlineLoopRef &&
     a.centerlineLoopLength === b.centerlineLoopLength
   );
@@ -554,31 +532,25 @@ function drawTrackSurface(
 ) {
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
-  const centerlineTrack = isCenterlineTrack(trackDef);
+  if (!outerPath.length || !innerPath.length) return;
 
   ctx.save();
   ctx.beginPath();
-  if (centerlineTrack) {
-    const centerCount = boundaries.center?.length || 0;
-    const alignedCounts =
-      centerCount > 0 &&
-      centerCount === outerPath.length &&
-      centerCount === innerPath.length;
-    if (alignedCounts) {
-      for (let i = 0; i < centerCount; i++) {
-        const next = (i + 1) % centerCount;
-        ctx.moveTo(outerPath[i].x, outerPath[i].y);
-        ctx.lineTo(outerPath[next].x, outerPath[next].y);
-        ctx.lineTo(innerPath[next].x, innerPath[next].y);
-        ctx.lineTo(innerPath[i].x, innerPath[i].y);
-        ctx.closePath();
-      }
-      ctx.clip();
-    } else {
-      drawPath(outerPath);
-      drawPath([...innerPath].reverse());
-      ctx.clip("evenodd");
+  const centerCount = boundaries.center?.length || 0;
+  const alignedCounts =
+    centerCount > 0 &&
+    centerCount === outerPath.length &&
+    centerCount === innerPath.length;
+  if (alignedCounts) {
+    for (let i = 0; i < centerCount; i++) {
+      const next = (i + 1) % centerCount;
+      ctx.moveTo(outerPath[i].x, outerPath[i].y);
+      ctx.lineTo(outerPath[next].x, outerPath[next].y);
+      ctx.lineTo(innerPath[next].x, innerPath[next].y);
+      ctx.lineTo(innerPath[i].x, innerPath[i].y);
+      ctx.closePath();
     }
+    ctx.clip();
   } else {
     drawPath(outerPath);
     drawPath([...innerPath].reverse());
@@ -591,36 +563,28 @@ function drawTrackSurface(
     const drawCurbSegment = (segment, defaultSign) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? defaultSign;
-      if (centerlineTrack) {
-        const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
-        const runs = splitCurbRenderRuns(
-          pts,
-          sign,
-          trackDef,
-          objects,
-          widthCaps,
+      const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
+      const runs = splitCurbRenderRuns(pts, sign, trackDef, objects, widthCaps);
+      if (runs.length) {
+        const visibleRuns = runs.filter((run) =>
+          shouldRenderCurbSubsection(run, sign, trackDef, objects),
         );
-        if (runs.length) {
-          const visibleRuns = runs.filter((run) =>
-            shouldRenderCurbSubsection(run, sign, trackDef, objects),
-          );
-          const hasVisibleCurb = visibleRuns.some((run) => run.kind === "curb");
-          for (const run of visibleRuns) {
-            if (run.kind === "guide") {
-              if (hasVisibleCurb) drawDottedCurbGuide(run.points);
-            } else {
-              drawStripedCurb(
-                run.points,
-                sign,
-                CURB_MIN_WIDTH,
-                CURB_MAX_WIDTH,
-                CURB_STRIPE_LENGTH,
-                run.widthCaps,
-              );
-            }
+        const hasVisibleCurb = visibleRuns.some((run) => run.kind === "curb");
+        for (const run of visibleRuns) {
+          if (run.kind === "guide") {
+            if (hasVisibleCurb) drawDottedCurbGuide(run.points);
+          } else {
+            drawStripedCurb(
+              run.points,
+              sign,
+              CURB_MIN_WIDTH,
+              CURB_MAX_WIDTH,
+              CURB_STRIPE_LENGTH,
+              run.widthCaps,
+            );
           }
-          return;
         }
+        return;
       }
       drawStripedCurb(
         pts,
@@ -632,13 +596,6 @@ function drawTrackSurface(
     };
     segments.outer.forEach((segment) => drawCurbSegment(segment, -1));
     segments.inner.forEach((segment) => drawCurbSegment(segment, 1));
-  }
-
-  if (!centerlineTrack) {
-    ctx.fillStyle = "#247637";
-    ctx.beginPath();
-    drawPath(innerPath);
-    ctx.fill();
   }
 }
 
@@ -910,7 +867,12 @@ function drawTrack() {
   const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
   const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
   drawTrackSurface(track, boundaries, curbSegments, showCurbs, worldObjects);
-  if (state.mode === "editor" && !state.editor.showCurbs) {
+  if (
+    state.mode === "editor" &&
+    !state.editor.showCurbs &&
+    boundaries.outer.length &&
+    boundaries.inner.length
+  ) {
     drawEditorHiddenCurbOverlay(curbSegments);
     drawVertexAsterisks(boundaries.outer);
     drawVertexAsterisks(boundaries.inner);
@@ -918,9 +880,11 @@ function drawTrack() {
 
   drawDecor();
   drawSkidMarks();
-  drawRoadDetails(track);
-  drawStartLine(track);
-  drawCheckpointFlags();
+  if (boundaries.center.length) {
+    drawRoadDetails(track);
+    drawStartLine(track);
+    drawCheckpointFlags();
+  }
 }
 
 function drawCar() {
@@ -1485,22 +1449,32 @@ function drawEditorToolbar() {
     layout.objectValue.y + 18,
   );
 
-  for (const button of layout.objectActionButtons) {
-    drawToolbarButton(button, "", { active: false });
-    ctx.fillStyle = "#dff7ff";
-    ctx.font = "bold 18px Verdana";
-    ctx.textAlign = "center";
-    ctx.fillText(button.icon, button.x + button.width * 0.5, button.y + 19);
-  }
+  drawToolbarButton(layout.objectDeleteButton, "", { active: false });
+  ctx.fillStyle = "#dff7ff";
+  ctx.font = "bold 18px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    "🗑",
+    layout.objectDeleteButton.x + layout.objectDeleteButton.width * 0.5,
+    layout.objectDeleteButton.y + 19,
+  );
+  drawToolbarButton(layout.objectSizeDown, "−");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.font = "bold 12px Verdana";
+  ctx.fillText(
+    objectValue,
+    layout.objectSizeValue.x + layout.objectSizeValue.width * 0.5,
+    layout.objectSizeValue.y + 17,
+  );
+  drawToolbarButton(layout.objectSizeUp, "+");
+  drawToolbarButton(layout.rotateLeftButton, "↺");
+  drawToolbarButton(layout.rotateRightButton, "↻");
 
   ctx.fillStyle = "#9cb9c8";
   ctx.font = "bold 12px Verdana";
   ctx.textAlign = "left";
   ctx.fillText("ROAD", layout.roadHeader.x, layout.roadHeader.y + 15);
 
-  ctx.fillStyle = "#f0f8ff";
-  ctx.font = "bold 14px Verdana";
-  ctx.fillText("Pick", layout.roadSelectLabel.x, layout.roadSelectLabel.y + 18);
   drawToolbarButton(layout.roadPrev, "‹");
   drawToolbarButton(layout.roadNext, "›");
   ctx.fillStyle = "#d7ebf7";
@@ -1511,13 +1485,24 @@ function drawEditorToolbar() {
     layout.roadValue.y + 18,
   );
 
-  for (const button of layout.roadActionButtons) {
-    drawToolbarButton(button, "", { active: false });
-    ctx.fillStyle = "#dff7ff";
-    ctx.font = "bold 18px Verdana";
-    ctx.textAlign = "center";
-    ctx.fillText(button.icon, button.x + button.width * 0.5, button.y + 19);
-  }
+  drawToolbarButton(layout.roadDeleteButton, "", { active: false });
+  ctx.fillStyle = "#dff7ff";
+  ctx.font = "bold 18px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    "🗑",
+    layout.roadDeleteButton.x + layout.roadDeleteButton.width * 0.5,
+    layout.roadDeleteButton.y + 19,
+  );
+  drawToolbarButton(layout.roadSizeDown, "−");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.font = "bold 12px Verdana";
+  ctx.fillText(
+    roadWidth,
+    layout.roadSizeValue.x + layout.roadSizeValue.width * 0.5,
+    layout.roadSizeValue.y + 17,
+  );
+  drawToolbarButton(layout.roadSizeUp, "+");
 
   ctx.fillStyle = "#f0f8ff";
   ctx.textAlign = "left";
@@ -1994,6 +1979,16 @@ function drawEditorOverlay() {
   const preset = getTrackPreset(state.editor.trackIndex);
   const strokes = preset.centerlineStrokes || [];
   const connectedLoop = getConnectedCenterlinePoints(strokes);
+  const smoothedLoop = Array.isArray(preset.track?.centerlineLoop)
+    ? preset.track.centerlineLoop
+    : [];
+  if (state.editor.showCurbs && smoothedLoop.length >= 2) {
+    drawStroke(
+      [...smoothedLoop, smoothedLoop[0]],
+      "rgba(92, 255, 124, 0.95)",
+      3,
+    );
+  }
   drawStroke(connectedLoop, "rgba(96, 248, 255, 0.78)", 2);
   const flash = state.editor.selectionFlash;
   const selectedStrokeIndex =

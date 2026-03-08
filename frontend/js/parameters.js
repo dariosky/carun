@@ -103,28 +103,27 @@ export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
 export const DEFAULT_CENTERLINE_SMOOTHING_MODE = "light";
 const TRACK_PRESETS = [
   {
-    id: "classic",
-    name: "CLASSIC LOOP",
+    id: "bootstrap",
+    name: "BOOTSTRAP",
     track: {
       cx: WIDTH * 0.5,
       cy: HEIGHT * 0.53 - 60,
-      outerA: 500,
-      outerB: 265,
-      innerA: 315,
-      innerB: 145,
-      warpOuter: [
-        { f: 2, amp: 0.055, phase: 0.45 },
-        { f: 3, amp: 0.038, phase: -0.7 },
-        { f: 5, amp: 0.022, phase: 1.15 },
-      ],
-      warpInner: [
-        { f: 2, amp: 0.04, phase: 0.7 },
-        { f: 3, amp: 0.025, phase: -0.5 },
-        { f: 5, amp: 0.015, phase: 1.4 },
-      ],
       borderSize: 22,
+      centerlineLoop: [
+        { x: WIDTH * 0.19, y: HEIGHT * 0.27 },
+        { x: WIDTH * 0.34, y: HEIGHT * 0.17 },
+        { x: WIDTH * 0.62, y: HEIGHT * 0.17 },
+        { x: WIDTH * 0.81, y: HEIGHT * 0.31 },
+        { x: WIDTH * 0.8, y: HEIGHT * 0.64 },
+        { x: WIDTH * 0.63, y: HEIGHT * 0.79 },
+        { x: WIDTH * 0.34, y: HEIGHT * 0.79 },
+        { x: WIDTH * 0.18, y: HEIGHT * 0.61 },
+      ],
+      centerlineHalfWidth: 60,
+      centerlineWidthProfile: new Array(8).fill(60),
       worldScale: 1,
       centerlineSmoothingMode: DEFAULT_CENTERLINE_SMOOTHING_MODE,
+      startAngle: 0,
     },
     checkpoints: [
       { angle: 0 },
@@ -167,8 +166,6 @@ function cloneWorldObject(obj) {
 function cloneTrackData(trackData) {
   return {
     ...trackData,
-    warpOuter: (trackData.warpOuter || []).map((w) => ({ ...w })),
-    warpInner: (trackData.warpInner || []).map((w) => ({ ...w })),
     centerlineLoop: Array.isArray(trackData.centerlineLoop)
       ? trackData.centerlineLoop.map((p) => ({ x: p.x, y: p.y }))
       : null,
@@ -246,19 +243,10 @@ function normalizeTrackPresetData(raw) {
   if (!id) return null;
 
   const safeTrack = cloneTrackData(raw.track || {});
-  if (
-    !Number.isFinite(safeTrack.cx) ||
-    !Number.isFinite(safeTrack.cy) ||
-    !Number.isFinite(safeTrack.outerA) ||
-    !Number.isFinite(safeTrack.outerB) ||
-    !Number.isFinite(safeTrack.innerA) ||
-    !Number.isFinite(safeTrack.innerB)
-  ) {
+  if (!Number.isFinite(safeTrack.cx) || !Number.isFinite(safeTrack.cy)) {
     return null;
   }
 
-  if (!Array.isArray(safeTrack.warpOuter)) safeTrack.warpOuter = [];
-  if (!Array.isArray(safeTrack.warpInner)) safeTrack.warpInner = [];
   safeTrack.borderSize = Number.isFinite(safeTrack.borderSize)
     ? safeTrack.borderSize
     : 22;
@@ -462,8 +450,16 @@ rebuildTrackOptions();
 
 export const track = {
   ...activePreset.track,
-  warpOuter: activePreset.track.warpOuter.map((w) => ({ ...w })),
-  warpInner: activePreset.track.warpInner.map((w) => ({ ...w })),
+  centerlineLoop: Array.isArray(activePreset.track.centerlineLoop)
+    ? activePreset.track.centerlineLoop.map((p) => ({ x: p.x, y: p.y }))
+    : null,
+  centerlineWidthProfile: Array.isArray(
+    activePreset.track.centerlineWidthProfile,
+  )
+    ? activePreset.track.centerlineWidthProfile.map(
+        (value) => Number(value) || 0,
+      )
+    : null,
 };
 
 export const checkpoints = activePreset.checkpoints.map((cp) => ({ ...cp }));
@@ -552,8 +548,6 @@ export function applyTrackPreset(index) {
     : null;
   Object.assign(track, {
     ...preset.track,
-    warpOuter: preset.track.warpOuter.map((w) => ({ ...w })),
-    warpInner: preset.track.warpInner.map((w) => ({ ...w })),
     centerlineLoop,
     centerlineWidthProfile: Array.isArray(preset.track.centerlineWidthProfile)
       ? preset.track.centerlineWidthProfile.map((value) => Number(value) || 0)
@@ -565,12 +559,6 @@ export function applyTrackPreset(index) {
 
   worldObjects.length = 0;
   worldObjects.push(...preset.worldObjects.map(cloneWorldObject));
-}
-
-function ellipseRadiusAtAngle(angle, a, b) {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  return 1 / Math.sqrt((c * c) / (a * a) + (s * s) / (b * b));
 }
 
 function clamp(value, min, max) {
@@ -897,92 +885,54 @@ function offsetClosedLoop(points, offset, miterLimit = 2.6) {
   return out;
 }
 
-function solveLinearSystem(matrix, values) {
-  const n = values.length;
-  const a = matrix.map((row) => [...row]);
-  const b = [...values];
+function offsetClosedLoopVariable(points, offsets, miterLimit = 2.6) {
+  if (!Array.isArray(points) || points.length < 3) return [];
+  const n = points.length;
+  const orientation = signedLoopArea(points) < 0 ? 1 : -1;
+  const out = new Array(n);
 
-  for (let col = 0; col < n; col++) {
-    let pivot = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
-    }
-    if (Math.abs(a[pivot][col]) < 1e-8) continue;
-    if (pivot !== col) {
-      [a[col], a[pivot]] = [a[pivot], a[col]];
-      [b[col], b[pivot]] = [b[pivot], b[col]];
-    }
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n];
+    const curr = points[i];
+    const next = points[(i + 1) % n];
+    const inDir = normalizeVec(curr.x - prev.x, curr.y - prev.y);
+    const outDir = normalizeVec(next.x - curr.x, next.y - curr.y);
+    const inNormal = { x: -inDir.y, y: inDir.x };
+    const outNormal = { x: -outDir.y, y: outDir.x };
+    const signedOffset = (offsets[i] || 0) * orientation;
 
-    const invPivot = 1 / a[col][col];
-    for (let j = col; j < n; j++) a[col][j] *= invPivot;
-    b[col] *= invPivot;
+    const inPoint = {
+      x: curr.x + inNormal.x * signedOffset,
+      y: curr.y + inNormal.y * signedOffset,
+    };
+    const outPoint = {
+      x: curr.x + outNormal.x * signedOffset,
+      y: curr.y + outNormal.y * signedOffset,
+    };
 
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const factor = a[row][col];
-      if (Math.abs(factor) < 1e-10) continue;
-      for (let j = col; j < n; j++) a[row][j] -= factor * a[col][j];
-      b[row] -= factor * b[col];
-    }
-  }
-
-  return b;
-}
-
-function fitWarpProfile(angles, scaleValues, freqs, ampLimit = 0.24) {
-  const termCount = freqs.length * 2;
-  const ata = Array.from({ length: termCount }, () =>
-    new Array(termCount).fill(0),
-  );
-  const atb = new Array(termCount).fill(0);
-
-  for (let i = 0; i < angles.length; i++) {
-    const angle = angles[i];
-    const y = (scaleValues[i] || 1) - 1;
-    const row = [];
-    for (const f of freqs) {
-      row.push(Math.sin(angle * f));
-      row.push(Math.cos(angle * f));
-    }
-
-    for (let r = 0; r < termCount; r++) {
-      atb[r] += row[r] * y;
-      for (let c = 0; c < termCount; c++) {
-        ata[r][c] += row[r] * row[c];
+    const candidate = intersectLines(inPoint, inDir, outPoint, outDir);
+    if (candidate) {
+      const miterLen = Math.hypot(candidate.x - curr.x, candidate.y - curr.y);
+      if (miterLen <= Math.abs(signedOffset) * miterLimit + 1e-6) {
+        out[i] = candidate;
+        continue;
       }
     }
+
+    const avg = normalizeVec(
+      inNormal.x + outNormal.x,
+      inNormal.y + outNormal.y,
+    );
+    const fallbackNormal =
+      Math.hypot(avg.x, avg.y) > 1e-4
+        ? avg
+        : normalizeVec(-(inDir.y + outDir.y), inDir.x + outDir.x);
+    out[i] = {
+      x: curr.x + fallbackNormal.x * signedOffset,
+      y: curr.y + fallbackNormal.y * signedOffset,
+    };
   }
-
-  const coeffs = solveLinearSystem(ata, atb);
-  const profile = [];
-  for (let i = 0; i < freqs.length; i++) {
-    const sinCoeff = coeffs[i * 2] || 0;
-    const cosCoeff = coeffs[i * 2 + 1] || 0;
-    const amp = clamp(Math.hypot(sinCoeff, cosCoeff), 0, ampLimit);
-    const phase = amp > 1e-6 ? Math.atan2(cosCoeff, sinCoeff) : 0;
-    profile.push({
-      f: freqs[i],
-      amp: Number(amp.toFixed(4)),
-      phase: Number(phase.toFixed(4)),
-    });
-  }
-  return profile;
-}
-
-function raySegmentDistance(cx, cy, angle, a, b) {
-  const dx = Math.cos(angle);
-  const dy = Math.sin(angle);
-  const sx = b.x - a.x;
-  const sy = b.y - a.y;
-  const det = dx * sy - dy * sx;
-  if (Math.abs(det) < 1e-8) return null;
-
-  const acx = a.x - cx;
-  const acy = a.y - cy;
-  const t = (acx * sy - acy * sx) / det;
-  const u = (acx * dy - acy * dx) / det;
-  if (t < 0 || u < 0 || u > 1) return null;
-  return t;
+  return out;
 }
 
 function connectedSegmentsFromStrokes(strokes) {
@@ -1063,13 +1013,8 @@ export function regenerateTrackFromCenterlineStrokes(index) {
       const rotated = loopPoints
         .slice(bestIdx)
         .concat(loopPoints.slice(0, bestIdx));
-      const rotatedWidths = rawHalfWidths
-        .slice(bestIdx)
-        .concat(rawHalfWidths.slice(0, bestIdx));
       loopPoints.length = 0;
       loopPoints.push(...rotated);
-      rawHalfWidths.length = 0;
-      rawHalfWidths.push(...rotatedWidths);
     }
   }
   if (loopPoints.length < 20) return false;
@@ -1110,63 +1055,10 @@ export function regenerateTrackFromCenterlineStrokes(index) {
     24,
     72,
   );
-  const outerLoop = offsetClosedLoop(loopPoints, halfWidth);
-  const innerLoop = offsetClosedLoop(loopPoints, -halfWidth);
-  const outerA = Math.max(...outerLoop.map((p) => Math.abs(p.x - cx)));
-  const outerB = Math.max(...outerLoop.map((p) => Math.abs(p.y - cy)));
-  const innerA = Math.max(...innerLoop.map((p) => Math.abs(p.x - cx)));
-  const innerB = Math.max(...innerLoop.map((p) => Math.abs(p.y - cy)));
-
-  const sampleCount = 180;
-  const angles = [];
-  const outerScales = [];
-  const innerScales = [];
-  const fallbackOuter = Math.max(outerA, outerB);
-  const fallbackInner = Math.max(24, Math.max(innerA, innerB));
-
-  for (let i = 0; i < sampleCount; i++) {
-    const angle = (i / sampleCount) * Math.PI * 2;
-    angles.push(angle);
-    let outerTarget = null;
-    let innerTarget = null;
-    for (let j = 0; j < outerLoop.length; j++) {
-      const a = outerLoop[j];
-      const b = outerLoop[(j + 1) % outerLoop.length];
-      const t = raySegmentDistance(cx, cy, angle, a, b);
-      if (t === null) continue;
-      if (outerTarget === null || t > outerTarget) outerTarget = t;
-    }
-    for (let j = 0; j < innerLoop.length; j++) {
-      const a = innerLoop[j];
-      const b = innerLoop[(j + 1) % innerLoop.length];
-      const t = raySegmentDistance(cx, cy, angle, a, b);
-      if (t === null) continue;
-      if (innerTarget === null || t < innerTarget) innerTarget = t;
-    }
-
-    outerTarget = outerTarget === null ? fallbackOuter : outerTarget;
-    innerTarget = innerTarget === null ? fallbackInner : innerTarget;
-    const clampedInnerTarget = Math.max(
-      24,
-      Math.min(innerTarget, outerTarget - 12),
-    );
-    const outerBase = ellipseRadiusAtAngle(angle, outerA, outerB);
-    const innerBase = ellipseRadiusAtAngle(angle, innerA, innerB);
-    outerScales.push(outerTarget / Math.max(outerBase, 1e-6));
-    innerScales.push(clampedInnerTarget / Math.max(innerBase, 1e-6));
-  }
-
-  const frequencies = [1, 2, 3, 5, 7];
   preset.track = {
     ...preset.track,
     cx: Number(cx.toFixed(1)),
     cy: Number(cy.toFixed(1)),
-    outerA: Number(outerA.toFixed(1)),
-    outerB: Number(outerB.toFixed(1)),
-    innerA: Number(innerA.toFixed(1)),
-    innerB: Number(innerB.toFixed(1)),
-    warpOuter: fitWarpProfile(angles, outerScales, frequencies, 0.22),
-    warpInner: fitWarpProfile(angles, innerScales, frequencies, 0.24),
     centerlineHalfWidth: Number(halfWidth.toFixed(1)),
     centerlineWidthProfile: rawHalfWidths.map((value) =>
       Number(value.toFixed(1)),

@@ -16,20 +16,6 @@ import {
   signedLoopArea,
 } from "./polygon-clean.js";
 
-export function ellipseRadiusAtAngle(angle, a, b) {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  return 1 / Math.sqrt((c * c) / (a * a) + (s * s) / (b * b));
-}
-
-export function warpScale(angle, profile) {
-  let wobble = 1;
-  for (const wave of profile) {
-    wobble += wave.amp * Math.sin(angle * wave.f + wave.phase);
-  }
-  return wobble;
-}
-
 function normalizeAngle(angle) {
   let a = angle % (Math.PI * 2);
   if (a < 0) a += Math.PI * 2;
@@ -55,10 +41,6 @@ function getCenterlineWidthProfile(trackDef = track) {
   return null;
 }
 
-export function isCenterlineTrack(trackDef = track) {
-  return !!getCenterlineLoop(trackDef);
-}
-
 export function getTrackWorldScale(trackDef = track) {
   const raw = Number(trackDef?.worldScale);
   if (!Number.isFinite(raw)) return 1;
@@ -67,7 +49,7 @@ export function getTrackWorldScale(trackDef = track) {
 
 export function trackStartAngle(trackDef = track) {
   if (Number.isFinite(trackDef.startAngle)) return trackDef.startAngle;
-  return isCenterlineTrack(trackDef) ? 0 : Math.PI * 0.5;
+  return 0;
 }
 
 function catmullRomPoint(p0, p1, p2, p3, t) {
@@ -382,78 +364,36 @@ function nearestDistanceAndProgressToLoop(x, y, loop) {
   return { distance: Math.sqrt(bestDistSq), progress: bestProgress };
 }
 
-export function trackRadiiAtAngle(angle, trackDef = track) {
-  const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    const progress = normalizeAngle(angle) / (Math.PI * 2);
-    const centerPoint = pointOnLoopProgress(loop, progress);
-    const centerRadius = Math.hypot(
-      centerPoint.x - trackDef.cx,
-      centerPoint.y - trackDef.cy,
-    );
-    const halfWidth = Math.max(24, trackDef.centerlineHalfWidth || 90);
-    return {
-      outer: centerRadius + halfWidth,
-      inner: Math.max(8, centerRadius - halfWidth),
-    };
-  }
-
-  const outer =
-    ellipseRadiusAtAngle(angle, trackDef.outerA, trackDef.outerB) *
-    warpScale(angle, trackDef.warpOuter);
-  const inner =
-    ellipseRadiusAtAngle(angle, trackDef.innerA, trackDef.innerB) *
-    warpScale(angle, trackDef.warpInner);
-  return { outer, inner };
-}
-
-export function pointOnTrackRadius(angle, radius, trackDef = track) {
-  return {
-    x: trackDef.cx + Math.cos(angle) * radius,
-    y: trackDef.cy + Math.sin(angle) * radius,
-  };
-}
-
 export function pointOnCenterLine(angle, trackDef = track) {
   const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    const progress = normalizeAngle(angle) / (Math.PI * 2);
-    return pointOnLoopProgress(loop, progress);
-  }
-  const radii = trackRadiiAtAngle(angle, trackDef);
-  return pointOnTrackRadius(angle, (radii.outer + radii.inner) * 0.5, trackDef);
+  if (!loop) return { x: trackDef.cx, y: trackDef.cy };
+  const progress = normalizeAngle(angle) / (Math.PI * 2);
+  return pointOnLoopProgress(loop, progress);
 }
 
 export function trackProgressAtPoint(x, y, trackDef = track) {
   const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    return nearestDistanceAndProgressToLoop(x, y, loop).progress;
-  }
-
-  const angle = normalizeAngle(Math.atan2(y - trackDef.cy, x - trackDef.cx));
-  return angle / (Math.PI * 2);
+  if (!loop) return 0;
+  return nearestDistanceAndProgressToLoop(x, y, loop).progress;
 }
 
 export function trackFrameAtAngle(angle, trackDef = track) {
   const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    const progress = normalizeAngle(angle) / (Math.PI * 2);
-    const point = pointOnLoopProgress(loop, progress);
-    const tangent = tangentOnLoopProgress(loop, progress);
-    const normal = { x: -tangent.y, y: tangent.x };
-    const roadWidth = sampleCenterlineHalfWidth(progress, trackDef) * 2;
-    return { point, tangent, normal, roadWidth };
+  if (!loop) {
+    const roadWidth = Math.max(24, trackDef.centerlineHalfWidth || 60) * 2;
+    return {
+      point: { x: trackDef.cx, y: trackDef.cy },
+      tangent: { x: 1, y: 0 },
+      normal: { x: 0, y: 1 },
+      roadWidth,
+    };
   }
-
-  const radii = trackRadiiAtAngle(angle, trackDef);
-  const point = pointOnTrackRadius(
-    angle,
-    (radii.outer + radii.inner) * 0.5,
-    trackDef,
-  );
-  const tangent = { x: -Math.sin(angle), y: Math.cos(angle) };
-  const normal = { x: Math.cos(angle), y: Math.sin(angle) };
-  return { point, tangent, normal, roadWidth: radii.outer - radii.inner };
+  const progress = normalizeAngle(angle) / (Math.PI * 2);
+  const point = pointOnLoopProgress(loop, progress);
+  const tangent = tangentOnLoopProgress(loop, progress);
+  const normal = { x: -tangent.y, y: tangent.x };
+  const roadWidth = sampleCenterlineHalfWidth(progress, trackDef) * 2;
+  return { point, tangent, normal, roadWidth };
 }
 
 export function sampleCenterlineHalfWidth(progress, trackDef = track) {
@@ -530,34 +470,21 @@ function offsetLoopVariable(loop, offsets, miterLimit = 2.6) {
 
 export function trackBoundaryPaths(trackDef = track, segments = 220) {
   const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    const sampledCenter = sampleLoop(loop, Math.max(segments, loop.length));
-    const widthSamples = sampleCenterlineWidthSeries(
-      trackDef,
-      sampledCenter.length,
-    );
-    const outer = offsetLoopVariable(sampledCenter, widthSamples);
-    const inner = offsetLoopVariable(
-      sampledCenter,
-      widthSamples.map((value) => -value),
-    );
-    return {
-      center: sampledCenter,
-      outer,
-      inner,
-    };
-  }
-
+  if (!loop) return { center: [], outer: [], inner: [] };
+  const sampledCenter = sampleLoop(loop, Math.max(segments, loop.length));
+  const widthSamples = sampleCenterlineWidthSeries(
+    trackDef,
+    sampledCenter.length,
+  );
+  const outer = offsetLoopVariable(sampledCenter, widthSamples);
+  const inner = offsetLoopVariable(
+    sampledCenter,
+    widthSamples.map((value) => -value),
+  );
   return {
-    center: sampleClosedPath((a) => pointOnCenterLine(a, trackDef), segments),
-    outer: sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(a, radii.outer, trackDef);
-    }, segments),
-    inner: sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(a, radii.inner, trackDef);
-    }, segments),
+    center: sampledCenter,
+    outer,
+    inner,
   };
 }
 
@@ -580,7 +507,13 @@ export function drawPath(points) {
 }
 
 export function blobRadius(ellipseX, ellipseY, angle, seed = 0) {
-  const base = ellipseRadiusAtAngle(angle, ellipseX, ellipseY);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const base =
+    1 /
+    Math.sqrt(
+      (c * c) / (ellipseX * ellipseX) + (s * s) / (ellipseY * ellipseY),
+    );
   const wobble =
     1 +
     0.16 * Math.sin(angle * 2 + seed) +
@@ -738,35 +671,14 @@ function buildCurbSegments(trackDef = track) {
     throw new Error("Insufficient centerline samples for curb generation.");
   }
 
-  let outer;
-  let inner;
-  if (isCenterlineTrack(trackDef)) {
-    const curbOffsets = sampleCenterlineWidthSeries(trackDef, segmentCount).map(
-      (halfWidth) => halfWidth - trackDef.borderSize + CURB_OUTSET,
-    );
-    outer = offsetLoopVariable(center, curbOffsets);
-    inner = offsetLoopVariable(
-      center,
-      curbOffsets.map((value) => -value),
-    );
-  } else {
-    outer = sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(
-        a,
-        radii.outer - trackDef.borderSize + CURB_OUTSET,
-        trackDef,
-      );
-    }, segmentCount);
-    inner = sampleClosedPath((a) => {
-      const radii = trackRadiiAtAngle(a, trackDef);
-      return pointOnTrackRadius(
-        a,
-        radii.inner + trackDef.borderSize - CURB_OUTSET,
-        trackDef,
-      );
-    }, segmentCount);
-  }
+  const curbOffsets = sampleCenterlineWidthSeries(trackDef, segmentCount).map(
+    (halfWidth) => halfWidth - trackDef.borderSize + CURB_OUTSET,
+  );
+  const outer = offsetLoopVariable(center, curbOffsets);
+  const inner = offsetLoopVariable(
+    center,
+    curbOffsets.map((value) => -value),
+  );
 
   // ── Per-sample curvature analysis ──────────────────────────────────
   // Compute signed curvature at each centerline sample.  Positive =
@@ -980,96 +892,65 @@ function buildCurbSegments(trackDef = track) {
 }
 
 function buildFullCurbSegments(trackDef = track) {
-  if (isCenterlineTrack(trackDef)) {
-    const center = trackBoundaryPaths(trackDef, 420).center;
-    const curbOffsets = sampleCenterlineWidthSeries(
-      trackDef,
-      center.length,
-    ).map((halfWidth) => halfWidth - trackDef.borderSize + CURB_OUTSET);
-    const maxHalfWidth = Math.max(...curbOffsets, 24);
-    const simplifyParams = {
-      minEdgeLen: Math.max(1.2, maxHalfWidth * 0.035),
-      collinearTol: Math.max(1.4, maxHalfWidth * 0.045),
-      rdpTolerance: Math.max(1.8, maxHalfWidth * 0.07),
-      clusterRadius: Math.max(4, maxHalfWidth * 0.06),
-      maxPasses: 6,
-      minVertices: Math.max(14, Math.floor(center.length * 0.08)),
-    };
-    const outerLoop = simplifyOffsetClosedLoop(
-      offsetLoopVariable(center, curbOffsets),
-      simplifyParams,
-    );
-    const innerLoop = simplifyOffsetClosedLoop(
-      offsetLoopVariable(
-        center,
-        curbOffsets.map((value) => -value),
-      ),
-      simplifyParams,
-    );
+  const center = trackBoundaryPaths(trackDef, 420).center;
+  if (!center.length) return { outer: [], inner: [] };
+  const curbOffsets = sampleCenterlineWidthSeries(trackDef, center.length).map(
+    (halfWidth) => halfWidth - trackDef.borderSize + CURB_OUTSET,
+  );
+  const maxHalfWidth = Math.max(...curbOffsets, 24);
+  const simplifyParams = {
+    minEdgeLen: Math.max(1.2, maxHalfWidth * 0.035),
+    collinearTol: Math.max(1.4, maxHalfWidth * 0.045),
+    rdpTolerance: Math.max(1.8, maxHalfWidth * 0.07),
+    clusterRadius: Math.max(4, maxHalfWidth * 0.06),
+    maxPasses: 6,
+    minVertices: Math.max(14, Math.floor(center.length * 0.08)),
+  };
+  const outerLoop = simplifyOffsetClosedLoop(
+    offsetLoopVariable(center, curbOffsets),
+    simplifyParams,
+  );
+  const innerLoop = simplifyOffsetClosedLoop(
+    offsetLoopVariable(
+      center,
+      curbOffsets.map((value) => -value),
+    ),
+    simplifyParams,
+  );
 
-    // Compute outward signs using the centerline centroid.
-    // isOuter=true → extrude away from centroid; false → toward centroid.
-    const computeOutwardSign = (loop, isOuter) => {
-      const n = loop.length;
-      let cx = 0,
-        cy = 0;
-      for (let i = 0; i < center.length; i++) {
-        cx += center[i].x;
-        cy += center[i].y;
-      }
-      cx /= center.length;
-      cy /= center.length;
-      const midIdx = Math.floor(n / 2);
-      const pA = loop[midIdx];
-      const pB = loop[(midIdx + 1) % n];
-      const dx = pB.x - pA.x,
-        dy = pB.y - pA.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -(dy / len),
-        ny = dx / len; // sideSign=+1 normal
-      const dot = nx * (cx - pA.x) + ny * (cy - pA.y);
-      return isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
-    };
+  const computeOutwardSign = (loop, isOuter) => {
+    const n = loop.length;
+    let cx = 0,
+      cy = 0;
+    for (let i = 0; i < center.length; i++) {
+      cx += center[i].x;
+      cy += center[i].y;
+    }
+    cx /= center.length;
+    cy /= center.length;
+    const midIdx = Math.floor(n / 2);
+    const pA = loop[midIdx];
+    const pB = loop[(midIdx + 1) % n];
+    const dx = pB.x - pA.x;
+    const dy = pB.y - pA.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -(dy / len);
+    const ny = dx / len;
+    const dot = nx * (cx - pA.x) + ny * (cy - pA.y);
+    return isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
+  };
 
-    return {
-      outer: [
-        { points: outerLoop, outwardSign: computeOutwardSign(outerLoop, true) },
-      ],
-      inner: [
-        {
-          points: innerLoop,
-          outwardSign: computeOutwardSign(innerLoop, false),
-        },
-      ],
-    };
-  }
-
-  // Elliptical track: outer curbs extrude outward (-1), inner extrude inward (+1).
   return {
     outer: [
       {
-        points: sampleClosedPath((a) => {
-          const radii = trackRadiiAtAngle(a, trackDef);
-          return pointOnTrackRadius(
-            a,
-            radii.outer - trackDef.borderSize + CURB_OUTSET,
-            trackDef,
-          );
-        }),
-        outwardSign: -1,
+        points: outerLoop,
+        outwardSign: computeOutwardSign(outerLoop, true),
       },
     ],
     inner: [
       {
-        points: sampleClosedPath((a) => {
-          const radii = trackRadiiAtAngle(a, trackDef);
-          return pointOnTrackRadius(
-            a,
-            radii.inner + trackDef.borderSize - CURB_OUTSET,
-            trackDef,
-          );
-        }),
-        outwardSign: 1,
+        points: innerLoop,
+        outwardSign: computeOutwardSign(innerLoop, false),
       },
     ],
   };
@@ -1089,29 +970,11 @@ export function initCurbSegments(trackDef = track) {
 
 function getSurface(x, y, trackDef = track) {
   const loop = getCenterlineLoop(trackDef);
-  if (loop) {
-    const { distance, progress } = nearestDistanceAndProgressToLoop(x, y, loop);
-    const halfWidth = sampleCenterlineHalfWidth(progress, trackDef);
-    if (distance > halfWidth) return "grass";
-    if (distance > halfWidth - trackDef.borderSize) return "curb";
-    return "asphalt";
-  }
-
-  const dx = x - trackDef.cx;
-  const dy = y - trackDef.cy;
-  const angle = Math.atan2(dy, dx);
-  const dist = Math.hypot(dx, dy);
-  const radii = trackRadiiAtAngle(angle, trackDef);
-
-  if (dist > radii.outer) return "grass";
-  if (dist < radii.inner) return "innerGrass";
-
-  if (
-    dist > radii.outer - trackDef.borderSize ||
-    dist < radii.inner + trackDef.borderSize
-  )
-    return "curb";
-
+  if (!loop) return "grass";
+  const { distance, progress } = nearestDistanceAndProgressToLoop(x, y, loop);
+  const halfWidth = sampleCenterlineHalfWidth(progress, trackDef);
+  if (distance > halfWidth) return "grass";
+  if (distance > halfWidth - trackDef.borderSize) return "curb";
   return "asphalt";
 }
 

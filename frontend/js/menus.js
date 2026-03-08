@@ -239,37 +239,15 @@ export function getEditorToolbarLayout() {
   }));
   const objectSelectTop = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT + 8;
   const objectActionTop = objectSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
-  const objectActionGap = 8;
-  const objectActionButtonWidth = (panel.width - 24 - objectActionGap * 4) / 5;
-  const objectActionButtons = [
-    { id: "objectDelete", icon: "🗑️", label: "Delete" },
-    { id: "objectSizeDown", icon: "−", label: "Size -" },
-    { id: "objectSizeUp", icon: "+", label: "Size +" },
-    { id: "rotateLeft", icon: "↩", label: "Rotate Left" },
-    { id: "rotateRight", icon: "↪", label: "Rotate Right" },
-  ].map((button, index) => ({
-    ...button,
-    x: panel.x + 12 + index * (objectActionButtonWidth + objectActionGap),
-    y: objectActionTop + 2,
-    width: objectActionButtonWidth,
-    height: 24,
-  }));
+  const actionY = objectActionTop + 2;
+  const iconButtonWidth = 34;
+  const iconGap = 8;
+  const stepperWidth = 94;
   const roadHeaderTop = objectActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
   const roadSelectTop = roadHeaderTop + EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT + 4;
   const roadActionTop = roadSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
-  const roadActionGap = 8;
-  const roadActionButtonWidth = (panel.width - 24 - roadActionGap * 2) / 3;
-  const roadActionButtons = [
-    { id: "roadDelete", icon: "🗑️", label: "Delete Segment" },
-    { id: "roadSizeDown", icon: "−", label: "Width -" },
-    { id: "roadSizeUp", icon: "+", label: "Width +" },
-  ].map((button, index) => ({
-    ...button,
-    x: panel.x + 12 + index * (roadActionButtonWidth + roadActionGap),
-    y: roadActionTop + 2,
-    width: roadActionButtonWidth,
-    height: 24,
-  }));
+  const roadActionY = roadActionTop + 2;
+  const roadStepperWidth = 138;
   const roadSmoothTop = roadActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
   const zoomTop = roadSmoothTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
   return {
@@ -277,7 +255,6 @@ export function getEditorToolbarLayout() {
     titleBar,
     objectHeader,
     objectToolButtons,
-    objectActionButtons,
     objectPrev: {
       x: panel.x + 14,
       y: objectSelectTop + 2,
@@ -296,20 +273,63 @@ export function getEditorToolbarLayout() {
       width: panel.width - 104,
       height: 28,
     },
+    objectDeleteButton: {
+      x: panel.x + 12,
+      y: actionY,
+      width: iconButtonWidth,
+      height: 24,
+      id: "objectDelete",
+    },
+    objectSizeDown: {
+      x: panel.x + 12 + iconButtonWidth + iconGap,
+      y: actionY,
+      width: 28,
+      height: 24,
+      id: "objectSizeDown",
+    },
+    objectSizeValue: {
+      x: panel.x + 12 + iconButtonWidth + iconGap + 32,
+      y: objectActionTop,
+      width: stepperWidth - 64,
+      height: 28,
+    },
+    objectSizeUp: {
+      x: panel.x + 12 + iconButtonWidth + iconGap + stepperWidth - 28,
+      y: actionY,
+      width: 28,
+      height: 24,
+      id: "objectSizeUp",
+    },
+    rotateLeftButton: {
+      x: panel.x + 12 + iconButtonWidth + iconGap + stepperWidth + iconGap,
+      y: actionY,
+      width: iconButtonWidth,
+      height: 24,
+      id: "rotateLeft",
+    },
+    rotateRightButton: {
+      x:
+        panel.x +
+        12 +
+        iconButtonWidth +
+        iconGap +
+        stepperWidth +
+        iconGap +
+        iconButtonWidth +
+        iconGap,
+      y: actionY,
+      width: iconButtonWidth,
+      height: 24,
+      id: "rotateRight",
+    },
     roadHeader: {
       x: panel.x + 14,
       y: roadHeaderTop,
       width: panel.width - 28,
       height: EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT,
     },
-    roadSelectLabel: {
-      x: panel.x + 14,
-      y: roadSelectTop,
-      width: 56,
-      height: 28,
-    },
     roadPrev: {
-      x: panel.x + 92,
+      x: panel.x + 14,
       y: roadSelectTop + 2,
       width: 30,
       height: 24,
@@ -321,12 +341,38 @@ export function getEditorToolbarLayout() {
       height: 24,
     },
     roadValue: {
-      x: panel.x + 132,
+      x: panel.x + 52,
       y: roadSelectTop,
-      width: panel.width - 184,
+      width: panel.width - 104,
       height: 28,
     },
-    roadActionButtons,
+    roadDeleteButton: {
+      x: panel.x + 12,
+      y: roadActionY,
+      width: iconButtonWidth,
+      height: 24,
+      id: "roadDelete",
+    },
+    roadSizeDown: {
+      x: panel.x + 12 + iconButtonWidth + iconGap,
+      y: roadActionY,
+      width: 28,
+      height: 24,
+      id: "roadSizeDown",
+    },
+    roadSizeValue: {
+      x: panel.x + 12 + iconButtonWidth + iconGap + 32,
+      y: roadActionTop,
+      width: roadStepperWidth - 64,
+      height: 28,
+    },
+    roadSizeUp: {
+      x: panel.x + 12 + iconButtonWidth + iconGap + roadStepperWidth - 28,
+      y: roadActionY,
+      width: 28,
+      height: 24,
+      id: "roadSizeUp",
+    },
     roadSmoothLabel: {
       x: panel.x + 14,
       y: roadSmoothTop,
@@ -365,9 +411,16 @@ function editorToolbarActionAt(x, y) {
   for (const row of layout.objectToolButtons) {
     if (pointInRect(x, y, row)) return { type: "action", id: row.id };
   }
-  for (const button of layout.objectActionButtons) {
-    if (pointInRect(x, y, button)) return { type: "action", id: button.id };
-  }
+  if (pointInRect(x, y, layout.objectDeleteButton))
+    return { type: "action", id: layout.objectDeleteButton.id };
+  if (pointInRect(x, y, layout.objectSizeDown))
+    return { type: "action", id: layout.objectSizeDown.id };
+  if (pointInRect(x, y, layout.objectSizeUp))
+    return { type: "action", id: layout.objectSizeUp.id };
+  if (pointInRect(x, y, layout.rotateLeftButton))
+    return { type: "action", id: layout.rotateLeftButton.id };
+  if (pointInRect(x, y, layout.rotateRightButton))
+    return { type: "action", id: layout.rotateRightButton.id };
   if (pointInRect(x, y, layout.objectPrev))
     return { type: "action", id: "objectPrev" };
   if (pointInRect(x, y, layout.objectNext))
@@ -376,9 +429,12 @@ function editorToolbarActionAt(x, y) {
     return { type: "action", id: "roadPrev" };
   if (pointInRect(x, y, layout.roadNext))
     return { type: "action", id: "roadNext" };
-  for (const button of layout.roadActionButtons) {
-    if (pointInRect(x, y, button)) return { type: "action", id: button.id };
-  }
+  if (pointInRect(x, y, layout.roadDeleteButton))
+    return { type: "action", id: layout.roadDeleteButton.id };
+  if (pointInRect(x, y, layout.roadSizeDown))
+    return { type: "action", id: layout.roadSizeDown.id };
+  if (pointInRect(x, y, layout.roadSizeUp))
+    return { type: "action", id: layout.roadSizeUp.id };
   if (pointInRect(x, y, layout.roadSmoothPrev))
     return { type: "action", id: "roadSmoothPrev" };
   if (pointInRect(x, y, layout.roadSmoothNext))
@@ -1200,12 +1256,6 @@ function createEmptyTrackAndEdit() {
     track: {
       cx: canvas.width * 0.5,
       cy: canvas.height * 0.53,
-      outerA: 480,
-      outerB: 250,
-      innerA: 320,
-      innerB: 150,
-      warpOuter: [],
-      warpInner: [],
       borderSize: 22,
       centerlineLoop: null,
       centerlineHalfWidth: 60,
@@ -1959,7 +2009,7 @@ export function initInputHandlers() {
     updateEditorCursorFromEvent(event);
     const topBarAction = editorTopBarActionAt(
       state.editor.cursorScreenX,
-      state.editor.cursorScreenY + EDITOR_TOP_BAR_HEIGHT,
+      state.editor.cursorScreenY,
     );
     if (topBarAction) {
       performEditorTopBarAction(topBarAction);
