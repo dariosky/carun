@@ -1175,11 +1175,6 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "zoomIn") adjustEditorZoom(1);
 }
 
-function performEditorTopBarAction(actionId) {
-  if (actionId === "race") startEditorRace();
-  if (actionId === "build") rebuildEditorTrackGeometry();
-}
-
 function trackSelectCardCount() {
   return trackOptions.length; // Track cards only.
 }
@@ -2035,15 +2030,6 @@ export function initInputHandlers() {
     void unlockMenuMusic();
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
-    const topBarAction = editorTopBarActionAt(
-      state.editor.cursorScreenX,
-      state.editor.cursorScreenY,
-    );
-    if (topBarAction) {
-      performEditorTopBarAction(topBarAction);
-      return;
-    }
-    if (state.editor.cursorY < 0) return;
     const toolbarHit = editorToolbarActionAt(
       state.editor.cursorScreenX,
       state.editor.cursorScreenY,
@@ -2061,6 +2047,12 @@ export function initInputHandlers() {
       return;
     }
     if (toolbarHit?.type === "panel") return;
+    const topBarAction = editorTopBarActionAt(
+      state.editor.cursorScreenX,
+      state.editor.cursorScreenY,
+    );
+    if (topBarAction) return;
+    if (state.editor.cursorY < 0) return;
     if (state.editor.activeTool !== "road") {
       placeEditorObject(state.editor.activeTool);
       return;
