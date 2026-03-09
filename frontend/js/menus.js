@@ -920,7 +920,6 @@ function placeEditorObject(type) {
   if (!preset.editStack) preset.editStack = [];
   const x = state.editor.cursorX;
   const y = state.editor.cursorY;
-  if (y < 0) return;
 
   if (type === "tree") {
     const tree = { type: "tree", x, y, r: 24, angle: 0, height: 3 };
@@ -2179,7 +2178,6 @@ export function initInputHandlers() {
       performEditorTopBarAction(topBarAction);
       return;
     }
-    if (state.editor.cursorY < 0) return;
     if (state.editor.activeTool !== "road") {
       placeEditorObject(state.editor.activeTool);
       return;

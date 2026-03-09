@@ -72,6 +72,6 @@ export function getAsphaltPattern(targetCtx) {
 export function drawAsphaltMaterial(targetCtx) {
   targetCtx.save();
   targetCtx.fillStyle = getAsphaltPattern(targetCtx);
-  targetCtx.fillRect(0, 0, WIDTH, HEIGHT);
+  targetCtx.fillRect(-WIDTH, -HEIGHT, WIDTH * 3, HEIGHT * 3);
   targetCtx.restore();
 }
