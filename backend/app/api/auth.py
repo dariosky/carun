@@ -65,9 +65,6 @@ def me(request: Request, session: Session = Depends(get_session)):
 
 @router.get("/google/login")
 def google_login(request: Request):
-    canonical_redirect = canonicalize_local_oauth_request(request)
-    if canonical_redirect is not None:
-        return canonical_redirect
     return RedirectResponse(build_google_login_url(request), status_code=302)
 
 

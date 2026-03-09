@@ -123,6 +123,7 @@ def test_create_track_defaults_to_unpublished(client, session):
 def test_list_tracks_for_anonymous_user(client, session):
     owner = create_user(session, "OWNER")
     create_track(session, "System", source="system", is_published=True)
+    create_track(session, "System Draft", source="system", is_published=False)
     create_track(session, "Published", owner=owner, is_published=True)
     create_track(session, "Draft", owner=owner, is_published=False)
 
@@ -140,12 +141,21 @@ def test_list_tracks_for_authenticated_non_admin_includes_own_drafts(client, ses
     create_track(session, "Published", owner=other, is_published=True)
     create_track(session, "Own Draft", owner=owner, is_published=False)
     create_track(session, "Other Draft", owner=other, is_published=False)
+    create_track(session, "Orphan Draft", source="system", is_published=False)
 
     login_as(client, owner)
     response = client.get("/api/tracks")
 
     assert response.status_code == 200
     assert track_names(response.json()) == ["Own Draft", "Published"]
+
+
+def test_unpublished_system_track_hidden_from_non_admin(client, session):
+    draft = create_track(session, "System Draft", source="system", is_published=False)
+
+    response = client.get(f"/api/tracks/{draft.id}")
+
+    assert response.status_code == 404
 
 
 def test_list_tracks_for_admin_includes_all_tracks(client, session):

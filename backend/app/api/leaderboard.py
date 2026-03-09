@@ -27,7 +27,7 @@ def parse_track_id(track_id: str) -> UUID:
 
 
 def can_access_track(track: Track, current_user: User | None) -> bool:
-    if track.source == "system" or track.is_published:
+    if track.is_published:
         return True
     if not current_user:
         return False

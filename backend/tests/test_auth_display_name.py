@@ -200,6 +200,36 @@ def test_google_login_uses_request_origin_for_redirect_uri_when_unset(client, mo
     get_settings.cache_clear()
 
 
+def test_google_login_does_not_redirect_127_host_to_localhost(engine, monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "google-client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "google-secret")
+    get_settings.cache_clear()
+
+    from app.db import get_session
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+    from sqlmodel import Session
+
+    app = create_app()
+
+    def _get_session_override():
+        with Session(engine) as db_session:
+            yield db_session
+
+    app.dependency_overrides[get_session] = _get_session_override
+
+    with TestClient(app, base_url="http://127.0.0.1:8749") as local_client:
+        response = local_client.get("/api/auth/google/login", follow_redirects=False)
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert location.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
+    query = parse_qs(urlparse(location).query)
+    assert query["redirect_uri"] == ["http://127.0.0.1:8749/api/auth/google/callback"]
+    assert query["state"][0]
+    get_settings.cache_clear()
+
+
 def test_facebook_login_redirects_local_127_host_to_localhost(engine, monkeypatch):
     monkeypatch.setenv("FACEBOOK_CLIENT_ID", "facebook-client")
     monkeypatch.setenv("FACEBOOK_CLIENT_SECRET", "facebook-secret")

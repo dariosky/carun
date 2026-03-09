@@ -102,7 +102,7 @@ def _to_track_detail_response(session: Session, track: Track) -> TrackDetailResp
 
 
 def _can_access_track(track: Track, current_user: User | None) -> bool:
-    if track.source == "system" or track.is_published:
+    if track.is_published:
         return True
     if not current_user:
         return False
@@ -117,7 +117,7 @@ def list_tracks(
     if current_user and current_user.is_admin:
         query = select(Track).order_by(Track.created_at.desc())
     else:
-        visibility = (Track.is_published) | (Track.source == "system")
+        visibility = Track.is_published
         if current_user:
             visibility = or_(visibility, Track.owner_user_id == current_user.id)
         query = select(Track).where(visibility).order_by(Track.created_at.desc())
