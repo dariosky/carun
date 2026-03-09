@@ -80,18 +80,24 @@ export class EngineSynth {
     acceleration = 0,
     isMoving = false,
     surface = "asphalt",
+    airborne = false,
+    airborneAmount = 0,
+    wheelSpinAmount = 0,
   }) {
     const time = now(this.context);
     const engineCfg = AUDIO_TUNING.engine;
     const speed = clamp(speedNormalized, 0, 1);
     const throttleAmount = clamp(throttle, 0, 1);
     const accelAmount = clamp(acceleration, -1, 1);
+    const airAmount = clamp(airborneAmount, 0, 1);
+    const wheelSpin = clamp(wheelSpinAmount, 0, 1);
     const speedCurve = easeOut(Math.pow(speed, 0.7));
 
     const baseHz =
       engineCfg.idleHz +
       speedCurve * (engineCfg.topHz - engineCfg.idleHz) +
-      throttleAmount * 10;
+      throttleAmount * 10 +
+      airAmount * throttleAmount * engineCfg.airbornePitchBoostHz;
     const overtoneHz = baseHz * (1.94 + throttleAmount * 0.05);
     let cutoff =
       engineCfg.cutoffBase +
@@ -107,11 +113,13 @@ export class EngineSynth {
       throttleAmount * 0.03 * movingBlend;
     const roughness =
       engineCfg.noiseGain *
-      (0.2 + throttleAmount * 0.9 + Math.abs(accelAmount) * 0.45);
+      (0.2 + throttleAmount * 0.9 + Math.abs(accelAmount) * 0.45) *
+      (airborne ? 1 + wheelSpin * (engineCfg.airborneNoiseGainMul - 1) : 1);
     const detune =
       accelAmount * engineCfg.accelDetuneCents +
       throttleAmount * 3 +
-      speedCurve * 2;
+      speedCurve * 2 +
+      airAmount * throttleAmount * engineCfg.airborneDetuneCents;
     const wobbleDepth =
       engineCfg.wobbleDepthCents +
       throttleAmount * engineCfg.throttleWobbleDepthCents;

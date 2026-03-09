@@ -45,6 +45,7 @@ import {
   drawStripedCurb,
   getTrackWorldScale,
   initCurbSegments,
+  normalizeWorldObject,
   pointOnCenterLine,
   sampleCenterlineHalfWidth,
   sampleClosedPath,
@@ -225,11 +226,19 @@ function getPreviewBounds(preset, boundaries, curbs) {
     }
   }
   for (const obj of preset.worldObjects || []) {
-    if (obj.type === "tree" || obj.type === "barrel") {
+    if (obj.type === "tree" || obj.type === "barrel" || obj.type === "spring") {
       const radius = (Number(obj.r) || 0) * worldScale;
       const center = transformPointByWorldScale(obj, trackDef);
       expandBounds(bounds, center.x - radius, center.y - radius);
       expandBounds(bounds, center.x + radius, center.y + radius);
+      continue;
+    }
+    if (obj.type === "wall") {
+      const center = transformPointByWorldScale(obj, trackDef);
+      const halfLength = (Number(obj.length) || 0) * worldScale * 0.5;
+      const halfWidth = (Number(obj.width) || 0) * worldScale * 0.5;
+      expandBounds(bounds, center.x - halfLength, center.y - halfWidth);
+      expandBounds(bounds, center.x + halfLength, center.y + halfWidth);
       continue;
     }
     if (obj.type === "pond") {
@@ -269,6 +278,8 @@ function drawDecor(objects = worldObjects) {
       ? state.editor.latestEditTarget.objectIndex
       : -1;
   for (const [index, obj] of objects.entries()) {
+    const normalized = normalizeWorldObject(obj);
+    if (!normalized) continue;
     const shouldFlash =
       state.mode === "editor" &&
       selectedObjectIndex === index &&
@@ -276,23 +287,32 @@ function drawDecor(objects = worldObjects) {
       flash.index === index &&
       flash.time > 0 &&
       Math.floor(flash.time / 0.08) % 2 === 0;
-    if (obj.type === "tree") {
-      const angle = obj.angle || 0;
+    if (normalized.type === "tree") {
+      const angle = normalized.angle || 0;
+      const lift = normalized.height * 5;
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y + 10);
+      ctx.scale(1, 0.45);
+      ctx.fillStyle = "rgba(12, 18, 14, 0.22)";
+      ctx.beginPath();
+      ctx.arc(0, 0, normalized.r * 0.95, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
       ctx.fillStyle = "#4a2f1e";
       ctx.save();
-      ctx.translate(obj.x, obj.y);
+      ctx.translate(normalized.x, normalized.y);
       ctx.rotate(angle);
-      ctx.fillRect(-4, 8, 8, 16);
+      ctx.fillRect(-4, 8 - lift, 8, 16 + lift);
       ctx.fillStyle = "#2f9c4a";
       const canopy = sampleClosedPath((a) => {
         const radius =
-          obj.r *
+          normalized.r *
           (1 +
-            0.2 * Math.sin(a * 3 + obj.x * 0.02 + angle) +
-            0.12 * Math.sin(a * 5 + obj.y * 0.02 - angle * 0.7));
+            0.2 * Math.sin(a * 3 + normalized.x * 0.02 + angle) +
+            0.12 * Math.sin(a * 5 + normalized.y * 0.02 - angle * 0.7));
         return {
           x: Math.cos(a) * radius,
-          y: Math.sin(a) * radius,
+          y: Math.sin(a) * radius - lift,
         };
       }, 40);
       ctx.beginPath();
@@ -301,10 +321,12 @@ function drawDecor(objects = worldObjects) {
       ctx.fillStyle = "#3dcf60";
       const highlight = sampleClosedPath((a) => {
         const radius =
-          obj.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + obj.x * 0.08 + angle));
+          normalized.r *
+          0.4 *
+          (1 + 0.12 * Math.sin(a * 4 + normalized.x * 0.08 + angle));
         return {
           x: -8 + Math.cos(a) * radius,
-          y: -6 + Math.sin(a) * radius,
+          y: -6 + Math.sin(a) * radius - lift,
         };
       }, 24);
       ctx.beginPath();
@@ -320,18 +342,23 @@ function drawDecor(objects = worldObjects) {
       ctx.restore();
     }
 
-    if (obj.type === "pond") {
-      const angle = obj.angle || 0;
+    if (normalized.type === "pond") {
+      const angle = normalized.angle || 0;
       ctx.fillStyle = "#7aa1c2";
       const waterPath = sampleClosedPath((a) => {
-        const radius = blobRadius(obj.rx, obj.ry, a, obj.seed || 0);
+        const radius = blobRadius(
+          normalized.rx,
+          normalized.ry,
+          a,
+          normalized.seed || 0,
+        );
         return {
           x: Math.cos(a) * radius,
           y: Math.sin(a) * radius,
         };
       }, 64);
       ctx.save();
-      ctx.translate(obj.x, obj.y);
+      ctx.translate(normalized.x, normalized.y);
       ctx.rotate(angle);
       ctx.beginPath();
       drawPath(waterPath);
@@ -347,29 +374,145 @@ function drawDecor(objects = worldObjects) {
       ctx.restore();
     }
 
-    if (obj.type === "barrel") {
-      const angle = obj.angle || 0;
+    if (normalized.type === "barrel") {
+      const angle = normalized.angle || 0;
+      const lift = normalized.height * 4.5;
       ctx.save();
-      ctx.translate(obj.x, obj.y);
+      ctx.translate(normalized.x, normalized.y + normalized.r * 0.8);
+      ctx.scale(1, 0.45);
+      ctx.fillStyle = "rgba(16, 12, 8, 0.24)";
+      ctx.beginPath();
+      ctx.arc(0, 0, normalized.r * 0.95, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y);
       ctx.rotate(angle);
+      ctx.fillStyle = "#8e4a0a";
+      ctx.beginPath();
+      ctx.arc(0, -lift * 0.22, normalized.r, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = "#d16f0d";
       ctx.beginPath();
-      ctx.arc(0, 0, obj.r, 0, Math.PI * 2);
+      ctx.arc(0, -lift * 0.4, normalized.r * 0.82, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#3a2a12";
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, -lift * 0.22, normalized.r, 0, Math.PI * 2);
       ctx.stroke();
       ctx.strokeStyle = "#ffe0a2";
       ctx.beginPath();
-      ctx.moveTo(-obj.r * 0.7, 0);
-      ctx.lineTo(obj.r * 0.7, 0);
+      ctx.arc(0, -lift * 0.34, normalized.r * 0.55, 0.15, Math.PI - 0.15);
       ctx.stroke();
       if (shouldFlash) {
         ctx.strokeStyle = "#ffe167";
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(0, 0, obj.r + 3, 0, Math.PI * 2);
+        ctx.arc(0, -lift * 0.22, normalized.r + 3, 0, Math.PI * 2);
         ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    if (normalized.type === "spring") {
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y);
+      ctx.rotate(normalized.angle);
+      ctx.scale(1, 0.45);
+      ctx.fillStyle = "rgba(19, 14, 26, 0.2)";
+      ctx.beginPath();
+      ctx.arc(0, 0, normalized.r * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y);
+      ctx.rotate(normalized.angle);
+      ctx.strokeStyle = "#ffe46a";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const y = normalized.r * 0.7 - i * 5;
+        if (i === 0) ctx.moveTo(-normalized.r * 0.55, y);
+        ctx.quadraticCurveTo(0, y - 4, normalized.r * 0.55, y - 8);
+        ctx.quadraticCurveTo(0, y - 12, -normalized.r * 0.55, y - 16);
+      }
+      ctx.stroke();
+      ctx.fillStyle = "#ff6d3d";
+      ctx.beginPath();
+      ctx.roundRect(
+        -normalized.r * 0.9,
+        normalized.r * 0.38,
+        normalized.r * 1.8,
+        8,
+        4,
+      );
+      ctx.fill();
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(
+          -normalized.r - 4,
+          -normalized.r - 18,
+          normalized.r * 2 + 8,
+          normalized.r * 2 + 22,
+        );
+      }
+      ctx.restore();
+    }
+
+    if (normalized.type === "wall") {
+      const halfLength = normalized.length * 0.5;
+      const halfWidth = normalized.width * 0.5;
+      const extrude = normalized.height * 6;
+      const top = [
+        { x: -halfLength, y: -halfWidth - extrude },
+        { x: halfLength, y: -halfWidth - extrude },
+        { x: halfLength, y: halfWidth - extrude },
+        { x: -halfLength, y: halfWidth - extrude },
+      ];
+      const front = [
+        { x: -halfLength, y: halfWidth - extrude },
+        { x: halfLength, y: halfWidth - extrude },
+        { x: halfLength, y: halfWidth },
+        { x: -halfLength, y: halfWidth },
+      ];
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y + 8);
+      ctx.rotate(normalized.angle);
+      ctx.fillStyle = "rgba(18, 20, 24, 0.2)";
+      ctx.fillRect(
+        -halfLength,
+        -halfWidth,
+        normalized.length,
+        normalized.width,
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.translate(normalized.x, normalized.y);
+      ctx.rotate(normalized.angle);
+      ctx.fillStyle = "#56636d";
+      ctx.beginPath();
+      drawPath(front);
+      ctx.fill();
+      ctx.fillStyle = "#8e9ca8";
+      ctx.beginPath();
+      drawPath(top);
+      ctx.fill();
+      ctx.strokeStyle = "#d7e0e7";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      drawPath(top);
+      ctx.stroke();
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(
+          -halfLength - 4,
+          -halfWidth - extrude - 4,
+          normalized.length + 8,
+          normalized.width + extrude + 8,
+        );
       }
       ctx.restore();
     }
@@ -958,9 +1101,23 @@ function drawCar() {
       Math.max(state.checkpointBlink.duration, 0.0001);
   }
 
+  const airCfg = physicsConfig.air;
+  const scale = Math.max(1, car.visualScale || 1);
+  const screenLiftPx = Math.max(0, car.z) * airCfg.liftPxPerMeter;
+
   ctx.save();
-  ctx.translate(car.x, car.y);
+  ctx.translate(car.x, car.y + 7);
+  ctx.scale(1 + Math.max(0, car.z) * 0.015, 0.5);
+  ctx.fillStyle = `rgba(10, 12, 18, ${Math.max(0.08, 0.26 - car.z * 0.025).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(car.x, car.y - screenLiftPx);
   ctx.rotate(car.angle + Math.PI * 0.5);
+  ctx.scale(scale, scale);
 
   if (blinkActive) {
     const pulse = 0.5 + 0.5 * Math.sin((1 - blinkT) * Math.PI * 7);
@@ -1309,27 +1466,11 @@ function drawEditorTitleBar() {
   const trackName = String(preset.name || "UNTITLED").slice(0, 24);
   ctx.fillText(trackName, brandBox.x + 48, 40);
 
-  const helpText = ["S save", "C curbs", "Esc back"].join("   ");
-  const helpX = brandBox.x + brandBox.width + 18;
-  const helpW = Math.max(120, topBarLayout.race.x - helpX - 18);
-  if (helpW > 140) {
-    ctx.fillStyle = "rgba(13, 25, 33, 0.62)";
-    ctx.beginPath();
-    ctx.roundRect(helpX, 10, helpW, 36, 8);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(184, 215, 232, 0.18)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = "#c9d9e7";
-    ctx.font = "13px Verdana";
-    ctx.textAlign = "center";
-    ctx.fillText(helpText, helpX + helpW * 0.5, 33);
-  }
-
   const drawTopBarButton = (rect, label, shortcut) => {
-    ctx.fillStyle = "rgba(16, 33, 45, 0.92)";
-    ctx.strokeStyle = "rgba(184, 215, 232, 0.28)";
-    ctx.lineWidth = 2;
+    const active = rect.id === "toggleCurbs" && state.editor.showCurbs;
+    ctx.fillStyle = active ? "#264c61" : "rgba(16, 33, 45, 0.92)";
+    ctx.strokeStyle = active ? "#9be9ff" : "rgba(184, 215, 232, 0.28)";
+    ctx.lineWidth = active ? 2.5 : 2;
     ctx.beginPath();
     ctx.roundRect(rect.x, rect.y, rect.width, rect.height, 8);
     ctx.fill();
@@ -1344,6 +1485,9 @@ function drawEditorTitleBar() {
     ctx.fillText(`[${shortcut}]`, rect.x + rect.width - 10, rect.y + 21);
   };
 
+  drawTopBarButton(topBarLayout.save, "Save", topBarLayout.save.shortcut);
+  drawTopBarButton(topBarLayout.curbs, "Curbs", topBarLayout.curbs.shortcut);
+  drawTopBarButton(topBarLayout.back, "Esc", topBarLayout.back.shortcut);
   drawTopBarButton(topBarLayout.race, "Race", topBarLayout.race.shortcut);
   drawTopBarButton(topBarLayout.build, "Build", topBarLayout.build.shortcut);
   ctx.restore();
@@ -1357,6 +1501,8 @@ function selectedObjectValueLabel(preset) {
     if (!object) return "--";
     if (object.type === "pond")
       return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
+    if (object.type === "wall")
+      return `${Math.round(object.length)}x${Math.round(object.width)}`;
     if (Number.isFinite(object.r)) return `${Math.round(object.r)}`;
   }
   return "--";
@@ -1372,7 +1518,11 @@ function selectedObjectLabel(preset) {
         ? "◉"
         : type === "tree"
           ? "♣"
-          : "•";
+          : type === "spring"
+            ? "✹"
+            : type === "wall"
+              ? "▭"
+              : "•";
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "object" || !objects[target.objectIndex]) {
     const last = objects[objects.length - 1];
@@ -1493,7 +1643,9 @@ function drawEditorToolbar() {
     const active =
       (row.id === "water" && state.editor.activeTool === "pond") ||
       (row.id === "barrel" && state.editor.activeTool === "barrel") ||
-      (row.id === "tree" && state.editor.activeTool === "tree");
+      (row.id === "tree" && state.editor.activeTool === "tree") ||
+      (row.id === "spring" && state.editor.activeTool === "spring") ||
+      (row.id === "wall" && state.editor.activeTool === "wall");
     drawToolbarButton(row, "", { active });
     ctx.fillStyle = "#dff7ff";
     ctx.font = "bold 20px Verdana";

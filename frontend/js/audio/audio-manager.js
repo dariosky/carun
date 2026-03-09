@@ -12,6 +12,9 @@ const DEFAULT_VEHICLE_STATE = {
   skidAmount: 0,
   surface: "asphalt",
   isMoving: false,
+  airborne: false,
+  airborneAmount: 0,
+  wheelSpinAmount: 0,
 };
 
 function getAudioContextCtor() {
@@ -149,6 +152,11 @@ export class AudioManager {
     this.impactSynth.triggerBarrelBump(intensity);
   }
 
+  playLandingBump(intensity) {
+    if (!this.ensureContext() || !this.impactSynth) return;
+    this.impactSynth.triggerWallBump(intensity * 0.85);
+  }
+
   #applyVehicleState(params) {
     if (!this.context) return;
     const normalized = {
@@ -158,6 +166,9 @@ export class AudioManager {
       skidAmount: clamp(params.skidAmount, 0, 1),
       surface: params.surface || "asphalt",
       isMoving: Boolean(params.isMoving),
+      airborne: Boolean(params.airborne),
+      airborneAmount: clamp(params.airborneAmount, 0, 1),
+      wheelSpinAmount: clamp(params.wheelSpinAmount, 0, 1),
     };
     this.engineSynth.update(normalized);
     this.skidSynth.update(normalized);

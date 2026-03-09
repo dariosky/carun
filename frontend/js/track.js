@@ -1037,7 +1037,175 @@ export function surfaceAtForTrack(
   return "asphalt";
 }
 
-export function resolveObjectCollisions(x, y) {
+export function normalizeWorldObject(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const angle = Number.isFinite(obj.angle) ? Number(obj.angle) : 0;
+  switch (obj.type) {
+    case "tree":
+      return {
+        ...obj,
+        type: "tree",
+        angle,
+        r: Number.isFinite(obj.r) ? Number(obj.r) : 24,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 3,
+      };
+    case "barrel":
+      return {
+        ...obj,
+        type: "barrel",
+        angle,
+        r: Number.isFinite(obj.r) ? Number(obj.r) : 12,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 1,
+      };
+    case "spring":
+      return {
+        ...obj,
+        type: "spring",
+        angle,
+        r: Number.isFinite(obj.r) ? Number(obj.r) : 16,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 0.4,
+      };
+    case "wall":
+      return {
+        ...obj,
+        type: "wall",
+        angle,
+        width: Number.isFinite(obj.width) ? Number(obj.width) : 18,
+        length: Number.isFinite(obj.length) ? Number(obj.length) : 90,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 2.5,
+      };
+    case "pond":
+      return {
+        ...obj,
+        type: "pond",
+        angle,
+        rx: Number.isFinite(obj.rx) ? Number(obj.rx) : 78,
+        ry: Number.isFinite(obj.ry) ? Number(obj.ry) : 44,
+        seed: Number.isFinite(obj.seed) ? Number(obj.seed) : 0,
+      };
+    default:
+      return { ...obj, angle };
+  }
+}
+
+export function getObjectHeight(obj) {
+  const normalized = normalizeWorldObject(obj);
+  return Number.isFinite(normalized?.height) ? normalized.height : 0;
+}
+
+export function getSolidObjects(objects = worldObjects) {
+  return objects
+    .map(normalizeWorldObject)
+    .filter(
+      (obj) =>
+        obj &&
+        (obj.type === "tree" || obj.type === "barrel" || obj.type === "wall"),
+    );
+}
+
+export function pointInsideWallFootprint(x, y, wall) {
+  const normalized = normalizeWorldObject(wall);
+  if (!normalized || normalized.type !== "wall") return false;
+  const dx = x - normalized.x;
+  const dy = y - normalized.y;
+  const cos = Math.cos(normalized.angle);
+  const sin = Math.sin(normalized.angle);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  return (
+    Math.abs(localX) <= normalized.length * 0.5 &&
+    Math.abs(localY) <= normalized.width * 0.5
+  );
+}
+
+export function findSpringTrigger(x, y, objects = worldObjects) {
+  for (const raw of objects) {
+    const obj = normalizeWorldObject(raw);
+    if (!obj || obj.type !== "spring") continue;
+    if (Math.hypot(x - obj.x, y - obj.y) <= obj.r) return obj;
+  }
+  return null;
+}
+
+function resolveCircleCollision(rx, ry, obj, carRadius) {
+  const minDist = obj.r + carRadius;
+  const dx = rx - obj.x;
+  const dy = ry - obj.y;
+  const distSq = dx * dx + dy * dy;
+  if (distSq >= minDist * minDist) return null;
+
+  const dist = Math.sqrt(Math.max(distSq, 1e-8));
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const penetration = minDist - dist;
+  return {
+    x: rx + nx * (penetration + 0.25),
+    y: ry + ny * (penetration + 0.25),
+    normalX: nx,
+    normalY: ny,
+    hitType: obj.type,
+  };
+}
+
+function resolveWallCollision(rx, ry, obj, carRadius) {
+  const dx = rx - obj.x;
+  const dy = ry - obj.y;
+  const cos = Math.cos(obj.angle);
+  const sin = Math.sin(obj.angle);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  const halfLength = obj.length * 0.5;
+  const halfWidth = obj.width * 0.5;
+  const clampedX = clamp(localX, -halfLength, halfLength);
+  const clampedY = clamp(localY, -halfWidth, halfWidth);
+  const deltaX = localX - clampedX;
+  const deltaY = localY - clampedY;
+  const distSq = deltaX * deltaX + deltaY * deltaY;
+
+  if (distSq > carRadius * carRadius) return null;
+
+  let normalLocalX = 0;
+  let normalLocalY = 0;
+  let push = 0;
+  if (distSq > 1e-8) {
+    const dist = Math.sqrt(distSq);
+    normalLocalX = deltaX / dist;
+    normalLocalY = deltaY / dist;
+    push = carRadius - dist + 0.25;
+  } else {
+    const distToLength = halfLength - Math.abs(localX);
+    const distToWidth = halfWidth - Math.abs(localY);
+    if (distToLength < distToWidth) {
+      normalLocalX = localX >= 0 ? 1 : -1;
+      push = distToLength + carRadius + 0.25;
+    } else {
+      normalLocalY = localY >= 0 ? 1 : -1;
+      push = distToWidth + carRadius + 0.25;
+    }
+  }
+
+  const nextLocalX = localX + normalLocalX * push;
+  const nextLocalY = localY + normalLocalY * push;
+  const worldPushX = nextLocalX * cos - nextLocalY * sin;
+  const worldPushY = nextLocalX * sin + nextLocalY * cos;
+  const normalX = normalLocalX * cos - normalLocalY * sin;
+  const normalY = normalLocalX * sin + normalLocalY * cos;
+
+  return {
+    x: obj.x + worldPushX,
+    y: obj.y + worldPushY,
+    normalX,
+    normalY,
+    hitType: "wall",
+  };
+}
+
+export function resolveObjectCollisions(
+  x,
+  y,
+  carZ = 0,
+  objects = worldObjects,
+) {
   let rx = x;
   let ry = y;
   let hit = false;
@@ -1049,30 +1217,21 @@ export function resolveObjectCollisions(x, y) {
   for (let pass = 0; pass < 3; pass++) {
     let pushed = false;
 
-    for (const obj of worldObjects) {
-      if (obj.type !== "tree" && obj.type !== "barrel") continue;
-      const minDist = obj.r + carRadius;
-      const dx = rx - obj.x;
-      const dy = ry - obj.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq >= minDist * minDist) continue;
+    for (const obj of getSolidObjects(objects)) {
+      if (carZ >= getObjectHeight(obj)) continue;
+      const resolved =
+        obj.type === "wall"
+          ? resolveWallCollision(rx, ry, obj, carRadius)
+          : resolveCircleCollision(rx, ry, obj, carRadius);
+      if (!resolved) continue;
 
       hit = true;
       pushed = true;
-      const dist = Math.sqrt(Math.max(distSq, 1e-8));
-      const nx = dx / dist;
-      const ny = dy / dist;
-      const penetration = minDist - dist;
-      rx += nx * (penetration + 0.25);
-      ry += ny * (penetration + 0.25);
-      normalX = nx;
-      normalY = ny;
-      hitType =
-        obj.type === "tree"
-          ? "tree"
-          : obj.type === "barrel"
-            ? "barrel"
-            : "wall";
+      rx = resolved.x;
+      ry = resolved.y;
+      normalX = resolved.normalX;
+      normalY = resolved.normalY;
+      hitType = resolved.hitType;
     }
 
     if (!pushed) break;

@@ -25,6 +25,9 @@ export const AUDIO_TUNING = {
     wobbleHz: 9,
     wobbleDepthCents: 4,
     throttleWobbleDepthCents: 10,
+    airbornePitchBoostHz: 20,
+    airborneDetuneCents: 32,
+    airborneNoiseGainMul: 1.45,
   },
   skid: {
     baseGain: 0.001,

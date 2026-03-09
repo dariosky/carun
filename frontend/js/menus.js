@@ -48,8 +48,10 @@ const EDITOR_OBJECT_PLACE_TOOLS = [
   { id: "water", label: "Water", icon: "≈", shortcut: "W" },
   { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
   { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
+  { id: "spring", label: "Spring", icon: "✹", shortcut: "" },
+  { id: "wall", label: "Wall", icon: "▭", shortcut: "L" },
 ];
-const EDITOR_TOOLBAR_WIDTH = 252;
+const EDITOR_TOOLBAR_WIDTH = 320;
 const EDITOR_TOOLBAR_TITLE_HEIGHT = 32;
 const EDITOR_TOOLBAR_ROW_HEIGHT = 32;
 const EDITOR_TOOLBAR_SECTION_HEIGHT = 38;
@@ -192,7 +194,34 @@ export function getEditorTopBarLayout() {
     label: "Race",
     shortcut: "R",
   };
-  return { race, build };
+  const back = {
+    x: race.x - gap - buttonWidth,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    id: "back",
+    label: "Esc",
+    shortcut: "Esc",
+  };
+  const curbs = {
+    x: back.x - gap - buttonWidth,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    id: "toggleCurbs",
+    label: "Curbs",
+    shortcut: "C",
+  };
+  const save = {
+    x: curbs.x - gap - buttonWidth,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    id: "save",
+    label: "Save",
+    shortcut: "S",
+  };
+  return { save, curbs, back, race, build };
 }
 
 export function getEditorToolbarLayout() {
@@ -200,7 +229,7 @@ export function getEditorToolbarLayout() {
   const panelHeight =
     EDITOR_TOOLBAR_TITLE_HEIGHT +
     EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
-    EDITOR_TOOLBAR_ROW_HEIGHT * 2 +
+    EDITOR_TOOLBAR_ROW_HEIGHT * 3 +
     EDITOR_TOOLBAR_SECTION_HEIGHT * 2 +
     14 +
     EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
@@ -230,14 +259,18 @@ export function getEditorToolbarLayout() {
   const objectToolButtonGap = 10;
   const objectToolButtonWidth =
     (panel.width - 24 - objectToolButtonGap * 2) / 3;
-  const objectToolButtons = EDITOR_OBJECT_PLACE_TOOLS.map((tool, index) => ({
-    ...tool,
-    x: panel.x + 12 + index * (objectToolButtonWidth + objectToolButtonGap),
-    y: objectToolRowY,
-    width: objectToolButtonWidth,
-    height: EDITOR_TOOLBAR_ROW_HEIGHT - 2,
-  }));
-  const objectSelectTop = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT + 8;
+  const objectToolButtons = EDITOR_OBJECT_PLACE_TOOLS.map((tool, index) => {
+    const row = Math.floor(index / 3);
+    const col = index % 3;
+    return {
+      ...tool,
+      x: panel.x + 12 + col * (objectToolButtonWidth + objectToolButtonGap),
+      y: objectToolRowY + row * EDITOR_TOOLBAR_ROW_HEIGHT,
+      width: objectToolButtonWidth,
+      height: EDITOR_TOOLBAR_ROW_HEIGHT - 2,
+    };
+  });
+  const objectSelectTop = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT * 2 + 8;
   const objectActionTop = objectSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
   const actionY = objectActionTop + 2;
   const iconButtonWidth = 34;
@@ -447,6 +480,9 @@ function editorToolbarActionAt(x, y) {
 
 function editorTopBarActionAt(x, y) {
   const layout = getEditorTopBarLayout();
+  if (pointInRect(x, y, layout.save)) return layout.save.id;
+  if (pointInRect(x, y, layout.curbs)) return layout.curbs.id;
+  if (pointInRect(x, y, layout.back)) return layout.back.id;
   if (pointInRect(x, y, layout.race)) return layout.race.id;
   if (pointInRect(x, y, layout.build)) return layout.build.id;
   return null;
@@ -462,6 +498,10 @@ function editorToolbarActionLabel(actionId) {
       return "Barrel";
     case "tree":
       return "Tree";
+    case "spring":
+      return "Spring";
+    case "wall":
+      return "Wall";
     case "objectPrev":
       return "Previous Object";
     case "objectNext":
@@ -474,6 +514,12 @@ function editorToolbarActionLabel(actionId) {
       return "Rotate Left";
     case "rotateRight":
       return "Rotate Right";
+    case "save":
+      return "Save";
+    case "toggleCurbs":
+      return "Curbs";
+    case "back":
+      return "Back";
     case "roadPrev":
       return "Previous Segment";
     case "roadNext":
@@ -836,9 +882,11 @@ function updateEditorCursorFromEvent(event) {
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   const screenX = (event.clientX - rect.left) * scaleX;
-  const screenY = (event.clientY - rect.top) * scaleY - EDITOR_TOP_BAR_HEIGHT;
+  const canvasY = (event.clientY - rect.top) * scaleY;
+  const screenY = canvasY - EDITOR_TOP_BAR_HEIGHT;
   const worldScale = clampWorldScale(Number(track.worldScale) || 1);
   state.editor.cursorScreenX = screenX;
+  state.editor.cursorCanvasY = canvasY;
   state.editor.cursorScreenY = screenY;
   state.editor.cursorX = track.cx + (screenX - track.cx) / worldScale;
   state.editor.cursorY = track.cy + (screenY - track.cy) / worldScale;
@@ -875,7 +923,7 @@ function placeEditorObject(type) {
   if (y < 0) return;
 
   if (type === "tree") {
-    const tree = { type: "tree", x, y, r: 24, angle: 0 };
+    const tree = { type: "tree", x, y, r: 24, angle: 0, height: 3 };
     preset.worldObjects.push(tree);
     preset.editStack.push({
       kind: "object",
@@ -913,8 +961,46 @@ function placeEditorObject(type) {
     return;
   }
   if (type === "barrel") {
-    const barrel = { type: "barrel", x, y, r: 12, angle: 0 };
+    const barrel = { type: "barrel", x, y, r: 12, angle: 0, height: 1 };
     preset.worldObjects.push(barrel);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+  if (type === "spring") {
+    const spring = { type: "spring", x, y, r: 16, angle: 0, height: 0.4 };
+    preset.worldObjects.push(spring);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+  if (type === "wall") {
+    const wall = {
+      type: "wall",
+      x,
+      y,
+      width: 18,
+      length: 90,
+      angle: 0,
+      height: 2.5,
+    };
+    preset.worldObjects.push(wall);
     preset.editStack.push({
       kind: "object",
       objectIndex: preset.worldObjects.length - 1,
@@ -1085,6 +1171,12 @@ function adjustSelectedObjectSize(direction) {
   if (object.type === "barrel") {
     object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
   }
+  if (object.type === "spring") {
+    object.r = Math.max(10, Math.min(28, object.r + direction * 2));
+  }
+  if (object.type === "wall") {
+    object.length = Math.max(32, Math.min(160, object.length + direction * 8));
+  }
   state.editor.latestEditTarget = target;
   applyTrackPreset(state.editor.trackIndex);
 }
@@ -1158,12 +1250,18 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "water") toggleEditorTool("pond");
   if (actionId === "barrel") toggleEditorTool("barrel");
   if (actionId === "tree") toggleEditorTool("tree");
+  if (actionId === "spring") toggleEditorTool("spring");
+  if (actionId === "wall") toggleEditorTool("wall");
   if (actionId === "objectPrev") selectEditorObject(-1);
   if (actionId === "objectNext") selectEditorObject(1);
   if (actionId === "objectSizeDown") adjustSelectedObjectSize(-1);
   if (actionId === "objectSizeUp") adjustSelectedObjectSize(1);
   if (actionId === "rotateLeft") rotateSelectedEditorObject(-1);
   if (actionId === "rotateRight") rotateSelectedEditorObject(1);
+  if (actionId === "save") promptSaveEditorTrack();
+  if (actionId === "toggleCurbs")
+    state.editor.showCurbs = !state.editor.showCurbs;
+  if (actionId === "back") returnToTrackSelect();
   if (actionId === "roadPrev") selectEditorRoad(-1);
   if (actionId === "roadNext") selectEditorRoad(1);
   if (actionId === "roadDelete") deleteSelectedEditorTarget("stroke");
@@ -1173,6 +1271,15 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "roadSmoothNext") adjustEditorSmoothing(1);
   if (actionId === "zoomOut") adjustEditorZoom(-1);
   if (actionId === "zoomIn") adjustEditorZoom(1);
+}
+
+function performEditorTopBarAction(actionId) {
+  if (actionId === "save") promptSaveEditorTrack();
+  if (actionId === "toggleCurbs")
+    state.editor.showCurbs = !state.editor.showCurbs;
+  if (actionId === "back") returnToTrackSelect();
+  if (actionId === "race") startEditorRace();
+  if (actionId === "build") rebuildEditorTrackGeometry();
 }
 
 function trackSelectCardCount() {
@@ -1487,6 +1594,17 @@ function onKeyDown(e) {
         state.modal.open))
   ) {
     e.preventDefault();
+  }
+
+  if (
+    state.mode === "editor" &&
+    key === "s" &&
+    (e.metaKey || e.ctrlKey) &&
+    !e.altKey
+  ) {
+    e.preventDefault();
+    if (!e.repeat) promptSaveEditorTrack();
+    return;
   }
 
   if (state.modal.open) {
@@ -1839,6 +1957,11 @@ function onKeyDown(e) {
   }
 
   if (state.mode === "editor") {
+    if (key === "s") {
+      if (e.repeat) return;
+      promptSaveEditorTrack();
+      return;
+    }
     if (key === "c") {
       if (e.repeat) return;
       state.editor.showCurbs = !state.editor.showCurbs;
@@ -1859,12 +1982,13 @@ function onKeyDown(e) {
       toggleEditorTool("barrel");
       return;
     }
-    if (key === "r") {
-      startEditorRace();
+    if (key === "l") {
+      if (e.repeat) return;
+      toggleEditorTool("wall");
       return;
     }
-    if (key === "s") {
-      promptSaveEditorTrack();
+    if (key === "r") {
+      startEditorRace();
       return;
     }
     if (key === " ") {
@@ -2049,9 +2173,12 @@ export function initInputHandlers() {
     if (toolbarHit?.type === "panel") return;
     const topBarAction = editorTopBarActionAt(
       state.editor.cursorScreenX,
-      state.editor.cursorScreenY,
+      state.editor.cursorCanvasY,
     );
-    if (topBarAction) return;
+    if (topBarAction) {
+      performEditorTopBarAction(topBarAction);
+      return;
+    }
     if (state.editor.cursorY < 0) return;
     if (state.editor.activeTool !== "road") {
       placeEditorObject(state.editor.activeTool);

@@ -18,6 +18,13 @@ export const HEIGHT = canvas.height;
 const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
 const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
+const OBJECT_DEFAULTS = {
+  tree: { height: 1.5, r: 24, angle: 0 },
+  barrel: { height: 1, r: 12, angle: 0 },
+  spring: { height: 0.4, r: 16, angle: 0 },
+  wall: { height: 1, width: 18, length: 90, angle: 0 },
+  pond: { angle: 0 },
+};
 
 export function sanitizePlayerName(raw) {
   if (typeof raw !== "string") return "PLAYER";
@@ -132,14 +139,14 @@ const TRACK_PRESETS = [
       { angle: Math.PI * 1.5 },
     ],
     worldObjects: [
-      { type: "tree", x: 150, y: 90, r: 26, angle: 0 },
-      { type: "tree", x: 1080, y: 76, r: 24, angle: 0 },
-      { type: "tree", x: 172, y: 536, r: 23, angle: 0 },
-      { type: "tree", x: 1110, y: 520, r: 22, angle: 0 },
+      { type: "tree", x: 150, y: 90, r: 26, angle: 0, height: 3 },
+      { type: "tree", x: 1080, y: 76, r: 24, angle: 0, height: 3 },
+      { type: "tree", x: 172, y: 536, r: 23, angle: 0, height: 3 },
+      { type: "tree", x: 1110, y: 520, r: 22, angle: 0, height: 3 },
       { type: "pond", x: 650, y: 290, rx: 95, ry: 52, seed: 0.8, angle: 0 },
       { type: "pond", x: 215, y: 280, rx: 60, ry: 34, seed: -0.55, angle: 0 },
-      { type: "barrel", x: 447, y: 93, r: 13, angle: 0 },
-      { type: "barrel", x: 847, y: 507, r: 13, angle: 0 },
+      { type: "barrel", x: 447, y: 93, r: 13, angle: 0, height: 1 },
+      { type: "barrel", x: 847, y: 507, r: 13, angle: 0, height: 1 },
     ],
     centerlineStrokes: [],
     editStack: [],
@@ -157,10 +164,45 @@ function cloneCenterlinePoint(point, fallbackHalfWidth = 60) {
 }
 
 function cloneWorldObject(obj) {
-  return {
+  const type = typeof obj?.type === "string" ? obj.type : "tree";
+  const defaults = OBJECT_DEFAULTS[type] || { angle: 0 };
+  const base = {
     ...obj,
-    angle: Number.isFinite(obj?.angle) ? Number(obj.angle) : 0,
+    type,
+    angle: Number.isFinite(obj?.angle)
+      ? Number(obj.angle)
+      : defaults.angle || 0,
   };
+
+  if (type === "tree" || type === "barrel" || type === "spring") {
+    base.r = Number.isFinite(obj?.r) ? Number(obj.r) : defaults.r;
+    base.height = Number.isFinite(obj?.height)
+      ? Number(obj.height)
+      : defaults.height;
+    return base;
+  }
+
+  if (type === "wall") {
+    base.width = Number.isFinite(obj?.width)
+      ? Number(obj.width)
+      : defaults.width;
+    base.length = Number.isFinite(obj?.length)
+      ? Number(obj.length)
+      : defaults.length;
+    base.height = Number.isFinite(obj?.height)
+      ? Number(obj.height)
+      : defaults.height;
+    return base;
+  }
+
+  if (type === "pond") {
+    base.rx = Number.isFinite(obj?.rx) ? Number(obj.rx) : 78;
+    base.ry = Number.isFinite(obj?.ry) ? Number(obj.ry) : 44;
+    base.seed = Number.isFinite(obj?.seed) ? Number(obj.seed) : 0;
+    return base;
+  }
+
+  return base;
 }
 
 function cloneTrackData(trackData) {
@@ -1320,6 +1362,25 @@ export const physicsConfig = {
     reverseMaxSpeedMul: 0.32,
     inputSmoothing: 0.2,
     dtClamp: 0.033,
+  },
+  air: {
+    gravity: 50,
+    longDragMul: 0.18,
+    throttleAccelMul: 0.08,
+    brakeDecelMul: 0.04,
+    maxJumpHeight: 4,
+    bounceRestitution: 0.22,
+    minBounceVz: 1.4,
+    visualScalePerMeter: 0.06,
+    liftPxPerMeter: 7.5,
+  },
+  objects: {
+    treeHeight: 3,
+    barrelHeight: 1,
+    springHeight: 0.4,
+    wallHeight: 2.5,
+    wallThicknessDefault: 18,
+    springRadiusDefault: 16,
   },
   assists: {
     autoDriftGripCut: 0.3,

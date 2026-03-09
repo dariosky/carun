@@ -26,6 +26,7 @@ import {
 import { gameAudio } from "./game-audio.js";
 import { clamp, moveTowards } from "./utils.js";
 import {
+  findSpringTrigger,
   pointOnCenterLine,
   resolveObjectCollisions,
   surfaceAt,
@@ -174,6 +175,11 @@ function emitDrivingParticles({
 }
 
 function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
+  if (car.airborne) {
+    physicsRuntime.wheelLastPoints = null;
+    return;
+  }
+
   const points = wheelWorldPoints();
   const lastPoints = physicsRuntime.wheelLastPoints;
   physicsRuntime.wheelLastPoints = points;
@@ -212,6 +218,179 @@ function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
   }
 }
 
+function emitLandingMarks(surfaceName, impact) {
+  const isGrass = surfaceName === "grass";
+  const isWater = surfaceName === "water";
+  const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
+  if (!isGrass && !isWater && !isRoad) return;
+
+  const color = isGrass
+    ? "rgba(112, 74, 44, 0.40)"
+    : isWater
+      ? "rgba(245, 250, 255, 0.42)"
+      : "rgba(20, 20, 20, 0.37)";
+  const width = isGrass || isWater ? 2.7 : 2.2;
+  const forwardX = Math.cos(car.angle);
+  const forwardY = Math.sin(car.angle);
+  const markLength = 4 + clamp(impact, 0, 1) * 7;
+  const wheelPoints = wheelWorldPoints();
+
+  for (const point of wheelPoints) {
+    skidMarks.push({
+      x1: point.x - forwardX * markLength,
+      y1: point.y - forwardY * markLength,
+      x2: point.x,
+      y2: point.y,
+      color,
+      width,
+    });
+  }
+}
+
+function updateVehicleAudioState({
+  surfaceName,
+  headingForwardSpeed = 0,
+  headingLateralSpeed = 0,
+  longAccel = 0,
+}) {
+  const carCfg = physicsConfig.car;
+  const airCfg = physicsConfig.air;
+  const skidAmount = car.airborne
+    ? 0
+    : clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
+      clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
+  const airborneAmount = clamp(car.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1);
+  const wheelSpinAmount = car.airborne
+    ? clamp(
+        physicsRuntime.input.throttle * 0.8 +
+          Math.abs(car.vz) / Math.max(airCfg.maxJumpHeight * 4, 1),
+        0,
+        1,
+      )
+    : 0;
+
+  gameAudio.updateVehicleAudio({
+    speedNormalized: clamp(car.speed / Math.max(carCfg.maxSpeed, 1), 0, 1),
+    throttle: physicsRuntime.input.throttle,
+    acceleration: clamp(longAccel / Math.max(carCfg.engineAccel, 1), -1, 1),
+    skidAmount,
+    surface: surfaceName,
+    isMoving: car.speed > 4,
+    airborne: car.airborne,
+    airborneAmount,
+    wheelSpinAmount,
+  });
+}
+
+function launchFromSpring() {
+  const airCfg = physicsConfig.air;
+  const speedRatio = clamp(
+    car.speed / Math.max(physicsConfig.car.maxSpeed, 1),
+    0,
+    1,
+  );
+  const apexHeight = Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
+  car.airborne = true;
+  car.airTime = 0;
+  car.z = Math.max(car.z, 0.02);
+  car.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
+  car.visualScale = 1 + car.z * airCfg.visualScalePerMeter;
+  physicsRuntime.landingBouncePending = true;
+  physicsRuntime.lastGroundedSpeed = car.speed;
+  physicsRuntime.wheelLastPoints = null;
+}
+
+function resolveLanding(surfaceName) {
+  const airCfg = physicsConfig.air;
+  if (car.z > 0) return;
+  car.z = 0;
+  const landingImpact = clamp(Math.abs(car.vz) / 8, 0, 1);
+  if (landingImpact > 0.08) emitLandingMarks(surfaceName, landingImpact);
+  if (car.vz < -airCfg.minBounceVz && physicsRuntime.landingBouncePending) {
+    car.vz = Math.abs(car.vz) * airCfg.bounceRestitution;
+    car.airborne = true;
+    car.airTime += 0.01;
+    physicsRuntime.landingBouncePending = false;
+    physicsRuntime.wheelLastPoints = null;
+    return;
+  }
+
+  car.vz = 0;
+  car.airborne = false;
+  car.airTime = 0;
+  car.visualScale = 1;
+  physicsRuntime.landingBouncePending = false;
+  physicsRuntime.landingCooldown = 0.1;
+  physicsRuntime.lastGroundedSpeed = car.speed;
+  physicsRuntime.wheelLastPoints = wheelWorldPoints();
+  if (landingImpact > 0.08) gameAudio.playLandingBump(landingImpact);
+  if (surfaceName === "grass") physicsRuntime.collisionGripTimer = 0.04;
+}
+
+function integrateAirborneMotion(dt, surfaceName) {
+  const airCfg = physicsConfig.air;
+  const carCfg = physicsConfig.car;
+  const headingX = Math.cos(car.angle);
+  const headingY = Math.sin(car.angle);
+  const headingForwardSpeed = car.vx * headingX + car.vy * headingY;
+  let forwardSpeed = headingForwardSpeed;
+
+  forwardSpeed +=
+    carCfg.engineAccel *
+    airCfg.throttleAccelMul *
+    physicsRuntime.input.throttle *
+    dt;
+  forwardSpeed -=
+    carCfg.brakeDecel * airCfg.brakeDecelMul * physicsRuntime.input.brake * dt;
+  forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
+
+  car.vx = headingX * forwardSpeed;
+  car.vy = headingY * forwardSpeed;
+  const collision = resolveObjectCollisions(
+    car.x + car.vx * dt,
+    car.y + car.vy * dt,
+    car.z,
+  );
+  car.x = collision.x;
+  car.y = collision.y;
+  if (collision.hit) {
+    const inwardSpeed = car.vx * collision.normalX + car.vy * collision.normalY;
+    if (inwardSpeed < 0) {
+      car.vx -= inwardSpeed * collision.normalX;
+      car.vy -= inwardSpeed * collision.normalY;
+    }
+  }
+
+  car.speed = Math.hypot(car.vx, car.vy);
+  car.vz -= airCfg.gravity * dt;
+  car.z += car.vz * dt;
+  car.airTime += dt;
+  car.visualScale = Math.min(
+    1.32,
+    1 + Math.max(car.z, 0) * airCfg.visualScalePerMeter,
+  );
+  physicsRuntime.debug.surface = surfaceName;
+  physicsRuntime.debug.vForward = forwardSpeed;
+  physicsRuntime.debug.vLateral = 0;
+  physicsRuntime.debug.z = car.z;
+  physicsRuntime.debug.vz = car.vz;
+  physicsRuntime.debug.pivotX = car.x;
+  physicsRuntime.debug.pivotY = car.y;
+
+  resolveLanding(surfaceName);
+
+  const prevForward = physicsRuntime.prevForwardSpeed;
+  const longAccel =
+    prevForward === null || dt <= 0 ? 0 : (forwardSpeed - prevForward) / dt;
+  physicsRuntime.prevForwardSpeed = forwardSpeed;
+  updateVehicleAudioState({
+    surfaceName,
+    headingForwardSpeed: forwardSpeed,
+    headingLateralSpeed: 0,
+    longAccel,
+  });
+}
+
 export function resetRace() {
   const spawnAngle = trackStartAngle(track);
   const spawnPoint = pointOnCenterLine(spawnAngle, track);
@@ -225,6 +404,11 @@ export function resetRace() {
     aheadPoint.x - spawnPoint.x,
   );
   car.speed = 0;
+  car.z = 0;
+  car.vz = 0;
+  car.airborne = false;
+  car.airTime = 0;
+  car.visualScale = 1;
   state.raceTime = 0;
   state.finished = false;
   state.paused = false;
@@ -254,6 +438,9 @@ export function resetRace() {
   physicsRuntime.recoveryTimer = 0;
   physicsRuntime.collisionGripTimer = 0;
   physicsRuntime.impactCooldown = 0;
+  physicsRuntime.lastGroundedSpeed = 0;
+  physicsRuntime.landingBouncePending = false;
+  physicsRuntime.landingCooldown = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = {
     lateralGripMul: 1,
@@ -263,6 +450,8 @@ export function resetRace() {
   };
   physicsRuntime.debug.pivotX = car.x;
   physicsRuntime.debug.pivotY = car.y;
+  physicsRuntime.debug.z = 0;
+  physicsRuntime.debug.vz = 0;
   physicsRuntime.wheelLastPoints = null;
   physicsRuntime.prevForwardSpeed = null;
   physicsRuntime.particleEmitters.smokeCooldown = 0;
@@ -287,6 +476,7 @@ export function clearRaceInputs() {
 
 export function updateRace(dt) {
   const carCfg = physicsConfig.car;
+  const airCfg = physicsConfig.air;
   const assistCfg = physicsConfig.assists;
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
@@ -325,6 +515,9 @@ export function updateRace(dt) {
       skidAmount: 0,
       surface: surfaceName,
       isMoving: false,
+      airborne: false,
+      airborneAmount: 0,
+      wheelSpinAmount: 0,
     });
     return;
   }
@@ -338,24 +531,12 @@ export function updateRace(dt) {
 
   const targetSurface =
     physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
-  const blendAlpha = flags.SURFACE_BLENDING
-    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
-    : 1;
-  physicsRuntime.surface.lateralGripMul +=
-    (targetSurface.lateralGripMul - physicsRuntime.surface.lateralGripMul) *
-    blendAlpha;
-  physicsRuntime.surface.longDragMul +=
-    (targetSurface.longDragMul - physicsRuntime.surface.longDragMul) *
-    blendAlpha;
-  physicsRuntime.surface.engineMul +=
-    (targetSurface.engineMul - physicsRuntime.surface.engineMul) * blendAlpha;
-  physicsRuntime.surface.coastDecelMul +=
-    (targetSurface.coastDecelMul - physicsRuntime.surface.coastDecelMul) *
-    blendAlpha;
 
   const throttleTarget = keys.accel ? 1 : 0;
   const brakeTarget = keys.brake ? 1 : 0;
-  const steerTarget = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  const steerTarget = car.airborne
+    ? 0
+    : (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
   const handbrakeTarget = keys.handbrake ? 1 : 0;
 
   physicsRuntime.input.throttle = smoothInputValue(
@@ -378,6 +559,36 @@ export function updateRace(dt) {
     handbrakeTarget,
     dt,
   );
+
+  if (physicsRuntime.landingCooldown > 0) {
+    physicsRuntime.landingCooldown = Math.max(
+      0,
+      physicsRuntime.landingCooldown - dt,
+    );
+  }
+
+  if (car.airborne) {
+    integrateAirborneMotion(dt, surfaceName);
+    if (!state.finished) {
+      checkCheckpoints();
+    }
+    return;
+  }
+
+  const blendAlpha = flags.SURFACE_BLENDING
+    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
+    : 1;
+  physicsRuntime.surface.lateralGripMul +=
+    (targetSurface.lateralGripMul - physicsRuntime.surface.lateralGripMul) *
+    blendAlpha;
+  physicsRuntime.surface.longDragMul +=
+    (targetSurface.longDragMul - physicsRuntime.surface.longDragMul) *
+    blendAlpha;
+  physicsRuntime.surface.engineMul +=
+    (targetSurface.engineMul - physicsRuntime.surface.engineMul) * blendAlpha;
+  physicsRuntime.surface.coastDecelMul +=
+    (targetSurface.coastDecelMul - physicsRuntime.surface.coastDecelMul) *
+    blendAlpha;
 
   const forwardX = Math.cos(car.angle);
   const forwardY = Math.sin(car.angle);
@@ -559,7 +770,7 @@ export function updateRace(dt) {
   const nx = car.x + car.vx * dt + pivotShiftX;
   const ny = car.y + car.vy * dt + pivotShiftY;
 
-  const collision = resolveObjectCollisions(nx, ny);
+  const collision = resolveObjectCollisions(nx, ny, car.z);
   car.x = collision.x;
   car.y = collision.y;
   if (collision.hit) {
@@ -618,6 +829,7 @@ export function updateRace(dt) {
   }
 
   car.speed = Math.hypot(car.vx, car.vy);
+  physicsRuntime.lastGroundedSpeed = car.speed;
   const headingForwardSpeed =
     car.vx * headingForwardX + car.vy * headingForwardY;
   const headingLateralSpeed = car.vx * headingRightX + car.vy * headingRightY;
@@ -626,6 +838,8 @@ export function updateRace(dt) {
   physicsRuntime.debug.vLateral = headingLateralSpeed;
   physicsRuntime.debug.pivotX = car.x + headingForwardX * pivotOffset;
   physicsRuntime.debug.pivotY = car.y + headingForwardY * pivotOffset;
+  physicsRuntime.debug.z = car.z;
+  physicsRuntime.debug.vz = car.vz;
   physicsRuntime.debug.slipAngle = Math.atan2(
     Math.abs(headingLateralSpeed),
     Math.abs(headingForwardSpeed) + 0.0001,
@@ -636,6 +850,10 @@ export function updateRace(dt) {
       ? 0
       : (headingForwardSpeed - prevForward) / dt;
   physicsRuntime.prevForwardSpeed = headingForwardSpeed;
+  const spring = findSpringTrigger(car.x, car.y);
+  if (spring && !car.airborne) {
+    launchFromSpring();
+  }
   const skidSurface = surfaceAt(car.x, car.y);
   const wheelPoints = wheelWorldPoints();
   recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
@@ -651,13 +869,11 @@ export function updateRace(dt) {
   const skidAmount =
     clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
     clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
-  gameAudio.updateVehicleAudio({
-    speedNormalized: clamp(car.speed / Math.max(carCfg.maxSpeed, 1), 0, 1),
-    throttle: physicsRuntime.input.throttle,
-    acceleration: clamp(longAccel / Math.max(carCfg.engineAccel, 1), -1, 1),
-    skidAmount,
-    surface: skidSurface,
-    isMoving: car.speed > 4,
+  updateVehicleAudioState({
+    surfaceName: skidSurface,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    longAccel,
   });
 
   if (!state.finished) {
