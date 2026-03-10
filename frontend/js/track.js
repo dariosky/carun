@@ -851,6 +851,11 @@ function buildBestLapRoute(graph, trackDef) {
   const routeTargetSpeeds = routeNodeIds.map(
     (nodeId) => graph.nodes[nodeId].baseTargetSpeed,
   );
+  // Physics-based backward propagation: v_entry = sqrt(v_next² + 2·a·d).
+  // This lets the AI carry maximum speed into corners while guaranteeing it
+  // can brake in time.
+  const brakeDecel = physicsConfig.car.brakeDecel;
+  const brakingEff = physicsConfig.ai.brakingEfficiency;
   for (let i = routeTargetSpeeds.length - 2; i >= 0; i--) {
     const node = graph.nodes[routeNodeIds[i]];
     const nextNode = graph.nodes[routeNodeIds[i + 1]];
@@ -858,9 +863,10 @@ function buildBestLapRoute(graph, trackDef) {
       nextNode.x - node.x,
       nextNode.y - node.y,
     );
-    const carrySpeed =
-      routeTargetSpeeds[i + 1] +
-      segmentDistance * physicsConfig.ai.brakeCarryPerUnit;
+    const carrySpeed = Math.sqrt(
+      routeTargetSpeeds[i + 1] * routeTargetSpeeds[i + 1] +
+        2 * brakeDecel * brakingEff * segmentDistance,
+    );
     routeTargetSpeeds[i] = Math.min(routeTargetSpeeds[i], carrySpeed);
   }
   if (routeTargetSpeeds.length > 1) {
@@ -870,9 +876,13 @@ function buildBestLapRoute(graph, trackDef) {
       graph.nodes[routeNodeIds[0]].y -
         graph.nodes[routeNodeIds[routeNodeIds.length - 1]].y,
     );
+    const tailCarry = Math.sqrt(
+      routeTargetSpeeds[0] * routeTargetSpeeds[0] +
+        2 * brakeDecel * brakingEff * tailDistance,
+    );
     routeTargetSpeeds[routeTargetSpeeds.length - 1] = Math.min(
       routeTargetSpeeds[routeTargetSpeeds.length - 1],
-      routeTargetSpeeds[0] + tailDistance * physicsConfig.ai.brakeCarryPerUnit,
+      tailCarry,
     );
   }
 

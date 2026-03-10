@@ -448,12 +448,20 @@ test("ai uses the same grass slowdown and skid pipeline as the player", () => {
   aiCar.x = 60;
   aiCar.y = 60;
   aiCar.angle = 0;
-  aiCar.vx = 180;
-  aiCar.vy = 95;
-  aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
+  aiCar.vx = 310;
+  aiCar.vy = 0;
+  aiCar.speed = 310;
+  // Prevent soft-reset teleporting the AI back to the track.
+  aiPhysicsRuntime.softResetCooldown = 99;
+  // Pre-set the surface blend to grass values so the drag/engine multipliers
+  // are already active from the first frame (surface blending is gradual).
+  aiPhysicsRuntime.surface.lateralGripMul = 0.88;
+  aiPhysicsRuntime.surface.longDragMul = 2.35;
+  aiPhysicsRuntime.surface.engineMul = 0.36;
+  aiPhysicsRuntime.surface.coastDecelMul = 2.6;
 
   const initialSpeed = aiCar.speed;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 20; i++) {
     updateRace(0.016);
   }
 

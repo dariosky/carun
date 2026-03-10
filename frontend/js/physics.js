@@ -509,25 +509,25 @@ function setAiInputTargets(
   dt,
   { throttle = 0, brake = 0, steer = 0, handbrake = 0 },
 ) {
-  aiPhysicsRuntime.input.throttle = smoothInputValue(
+  // AI uses very fast input response (near-instant) — no human-like lag.
+  const aiSmoothing = physicsConfig.ai.inputSmoothing;
+  const response = clamp((1 - aiSmoothing) * dt * 60, 0, 1);
+  const chase = (current, target) => current + (target - current) * response;
+  aiPhysicsRuntime.input.throttle = chase(
     aiPhysicsRuntime.input.throttle,
     clamp(throttle, 0, 1),
-    dt,
   );
-  aiPhysicsRuntime.input.brake = smoothInputValue(
+  aiPhysicsRuntime.input.brake = chase(
     aiPhysicsRuntime.input.brake,
     clamp(brake, 0, 1),
-    dt,
   );
-  aiPhysicsRuntime.input.steer = smoothInputValue(
+  aiPhysicsRuntime.input.steer = chase(
     aiPhysicsRuntime.input.steer,
     clamp(steer, -1, 1),
-    dt,
   );
-  aiPhysicsRuntime.input.handbrake = smoothInputValue(
+  aiPhysicsRuntime.input.handbrake = chase(
     aiPhysicsRuntime.input.handbrake,
     clamp(handbrake, 0, 1),
-    dt,
   );
 }
 
@@ -704,17 +704,37 @@ function computeAiTargetSpeed(graph) {
     return physicsConfig.ai.targetSpeedMin;
   }
   const aiCfg = physicsConfig.ai;
+  const brakeDecel = physicsConfig.car.brakeDecel;
   let targetSpeed = aiCfg.targetSpeedMax;
   const endIndex = Math.min(
     aiPhysicsRuntime.plannedNodeIds.length - 1,
     aiPhysicsRuntime.pathCursor + aiCfg.targetSpeedLookAhead,
   );
+  // Accumulate real pixel distance along the planned path for physics-based
+  // braking: v_allowed = sqrt(v_node² + 2 * brakeDecel * distance).
+  let cumulativeDistance = 0;
+  let prevNode =
+    graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
   for (let i = aiPhysicsRuntime.pathCursor; i <= endIndex; i++) {
     const node = graph.nodes[aiPhysicsRuntime.plannedNodeIds[i]];
     if (!node) continue;
-    const distanceIndex = i - aiPhysicsRuntime.pathCursor;
-    const brakingAllowance = distanceIndex <= 1 ? 0 : distanceIndex * 18;
-    targetSpeed = Math.min(targetSpeed, node.targetSpeed + brakingAllowance);
+    if (i > aiPhysicsRuntime.pathCursor && prevNode) {
+      cumulativeDistance += Math.hypot(
+        node.x - prevNode.x,
+        node.y - prevNode.y,
+      );
+    }
+    prevNode = node;
+    // At the cursor node itself (distance 0) use node speed directly.
+    // Further ahead, allow higher entry speed based on kinematic braking.
+    const allowedSpeed =
+      cumulativeDistance <= 1
+        ? node.targetSpeed
+        : Math.sqrt(
+            node.targetSpeed * node.targetSpeed +
+              2 * brakeDecel * aiCfg.brakingEfficiency * cumulativeDistance,
+          );
+    targetSpeed = Math.min(targetSpeed, allowedSpeed);
   }
   aiPhysicsRuntime.desiredSpeed = clamp(
     targetSpeed * aiCfg.targetSpeedBias,
@@ -758,36 +778,35 @@ function updateAiRaceControl(dt, graph) {
   const rightY = forwardX;
   const lateralError = dx * rightX + dy * rightY;
   const headingError = signedAngleDelta(aiCar.angle, desiredHeading);
-  const obstacleTurnDamping =
-    distanceToTarget <= aiCfg.obstacleTurnDampingDistance
-      ? 1
-      : clamp(
-          1 -
-            (distanceToTarget - aiCfg.obstacleTurnDampingDistance) /
-              Math.max(aiCfg.tangentBlendDistance, 1),
-          0,
-          1,
-        );
   let steerTarget =
     headingError * physicsConfig.ai.steeringGain +
     lateralError * physicsConfig.ai.lateralErrorGain;
-  steerTarget *= 1 - obstacleTurnDamping * 0.18;
   steerTarget = clamp(steerTarget, -1, 1);
 
   const forwardSpeed = aiCar.vx * forwardX + aiCar.vy * forwardY;
   const targetSpeed = computeAiTargetSpeed(graph);
   let throttleTarget = 1;
   let brakeTarget = 0;
-  if (forwardSpeed > targetSpeed + aiCfg.lateBrakeMargin) {
-    brakeTarget = clamp((forwardSpeed - targetSpeed) / 72, 0, 1);
-    throttleTarget = brakeTarget > 0.1 ? 0 : 1;
-  } else {
-    throttleTarget = 1;
+  const speedExcess = forwardSpeed - targetSpeed;
+  if (speedExcess > aiCfg.lateBrakeMargin) {
+    // Hard braking zone — proportional but sharp response
+    brakeTarget = clamp(speedExcess / aiCfg.brakeRampRange, 0.15, 1);
+    throttleTarget = brakeTarget > 0.15 ? 0 : 0.3;
+  } else if (speedExcess > 0) {
+    // Trail-braking zone: modulate throttle instead of braking
+    throttleTarget = clamp(1 - speedExcess / aiCfg.lateBrakeMargin, 0.2, 1);
   }
   let handbrakeTarget = 0;
-  if (Math.abs(headingError) > 1.18 && Math.abs(forwardSpeed) > 235) {
-    handbrakeTarget = clamp((Math.abs(headingError) - 1.18) / 0.45, 0, 0.4);
-    throttleTarget *= 0.94;
+  if (
+    Math.abs(headingError) > aiCfg.handbrakeHeadingThreshold &&
+    Math.abs(forwardSpeed) > aiCfg.handbrakeSpeedThreshold
+  ) {
+    handbrakeTarget = clamp(
+      (Math.abs(headingError) - aiCfg.handbrakeHeadingThreshold) / 0.45,
+      0,
+      0.5,
+    );
+    throttleTarget *= 0.9;
   }
 
   const rivalDistance = Math.hypot(car.x - aiCar.x, car.y - aiCar.y);
@@ -1343,7 +1362,7 @@ export function resolveCarToCarCollision(
 }
 
 function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
-  if (!checkpoints.length || targetLapData.finished) return;
+  if (!checkpoints.length) return;
   const { blink = false, onFinish = null, racerKey = "player" } = options;
   const startCheckpointIndex = getStartCheckpointIndex();
   const targetIndex = targetLapData.nextCheckpointIndex % checkpoints.length;
@@ -1374,11 +1393,17 @@ function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
   const lapTime = state.raceTime - targetLapData.currentLapStart;
   if (lapTime <= 2) return;
 
-  targetLapData.lapTimes.push(lapTime);
-  targetLapData.currentLapStart = state.raceTime;
+  // Reset checkpoint set and advance to next lap's first checkpoint,
+  // keeping the car cycling through checkpoints even after finishing.
   targetLapData.passed = new Set([startCheckpointIndex]);
   targetLapData.nextCheckpointIndex =
     (startCheckpointIndex + 1) % checkpoints.length;
+
+  // After the race is finished, keep cycling but don't record times or advance laps.
+  if (targetLapData.finished) return;
+
+  targetLapData.lapTimes.push(lapTime);
+  targetLapData.currentLapStart = state.raceTime;
   targetLapData.lap += 1;
 
   if (targetLapData.lap > targetLapData.maxLaps) {
