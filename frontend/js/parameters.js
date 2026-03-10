@@ -18,6 +18,7 @@ export const HEIGHT = canvas.height;
 const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
 const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
+const AI_OPPONENTS_STORAGE_KEY = "carun.aiOpponentsEnabled";
 const OBJECT_DEFAULTS = {
   tree: { height: 1.5, r: 24, angle: 0 },
   barrel: { height: 1, r: 12, angle: 0 },
@@ -90,6 +91,25 @@ export function saveMenuMusicEnabled(enabled) {
   }
 }
 
+export function loadAiOpponentsEnabled(defaultValue = false) {
+  try {
+    const raw = localStorage.getItem(AI_OPPONENTS_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return defaultValue;
+}
+
+export function saveAiOpponentsEnabled(enabled) {
+  try {
+    localStorage.setItem(AI_OPPONENTS_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
 export function getMenuItems(authenticated) {
   return authenticated
     ? ["RACE", "SETTINGS"]
@@ -102,8 +122,15 @@ export function getLoginProviderItems() {
 
 export function getSettingsItems(authenticated) {
   return authenticated
-    ? ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "LOGOUT", "BACK"]
-    : ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "BACK"];
+    ? [
+        "PLAYER NAME",
+        "MENU MUSIC",
+        "AI OPPONENTS",
+        "DEBUG MODE",
+        "LOGOUT",
+        "BACK",
+      ]
+    : ["PLAYER NAME", "MENU MUSIC", "AI OPPONENTS", "DEBUG MODE", "BACK"];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
@@ -1396,6 +1423,79 @@ export const physicsConfig = {
     handbrakeSlipBoost: 0.42,
     handbrakeReverseKillDecel: 1900,
   },
+  ai: {
+    navProgressSamples: 96,
+    navLaneSamples: [
+      -1.35, -1.1, -0.84, -0.56, -0.28, 0, 0.28, 0.56, 0.84, 1.1, 1.35,
+    ],
+    navIntersectionLinkRadius: 92,
+    navIntersectionHeadingThreshold: 0.18,
+    navIntersectionMinSliceGap: 4,
+    navIntersectionMaxLinks: 4,
+    navIntersectionPenalty: 10,
+    lookAheadBase: 10,
+    lookAheadSpeedMul: 0.034,
+    steeringGain: 1.02,
+    lateralErrorGain: 0.0065,
+    targetSpeedLookAhead: 5,
+    routeHorizon: 42,
+    checkpointPlanLookAhead: 2,
+    checkpointGoalDepth: 36,
+    checkpointGoalExitDepth: 54,
+    checkpointGoalLateralMargin: 14,
+    checkpointGoalHeadingAlignment: 0.3,
+    checkpointGoalNodeLimit: 10,
+    checkpointContinuationNodes: 8,
+    routeRejoinMin: 6,
+    routeRejoinWindow: 20,
+    targetPreviewDistanceBase: 82,
+    targetPreviewSpeedMul: 0.34,
+    targetPreviewMaxDistance: 280,
+    targetSightlineSamples: 8,
+    tangentBlendMax: 0.2,
+    tangentBlendDistance: 110,
+    obstacleTurnDampingDistance: 44,
+    laneChangePenalty: 1.2,
+    edgeGrassPenalty: 48,
+    edgeCurbPenalty: 2,
+    edgeWaterPenalty: 1000,
+    obstaclePenalty: 1200,
+    obstacleAvoidanceRadius: 34,
+    obstacleHardClearance: 10,
+    playerNodePenalty: 20,
+    playerAvoidanceRadius: 24,
+    rivalAvoidanceRadius: 22,
+    contactPush: 42,
+    targetSpeedBias: 1,
+    targetSpeedMin: 160,
+    targetSpeedMax: 320,
+    cornerSpeedMin: 150,
+    fullThrottleCurvature: 0.11,
+    curvatureSpeedScale: 1850,
+    curvatureSpeedBias: 124,
+    brakeCarryPerUnit: 0.95,
+    throttleFloor: 1,
+    lateBrakeMargin: 6,
+    apexApproachWeight: 0.28,
+    apexCommitWeight: 0.44,
+    apexTransitionWeight: 0.16,
+    replanInterval: 0.2,
+    pathNodeReachDistance: 42,
+    stuckSpeedThreshold: 18,
+    stuckProgressThreshold: 0.003,
+    stuckTime: 1.25,
+    offRoadStuckTime: 0.55,
+    grassRecoveryPathDistance: 64,
+    grassRecoverySpeedThreshold: 36,
+    repeatedCollisionTime: 0.75,
+    reverseRecoverTime: 0.55,
+    forwardRecoverTime: 0.75,
+    maxRecoveryTime: 2.2,
+    softResetSearchRadius: 80,
+    softResetSearchRadiusFallback: 140,
+    softResetCooldown: 3,
+    softResetForwardSpeed: 30,
+  },
   surfaces: {
     asphalt: {
       lateralGripMul: 0.95,
@@ -1428,6 +1528,7 @@ export const physicsConfig = {
     HANDBRAKE_MODE: true,
     SPEED_SENSITIVE_STEERING: true,
     SURFACE_BLENDING: true,
+    AI_OPPONENTS_ENABLED: loadAiOpponentsEnabled(false),
     DEBUG_MODE: loadDebugMode(false),
     ARCADE_COLLISION_PUSH: true,
   },

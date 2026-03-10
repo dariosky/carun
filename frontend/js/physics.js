@@ -17,6 +17,9 @@ import {
 } from "./particles.js";
 import {
   car,
+  aiCar,
+  aiLapData,
+  aiPhysicsRuntime,
   keys,
   lapData,
   physicsRuntime,
@@ -27,9 +30,12 @@ import { gameAudio } from "./game-audio.js";
 import { clamp, moveTowards } from "./utils.js";
 import {
   findSpringTrigger,
+  findNearestTrackNavNode,
+  getTrackNavigationGraph,
   pointOnCenterLine,
   resolveObjectCollisions,
   surfaceAt,
+  trackProgressAtPoint,
   trackFrameAtAngle,
   trackStartAngle,
 } from "./track.js";
@@ -72,14 +78,1325 @@ function getStartCheckpointIndex() {
   return bestIdx;
 }
 
-function wheelWorldPoints() {
-  const forwardX = Math.cos(car.angle);
-  const forwardY = Math.sin(car.angle);
+function wrapProgress(progress) {
+  return ((progress % 1) + 1) % 1;
+}
+
+function signedAngleDelta(from, to) {
+  let delta = to - from;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  return delta;
+}
+
+function resetLapProgress(targetLapData, startCheckpointIndex) {
+  targetLapData.currentLapStart = 0;
+  targetLapData.lapTimes = [];
+  targetLapData.passed = new Set([startCheckpointIndex]);
+  targetLapData.nextCheckpointIndex =
+    checkpoints.length > 0
+      ? (startCheckpointIndex + 1) % checkpoints.length
+      : 0;
+  targetLapData.lap = 1;
+  if ("finished" in targetLapData) targetLapData.finished = false;
+  if ("finishTime" in targetLapData) targetLapData.finishTime = 0;
+}
+
+function aiOpponentsEnabled() {
+  return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
+}
+
+function recordRaceFinish(racerKey) {
+  const orderKey = racerKey === "ai" ? "aiFinishOrder" : "playerFinishOrder";
+  if (state.raceStandings[orderKey] > 0) return state.raceStandings[orderKey];
+  const finishOrder = state.raceStandings.nextFinishOrder;
+  state.raceStandings[orderKey] = finishOrder;
+  state.raceStandings.nextFinishOrder += 1;
+  return finishOrder;
+}
+
+function getRacerSnapshot(racerKey) {
+  const isAi = racerKey === "ai";
+  const vehicle = isAi ? aiCar : car;
+  const racerLapData = isAi ? aiLapData : lapData;
+  const finishOrder = isAi
+    ? state.raceStandings.aiFinishOrder
+    : state.raceStandings.playerFinishOrder;
+  return {
+    id: racerKey,
+    finished: racerLapData.finished,
+    finishOrder,
+    finishTime: racerLapData.finishTime || 0,
+    lapsCompleted: Math.max(
+      0,
+      Math.min(racerLapData.lap - 1, racerLapData.maxLaps),
+    ),
+    lapProgress: trackProgressAtPoint(vehicle.x, vehicle.y, track),
+  };
+}
+
+function compareRaceSnapshots(a, b) {
+  if (a.finished || b.finished) {
+    if (a.finished && b.finished) {
+      if (a.finishOrder !== b.finishOrder) return a.finishOrder - b.finishOrder;
+      return a.finishTime - b.finishTime;
+    }
+    return a.finished ? -1 : 1;
+  }
+  if (a.lapsCompleted !== b.lapsCompleted) {
+    return b.lapsCompleted - a.lapsCompleted;
+  }
+  if (a.lapProgress !== b.lapProgress) {
+    return b.lapProgress - a.lapProgress;
+  }
+  return 0;
+}
+
+export function getRaceStandings() {
+  const standings = [getRacerSnapshot("player")];
+  if (aiOpponentsEnabled()) standings.push(getRacerSnapshot("ai"));
+  standings.sort(compareRaceSnapshots);
+  return standings;
+}
+
+export function getRacePosition(racerKey = "player") {
+  const standings = getRaceStandings();
+  const index = standings.findIndex((entry) => entry.id === racerKey);
+  return index >= 0 ? index + 1 : standings.length;
+}
+
+function progressDeltaForward(from, to) {
+  return wrapProgress(to - from);
+}
+
+function estimateNavHeuristic(node, goalNodeIds, graph) {
+  if (!goalNodeIds.length) return 0;
+  let best = Infinity;
+  for (const goalNodeId of goalNodeIds) {
+    const goalNode = graph.nodes[goalNodeId];
+    if (!goalNode) continue;
+    best = Math.min(best, Math.hypot(goalNode.x - node.x, goalNode.y - node.y));
+  }
+  return best === Infinity ? 0 : best;
+}
+
+export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
+  if (
+    !graph ||
+    startNodeId < 0 ||
+    startNodeId >= graph.nodes.length ||
+    !goalNodeIds.length
+  ) {
+    return [];
+  }
+  const aiCfg = physicsConfig.ai;
+  const goalSet = new Set(goalNodeIds);
+  const gScore = new Float64Array(graph.nodes.length);
+  const fScore = new Float64Array(graph.nodes.length);
+  const cameFrom = new Int32Array(graph.nodes.length);
+  const inOpen = new Uint8Array(graph.nodes.length);
+  const closed = new Uint8Array(graph.nodes.length);
+  gScore.fill(Infinity);
+  fScore.fill(Infinity);
+  cameFrom.fill(-1);
+  const open = [startNodeId];
+  gScore[startNodeId] = 0;
+  fScore[startNodeId] = estimateNavHeuristic(
+    graph.nodes[startNodeId],
+    goalNodeIds,
+    graph,
+  );
+  inOpen[startNodeId] = 1;
+
+  while (open.length) {
+    let bestIndex = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (fScore[open[i]] < fScore[open[bestIndex]]) bestIndex = i;
+    }
+    const currentId = open.splice(bestIndex, 1)[0];
+    inOpen[currentId] = 0;
+    if (goalSet.has(currentId) && currentId !== startNodeId) {
+      const path = [currentId];
+      let cursor = currentId;
+      while (cameFrom[cursor] >= 0) {
+        cursor = cameFrom[cursor];
+        path.push(cursor);
+      }
+      path.reverse();
+      return path;
+    }
+
+    closed[currentId] = 1;
+    for (const edge of graph.edges[currentId]) {
+      const neighborId = edge.to;
+      if (closed[neighborId]) continue;
+      const neighbor = graph.nodes[neighborId];
+      const playerDistance = Math.hypot(neighbor.x - car.x, neighbor.y - car.y);
+      const dynamicPenalty =
+        playerDistance >= aiCfg.playerAvoidanceRadius
+          ? 0
+          : aiCfg.playerNodePenalty *
+            (1 - playerDistance / Math.max(aiCfg.playerAvoidanceRadius, 1));
+      const tentative = gScore[currentId] + edge.cost + dynamicPenalty;
+      if (tentative >= gScore[neighborId]) continue;
+      cameFrom[neighborId] = currentId;
+      gScore[neighborId] = tentative;
+      fScore[neighborId] =
+        tentative + estimateNavHeuristic(neighbor, goalNodeIds, graph);
+      if (!inOpen[neighborId]) {
+        open.push(neighborId);
+        inOpen[neighborId] = 1;
+      }
+    }
+  }
+
+  return [];
+}
+
+function getRouteNodeIdAt(graph, routeIndex) {
+  if (!graph.bestLapRouteNodeIds.length) return -1;
+  const normalizedIndex =
+    ((routeIndex % graph.bestLapRouteNodeIds.length) +
+      graph.bestLapRouteNodeIds.length) %
+    graph.bestLapRouteNodeIds.length;
+  return graph.bestLapRouteNodeIds[normalizedIndex] ?? -1;
+}
+
+function findNearestRouteIndex(graph, node, progressHint = null) {
+  if (!graph.bestLapRouteNodeIds.length) return -1;
+  if (node?.id >= 0) {
+    const exactIndex = graph.routeIndexByNodeId[node.id];
+    if (exactIndex >= 0) return exactIndex;
+  }
+  let bestRouteIndex = 0;
+  let bestScore = Infinity;
+  for (
+    let routeIndex = 0;
+    routeIndex < graph.bestLapRouteNodeIds.length;
+    routeIndex++
+  ) {
+    const routeNode = graph.nodes[graph.bestLapRouteNodeIds[routeIndex]];
+    if (!routeNode) continue;
+    let score = node
+      ? Math.hypot(routeNode.x - node.x, routeNode.y - node.y)
+      : 0;
+    if (progressHint !== null) {
+      score += progressDeltaForward(progressHint, routeNode.progress) * 60;
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestRouteIndex = routeIndex;
+    }
+  }
+  return bestRouteIndex;
+}
+
+function buildRouteHorizonNodeIds(graph, routeIndex, length) {
+  const nodeIds = [];
+  for (let offset = 0; offset < length; offset++) {
+    const nodeId = getRouteNodeIdAt(graph, routeIndex + offset);
+    if (nodeId >= 0) nodeIds.push(nodeId);
+  }
+  return nodeIds;
+}
+
+function appendCheckpointContinuation(graph, nodeIds, count) {
+  if (!graph || !nodeIds.length || count <= 0) return nodeIds;
+  const extendedNodeIds = [...nodeIds];
+  const visited = new Set(nodeIds);
+  let currentNodeId = nodeIds[nodeIds.length - 1];
+  for (let step = 0; step < count; step++) {
+    const currentNode = graph.nodes[currentNodeId];
+    if (!currentNode) break;
+    let bestEdge = null;
+    let bestScore = Infinity;
+    for (const edge of graph.edges[currentNodeId] || []) {
+      if (visited.has(edge.to)) continue;
+      const nextNode = graph.nodes[edge.to];
+      if (!nextNode) continue;
+      const turnPenalty =
+        Math.abs(
+          signedAngleDelta(
+            Math.atan2(currentNode.tangentY, currentNode.tangentX),
+            Math.atan2(nextNode.tangentY, nextNode.tangentX),
+          ),
+        ) * 18;
+      const score = edge.cost + turnPenalty + nextNode.obstaclePenalty * 0.04;
+      if (score < bestScore) {
+        bestScore = score;
+        bestEdge = edge;
+      }
+    }
+    if (!bestEdge) break;
+    extendedNodeIds.push(bestEdge.to);
+    visited.add(bestEdge.to);
+    currentNodeId = bestEdge.to;
+  }
+  return extendedNodeIds;
+}
+
+function buildAiPath(graph, force = false) {
+  const aiCfg = physicsConfig.ai;
+  if (!force && aiPhysicsRuntime.replanCooldown > 0) return;
+  const fallbackNode =
+    aiPhysicsRuntime.lastValidNodeId >= 0
+      ? graph.nodes[aiPhysicsRuntime.lastValidNodeId]
+      : null;
+  const currentNode =
+    findNearestTrackNavNode(aiCar.x, aiCar.y, {
+      progressHint: aiPhysicsRuntime.progress,
+      maxDistance: aiCfg.softResetSearchRadiusFallback,
+    }) || fallbackNode;
+  if (!currentNode) return;
+  aiPhysicsRuntime.currentNodeId = currentNode.id;
+  const currentRouteIndex = findNearestRouteIndex(
+    graph,
+    currentNode,
+    aiPhysicsRuntime.progress,
+  );
+  aiPhysicsRuntime.routeNodeIndex = currentRouteIndex;
+  const nextCheckpointIndex =
+    aiLapData.nextCheckpointIndex % checkpoints.length;
+  const checkpointGoalNodeIds =
+    graph.checkpointGoalNodeIds?.[nextCheckpointIndex] || [];
+  const checkpointFallbackNodeIds =
+    graph.checkpointNodeIds?.[nextCheckpointIndex] || [];
+  let plannedNodeIds = planTrackNavPath(
+    graph,
+    currentNode.id,
+    checkpointGoalNodeIds,
+  );
+  if (!plannedNodeIds.length && checkpointFallbackNodeIds.length) {
+    plannedNodeIds = planTrackNavPath(
+      graph,
+      currentNode.id,
+      checkpointFallbackNodeIds,
+    );
+  }
+  if (plannedNodeIds.length) {
+    plannedNodeIds = appendCheckpointContinuation(
+      graph,
+      plannedNodeIds,
+      aiCfg.checkpointContinuationNodes,
+    );
+  }
+  if (!plannedNodeIds.length && aiPhysicsRuntime.plannedNodeIds.length) {
+    plannedNodeIds = [...aiPhysicsRuntime.plannedNodeIds];
+  }
+  const terminalNodeId =
+    plannedNodeIds.length > 0
+      ? plannedNodeIds[plannedNodeIds.length - 1]
+      : currentNode.id;
+  const terminalNode = graph.nodes[terminalNodeId] || currentNode;
+  const rejoinRouteIndex = findNearestRouteIndex(
+    graph,
+    terminalNode,
+    terminalNode?.progress ?? aiPhysicsRuntime.progress,
+  );
+  if (plannedNodeIds.length) {
+    aiPhysicsRuntime.rejoinRouteIndex = rejoinRouteIndex;
+    aiPhysicsRuntime.plannedNodeIds = plannedNodeIds;
+    aiPhysicsRuntime.pathCursor = 0;
+    aiPhysicsRuntime.targetNodeId =
+      plannedNodeIds[Math.min(1, plannedNodeIds.length - 1)];
+    aiPhysicsRuntime.debugPathPoints = plannedNodeIds.map((nodeId) => {
+      const node = graph.nodes[nodeId];
+      return { x: node.x, y: node.y };
+    });
+  }
+  aiPhysicsRuntime.replanCooldown = aiCfg.replanInterval;
+}
+
+function primeAiRaceStartPlan() {
+  if (!aiOpponentsEnabled()) return;
+  const graph = getTrackNavigationGraph(track);
+  aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
+  aiPhysicsRuntime.progressAtLastSample = aiPhysicsRuntime.progress;
+  const nearestNode = findNearestTrackNavNode(aiCar.x, aiCar.y, {
+    progressHint: aiPhysicsRuntime.progress,
+    maxDistance: physicsConfig.ai.softResetSearchRadiusFallback,
+  });
+  if (nearestNode) {
+    aiPhysicsRuntime.currentNodeId = nearestNode.id;
+    aiPhysicsRuntime.lastValidNodeId = nearestNode.id;
+    const routeIndex = graph.routeIndexByNodeId[nearestNode.id];
+    if (routeIndex >= 0) aiPhysicsRuntime.routeNodeIndex = routeIndex;
+  }
+  buildAiPath(graph, true);
+}
+
+function pickAiRecoveryNode(graph, maxDistance) {
+  const baseProgress =
+    aiPhysicsRuntime.lastValidNodeId >= 0
+      ? (graph.nodes[aiPhysicsRuntime.lastValidNodeId]?.progress ??
+        aiPhysicsRuntime.progress)
+      : aiPhysicsRuntime.progress;
+  return findNearestTrackNavNode(aiCar.x, aiCar.y, {
+    maxDistance,
+    progressHint: baseProgress,
+    preferForwardProgress: baseProgress,
+  });
+}
+
+function applyAiSoftReset(graph) {
+  const aiCfg = physicsConfig.ai;
+  let candidate =
+    pickAiRecoveryNode(graph, aiCfg.softResetSearchRadius) ||
+    pickAiRecoveryNode(graph, aiCfg.softResetSearchRadiusFallback) ||
+    findNearestTrackNavNode(aiCar.x, aiCar.y, {
+      progressHint: aiPhysicsRuntime.progress,
+    });
+  if (
+    candidate &&
+    aiPhysicsRuntime.lastValidNodeId >= 0 &&
+    graph.nodes[aiPhysicsRuntime.lastValidNodeId]
+  ) {
+    const lastValid = graph.nodes[aiPhysicsRuntime.lastValidNodeId];
+    if (
+      progressDeltaForward(lastValid.progress, candidate.progress) >
+      2 / Math.max(graph.progressCount, 1)
+    ) {
+      candidate = lastValid;
+    }
+  }
+  if (!candidate && aiPhysicsRuntime.lastValidNodeId >= 0) {
+    candidate = graph.nodes[aiPhysicsRuntime.lastValidNodeId] || null;
+  }
+  if (!candidate) return;
+
+  aiCar.x = candidate.x;
+  aiCar.y = candidate.y;
+  aiCar.angle = Math.atan2(candidate.tangentY, candidate.tangentX);
+  aiCar.vx = Math.cos(aiCar.angle) * aiCfg.softResetForwardSpeed;
+  aiCar.vy = Math.sin(aiCar.angle) * aiCfg.softResetForwardSpeed;
+  aiCar.speed = aiCfg.softResetForwardSpeed;
+  aiCar.z = 0;
+  aiCar.vz = 0;
+  aiCar.airborne = false;
+  aiCar.airTime = 0;
+  aiCar.visualScale = 1;
+  aiPhysicsRuntime.mode = "race";
+  aiPhysicsRuntime.recoveryMode = "none";
+  aiPhysicsRuntime.recoveryTimer = 0;
+  aiPhysicsRuntime.lowProgressTimer = 0;
+  aiPhysicsRuntime.offRoadTimer = 0;
+  aiPhysicsRuntime.repeatedCollisionTimer = 0;
+  aiPhysicsRuntime.softResetCooldown = aiCfg.softResetCooldown;
+  aiPhysicsRuntime.currentNodeId = candidate.id;
+  aiPhysicsRuntime.lastValidNodeId = candidate.id;
+  aiPhysicsRuntime.targetNodeId = candidate.id;
+  aiPhysicsRuntime.routeNodeIndex = findNearestRouteIndex(
+    graph,
+    candidate,
+    candidate.progress,
+  );
+  aiPhysicsRuntime.rejoinRouteIndex = aiPhysicsRuntime.routeNodeIndex;
+  aiPhysicsRuntime.plannedNodeIds = [candidate.id];
+  aiPhysicsRuntime.pathCursor = 0;
+  aiPhysicsRuntime.desiredSpeed = candidate.targetSpeed;
+  aiPhysicsRuntime.targetPoint = { x: candidate.x, y: candidate.y };
+  aiPhysicsRuntime.debugPathPoints = [{ x: candidate.x, y: candidate.y }];
+  aiPhysicsRuntime.input.throttle = 0;
+  aiPhysicsRuntime.input.brake = 0;
+  aiPhysicsRuntime.input.steer = 0;
+  aiPhysicsRuntime.input.handbrake = 0;
+  aiPhysicsRuntime.steeringRate = 0;
+  aiPhysicsRuntime.collisionGripTimer = 0;
+  aiPhysicsRuntime.replanCooldown = 0;
+}
+
+function setAiInputTargets(
+  dt,
+  { throttle = 0, brake = 0, steer = 0, handbrake = 0 },
+) {
+  aiPhysicsRuntime.input.throttle = smoothInputValue(
+    aiPhysicsRuntime.input.throttle,
+    clamp(throttle, 0, 1),
+    dt,
+  );
+  aiPhysicsRuntime.input.brake = smoothInputValue(
+    aiPhysicsRuntime.input.brake,
+    clamp(brake, 0, 1),
+    dt,
+  );
+  aiPhysicsRuntime.input.steer = smoothInputValue(
+    aiPhysicsRuntime.input.steer,
+    clamp(steer, -1, 1),
+    dt,
+  );
+  aiPhysicsRuntime.input.handbrake = smoothInputValue(
+    aiPhysicsRuntime.input.handbrake,
+    clamp(handbrake, 0, 1),
+    dt,
+  );
+}
+
+function projectPointToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = Math.max(dx * dx + dy * dy, 1e-6);
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / lenSq, 0, 1);
+  return {
+    x: ax + dx * t,
+    y: ay + dy * t,
+    t,
+  };
+}
+
+function aiSightlineBlocked(ax, ay, bx, by, samples) {
+  for (let step = 1; step <= samples; step++) {
+    const t = step / samples;
+    const x = ax + (bx - ax) * t;
+    const y = ay + (by - ay) * t;
+    if (resolveObjectCollisions(x, y, 0).hit) return true;
+  }
+  return false;
+}
+
+function buildAiTargetPreview(graph) {
+  if (!aiPhysicsRuntime.plannedNodeIds.length) return null;
+  const aiCfg = physicsConfig.ai;
+  const currentNode =
+    graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
+  if (!currentNode) return null;
+
+  let anchorX = currentNode.x;
+  let anchorY = currentNode.y;
+  let segmentIndex = aiPhysicsRuntime.pathCursor;
+  if (
+    aiPhysicsRuntime.pathCursor <
+    aiPhysicsRuntime.plannedNodeIds.length - 1
+  ) {
+    const nextNode =
+      graph.nodes[
+        aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]
+      ];
+    if (nextNode) {
+      const projection = projectPointToSegment(
+        aiCar.x,
+        aiCar.y,
+        currentNode.x,
+        currentNode.y,
+        nextNode.x,
+        nextNode.y,
+      );
+      anchorX = projection.x;
+      anchorY = projection.y;
+    }
+  }
+
+  let remainingDistance = Math.min(
+    aiCfg.targetPreviewMaxDistance,
+    aiCfg.targetPreviewDistanceBase + aiCar.speed * aiCfg.targetPreviewSpeedMul,
+  );
+  let previewX = anchorX;
+  let previewY = anchorY;
+  let previewNode = currentNode;
+
+  while (
+    segmentIndex < aiPhysicsRuntime.plannedNodeIds.length - 1 &&
+    remainingDistance > 0
+  ) {
+    const fromNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
+    const toNode =
+      graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1]];
+    if (!fromNode || !toNode) break;
+    const fromX =
+      segmentIndex === aiPhysicsRuntime.pathCursor ? anchorX : fromNode.x;
+    const fromY =
+      segmentIndex === aiPhysicsRuntime.pathCursor ? anchorY : fromNode.y;
+    const segDx = toNode.x - fromX;
+    const segDy = toNode.y - fromY;
+    const segLen = Math.hypot(segDx, segDy);
+    if (segLen <= 1e-5) {
+      segmentIndex += 1;
+      continue;
+    }
+    if (remainingDistance <= segLen) {
+      const t = remainingDistance / segLen;
+      previewX = fromX + segDx * t;
+      previewY = fromY + segDy * t;
+      previewNode = toNode;
+      break;
+    }
+    previewX = toNode.x;
+    previewY = toNode.y;
+    previewNode = toNode;
+    remainingDistance -= segLen;
+    segmentIndex += 1;
+  }
+
+  while (
+    segmentIndex > aiPhysicsRuntime.pathCursor &&
+    aiSightlineBlocked(
+      aiCar.x,
+      aiCar.y,
+      previewX,
+      previewY,
+      aiCfg.targetSightlineSamples,
+    )
+  ) {
+    const fallbackNode =
+      graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
+    if (!fallbackNode) break;
+    previewX = fallbackNode.x;
+    previewY = fallbackNode.y;
+    previewNode = fallbackNode;
+    segmentIndex -= 1;
+  }
+
+  return {
+    x: previewX,
+    y: previewY,
+    node: previewNode,
+  };
+}
+
+function updateAiPathCursor(graph) {
+  if (!aiPhysicsRuntime.plannedNodeIds.length) return null;
+  const aiCfg = physicsConfig.ai;
+  while (
+    aiPhysicsRuntime.pathCursor <
+    aiPhysicsRuntime.plannedNodeIds.length - 1
+  ) {
+    const nextNode =
+      graph.nodes[
+        aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]
+      ];
+    if (!nextNode) break;
+    const distance = Math.hypot(nextNode.x - aiCar.x, nextNode.y - aiCar.y);
+    if (distance > aiCfg.pathNodeReachDistance) break;
+    aiPhysicsRuntime.pathCursor += 1;
+  }
+  const lookAheadNodeCount = Math.max(
+    1,
+    Math.round(aiCfg.lookAheadBase + aiCar.speed * aiCfg.lookAheadSpeedMul),
+  );
+  const targetIndex = Math.min(
+    aiPhysicsRuntime.plannedNodeIds.length - 1,
+    aiPhysicsRuntime.pathCursor + lookAheadNodeCount,
+  );
+  const targetNodeId = aiPhysicsRuntime.plannedNodeIds[targetIndex];
+  aiPhysicsRuntime.targetNodeId = targetNodeId;
+  const routeIndex = graph.routeIndexByNodeId[targetNodeId];
+  if (routeIndex >= 0) aiPhysicsRuntime.routeNodeIndex = routeIndex;
+  const targetNode = graph.nodes[targetNodeId] || null;
+  const preview = buildAiTargetPreview(graph);
+  if (preview) {
+    aiPhysicsRuntime.targetPoint = { x: preview.x, y: preview.y };
+    return {
+      ...(targetNode || {}),
+      x: preview.x,
+      y: preview.y,
+      tangentX: preview.node?.tangentX ?? targetNode?.tangentX ?? 1,
+      tangentY: preview.node?.tangentY ?? targetNode?.tangentY ?? 0,
+      targetSpeed:
+        preview.node?.targetSpeed ??
+        targetNode?.targetSpeed ??
+        physicsConfig.ai.targetSpeedMax,
+    };
+  }
+  return targetNode;
+}
+
+function computeAiTargetSpeed(graph) {
+  if (!aiPhysicsRuntime.plannedNodeIds.length) {
+    return physicsConfig.ai.targetSpeedMin;
+  }
+  const aiCfg = physicsConfig.ai;
+  let targetSpeed = aiCfg.targetSpeedMax;
+  const endIndex = Math.min(
+    aiPhysicsRuntime.plannedNodeIds.length - 1,
+    aiPhysicsRuntime.pathCursor + aiCfg.targetSpeedLookAhead,
+  );
+  for (let i = aiPhysicsRuntime.pathCursor; i <= endIndex; i++) {
+    const node = graph.nodes[aiPhysicsRuntime.plannedNodeIds[i]];
+    if (!node) continue;
+    const distanceIndex = i - aiPhysicsRuntime.pathCursor;
+    const brakingAllowance = distanceIndex <= 1 ? 0 : distanceIndex * 18;
+    targetSpeed = Math.min(targetSpeed, node.targetSpeed + brakingAllowance);
+  }
+  aiPhysicsRuntime.desiredSpeed = clamp(
+    targetSpeed * aiCfg.targetSpeedBias,
+    aiCfg.targetSpeedMin,
+    aiCfg.targetSpeedMax,
+  );
+  return aiPhysicsRuntime.desiredSpeed;
+}
+
+function updateAiRaceControl(dt, graph) {
+  const aiCfg = physicsConfig.ai;
+  if (
+    !aiPhysicsRuntime.plannedNodeIds.length ||
+    aiPhysicsRuntime.replanCooldown <= 0
+  ) {
+    buildAiPath(graph, !aiPhysicsRuntime.plannedNodeIds.length);
+  }
+  const targetNode = updateAiPathCursor(graph);
+  if (!targetNode) {
+    aiPhysicsRuntime.mode = "recover";
+    aiPhysicsRuntime.recoveryMode = "reverseTurn";
+    aiPhysicsRuntime.recoveryTimer = 0;
+    setAiInputTargets(dt, { brake: 1 });
+    return;
+  }
+
+  const dx = targetNode.x - aiCar.x;
+  const dy = targetNode.y - aiCar.y;
+  const distanceToTarget = Math.hypot(dx, dy);
+  const directHeading = Math.atan2(dy, dx);
+  const tangentHeading = Math.atan2(targetNode.tangentY, targetNode.tangentX);
+  const tangentBlend =
+    clamp(distanceToTarget / Math.max(aiCfg.tangentBlendDistance, 1), 0, 1) *
+    aiCfg.tangentBlendMax;
+  const desiredHeading =
+    directHeading +
+    signedAngleDelta(directHeading, tangentHeading) * tangentBlend;
+  const forwardX = Math.cos(aiCar.angle);
+  const forwardY = Math.sin(aiCar.angle);
   const rightX = -forwardY;
   const rightY = forwardX;
-  const frontOffset = car.width * 0.36;
-  const rearOffset = -car.width * 0.34;
-  const sideOffset = car.height * 0.43;
+  const lateralError = dx * rightX + dy * rightY;
+  const headingError = signedAngleDelta(aiCar.angle, desiredHeading);
+  const obstacleTurnDamping =
+    distanceToTarget <= aiCfg.obstacleTurnDampingDistance
+      ? 1
+      : clamp(
+          1 -
+            (distanceToTarget - aiCfg.obstacleTurnDampingDistance) /
+              Math.max(aiCfg.tangentBlendDistance, 1),
+          0,
+          1,
+        );
+  let steerTarget =
+    headingError * physicsConfig.ai.steeringGain +
+    lateralError * physicsConfig.ai.lateralErrorGain;
+  steerTarget *= 1 - obstacleTurnDamping * 0.18;
+  steerTarget = clamp(steerTarget, -1, 1);
+
+  const forwardSpeed = aiCar.vx * forwardX + aiCar.vy * forwardY;
+  const targetSpeed = computeAiTargetSpeed(graph);
+  let throttleTarget = 1;
+  let brakeTarget = 0;
+  if (forwardSpeed > targetSpeed + aiCfg.lateBrakeMargin) {
+    brakeTarget = clamp((forwardSpeed - targetSpeed) / 72, 0, 1);
+    throttleTarget = brakeTarget > 0.1 ? 0 : 1;
+  } else {
+    throttleTarget = 1;
+  }
+  let handbrakeTarget = 0;
+  if (Math.abs(headingError) > 1.18 && Math.abs(forwardSpeed) > 235) {
+    handbrakeTarget = clamp((Math.abs(headingError) - 1.18) / 0.45, 0, 0.4);
+    throttleTarget *= 0.94;
+  }
+
+  const rivalDistance = Math.hypot(car.x - aiCar.x, car.y - aiCar.y);
+  const rivalAhead =
+    (car.x - aiCar.x) * forwardX + (car.y - aiCar.y) * forwardY > 0;
+  if (rivalAhead && rivalDistance < physicsConfig.ai.rivalAvoidanceRadius) {
+    brakeTarget = Math.max(
+      brakeTarget,
+      0.04 *
+        (1 -
+          rivalDistance / Math.max(physicsConfig.ai.rivalAvoidanceRadius, 1)),
+    );
+  }
+  setAiInputTargets(dt, {
+    throttle: throttleTarget,
+    brake: brakeTarget,
+    steer: steerTarget,
+    handbrake: handbrakeTarget,
+  });
+}
+
+function updateAiRecoveryControl(dt, graph) {
+  const aiCfg = physicsConfig.ai;
+  aiPhysicsRuntime.recoveryTimer += dt;
+  const recoveryNode =
+    pickAiRecoveryNode(graph, aiCfg.softResetSearchRadiusFallback) ||
+    (aiPhysicsRuntime.lastValidNodeId >= 0
+      ? graph.nodes[aiPhysicsRuntime.lastValidNodeId]
+      : null);
+  if (!recoveryNode) {
+    applyAiSoftReset(graph);
+    return;
+  }
+
+  aiPhysicsRuntime.targetNodeId = recoveryNode.id;
+  aiPhysicsRuntime.targetPoint = { x: recoveryNode.x, y: recoveryNode.y };
+  aiPhysicsRuntime.debugPathPoints = [{ x: recoveryNode.x, y: recoveryNode.y }];
+  const desiredForwardHeading = Math.atan2(
+    recoveryNode.y - aiCar.y,
+    recoveryNode.x - aiCar.x,
+  );
+
+  if (aiPhysicsRuntime.recoveryTimer >= aiCfg.maxRecoveryTime) {
+    if (aiPhysicsRuntime.softResetCooldown <= 0) {
+      applyAiSoftReset(graph);
+    }
+    return;
+  }
+
+  if (aiPhysicsRuntime.recoveryMode === "forwardHook") {
+    const headingError = signedAngleDelta(aiCar.angle, desiredForwardHeading);
+    setAiInputTargets(dt, {
+      throttle: 1,
+      brake: 0,
+      steer: clamp(headingError * 1.4, -1, 1),
+    });
+    if (
+      aiPhysicsRuntime.recoveryTimer >=
+      aiCfg.reverseRecoverTime + aiCfg.forwardRecoverTime
+    ) {
+      aiPhysicsRuntime.recoveryMode = "reverseTurn";
+      aiPhysicsRuntime.recoveryTimer = 0;
+    }
+    return;
+  }
+
+  const reverseHeading = desiredForwardHeading + Math.PI;
+  const headingError = signedAngleDelta(aiCar.angle, reverseHeading);
+  setAiInputTargets(dt, {
+    throttle: 0,
+    brake: 1,
+    steer: clamp(headingError * 1.2, -1, 1),
+  });
+  if (aiPhysicsRuntime.recoveryTimer >= aiCfg.reverseRecoverTime) {
+    aiPhysicsRuntime.recoveryMode = "forwardHook";
+  }
+}
+
+function updateAiControl(dt) {
+  const aiCfg = physicsConfig.ai;
+  const graph = getTrackNavigationGraph(track);
+  const currentSurface = surfaceAt(aiCar.x, aiCar.y);
+  aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
+  aiPhysicsRuntime.replanCooldown = Math.max(
+    0,
+    aiPhysicsRuntime.replanCooldown - dt,
+  );
+  aiPhysicsRuntime.softResetCooldown = Math.max(
+    0,
+    aiPhysicsRuntime.softResetCooldown - dt,
+  );
+
+  const nearestNode = findNearestTrackNavNode(aiCar.x, aiCar.y, {
+    maxDistance: aiCfg.softResetSearchRadiusFallback,
+    progressHint: aiPhysicsRuntime.progress,
+  });
+  if (nearestNode) {
+    aiPhysicsRuntime.currentNodeId = nearestNode.id;
+    if (currentSurface === "asphalt" || currentSurface === "curb") {
+      aiPhysicsRuntime.lastValidNodeId = nearestNode.id;
+      const routeIndex = graph.routeIndexByNodeId[nearestNode.id];
+      if (routeIndex >= 0) aiPhysicsRuntime.routeNodeIndex = routeIndex;
+    }
+  }
+
+  if (aiPhysicsRuntime.mode !== "recover") {
+    updateAiRaceControl(dt, graph);
+  } else {
+    updateAiRecoveryControl(dt, graph);
+  }
+}
+
+function distanceToAiPlannedPath(graph) {
+  if (!graph || !aiPhysicsRuntime.plannedNodeIds.length) return Infinity;
+  let bestDistance = Infinity;
+  const startIndex = Math.max(0, aiPhysicsRuntime.pathCursor - 1);
+  const endIndex = Math.min(
+    aiPhysicsRuntime.plannedNodeIds.length - 1,
+    aiPhysicsRuntime.pathCursor + 6,
+  );
+  for (let i = startIndex; i < endIndex; i++) {
+    const fromNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[i]];
+    const toNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[i + 1]];
+    if (!fromNode || !toNode) continue;
+    const projection = projectPointToSegment(
+      aiCar.x,
+      aiCar.y,
+      fromNode.x,
+      fromNode.y,
+      toNode.x,
+      toNode.y,
+    );
+    bestDistance = Math.min(
+      bestDistance,
+      Math.hypot(projection.x - aiCar.x, projection.y - aiCar.y),
+    );
+  }
+  if (!Number.isFinite(bestDistance)) {
+    const fallbackNode =
+      graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
+    if (!fallbackNode) return Infinity;
+    return Math.hypot(fallbackNode.x - aiCar.x, fallbackNode.y - aiCar.y);
+  }
+  return bestDistance;
+}
+
+function updateAiProgressHealth(dt, collision) {
+  const aiCfg = physicsConfig.ai;
+  const graph = getTrackNavigationGraph(track);
+  const nextProgress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
+  const progressGain = progressDeltaForward(
+    aiPhysicsRuntime.progressAtLastSample,
+    nextProgress,
+  );
+  aiPhysicsRuntime.progressAtLastSample = nextProgress;
+  aiPhysicsRuntime.progress = nextProgress;
+
+  const currentSurface = surfaceAt(aiCar.x, aiCar.y);
+  if (
+    aiCar.speed < aiCfg.stuckSpeedThreshold &&
+    progressGain < aiCfg.stuckProgressThreshold
+  ) {
+    aiPhysicsRuntime.lowProgressTimer += dt;
+  } else {
+    aiPhysicsRuntime.lowProgressTimer = Math.max(
+      0,
+      aiPhysicsRuntime.lowProgressTimer - dt * 1.5,
+    );
+  }
+  if (currentSurface === "grass" || currentSurface === "water") {
+    const distanceToPlan = distanceToAiPlannedPath(graph);
+    const intentionalGrassShortcut =
+      currentSurface === "grass" &&
+      distanceToPlan <= aiCfg.grassRecoveryPathDistance &&
+      (progressGain >= aiCfg.stuckProgressThreshold ||
+        aiCar.speed >= aiCfg.grassRecoverySpeedThreshold);
+    if (currentSurface === "water" || !intentionalGrassShortcut) {
+      aiPhysicsRuntime.offRoadTimer += dt;
+    } else {
+      aiPhysicsRuntime.offRoadTimer = Math.max(
+        0,
+        aiPhysicsRuntime.offRoadTimer - dt * 2,
+      );
+    }
+  } else {
+    aiPhysicsRuntime.offRoadTimer = 0;
+  }
+
+  if (collision?.hit) {
+    const prevDot =
+      aiPhysicsRuntime.lastCollisionNormalX * collision.normalX +
+      aiPhysicsRuntime.lastCollisionNormalY * collision.normalY;
+    aiPhysicsRuntime.lastCollisionNormalX = collision.normalX;
+    aiPhysicsRuntime.lastCollisionNormalY = collision.normalY;
+    aiPhysicsRuntime.repeatedCollisionTimer += prevDot < 0.2 ? dt : dt * 0.55;
+  } else {
+    aiPhysicsRuntime.repeatedCollisionTimer = Math.max(
+      0,
+      aiPhysicsRuntime.repeatedCollisionTimer - dt * 2,
+    );
+  }
+
+  const recovered =
+    (currentSurface === "asphalt" || currentSurface === "curb") &&
+    progressGain >= aiCfg.stuckProgressThreshold * 2;
+  if (aiPhysicsRuntime.mode === "recover" && recovered) {
+    aiPhysicsRuntime.mode = "race";
+    aiPhysicsRuntime.recoveryMode = "none";
+    aiPhysicsRuntime.recoveryTimer = 0;
+    aiPhysicsRuntime.lowProgressTimer = 0;
+    aiPhysicsRuntime.offRoadTimer = 0;
+    aiPhysicsRuntime.repeatedCollisionTimer = 0;
+    aiPhysicsRuntime.replanCooldown = 0;
+    return;
+  }
+
+  if (
+    aiPhysicsRuntime.mode === "race" &&
+    (aiPhysicsRuntime.lowProgressTimer >= aiCfg.stuckTime ||
+      aiPhysicsRuntime.offRoadTimer >= aiCfg.offRoadStuckTime ||
+      aiPhysicsRuntime.repeatedCollisionTimer >= aiCfg.repeatedCollisionTime)
+  ) {
+    aiPhysicsRuntime.mode = "recover";
+    aiPhysicsRuntime.recoveryMode = "reverseTurn";
+    aiPhysicsRuntime.recoveryTimer = 0;
+    aiPhysicsRuntime.replanCooldown = 0;
+  }
+}
+
+function updateAiVehicle(dt) {
+  const carCfg = physicsConfig.car;
+  const assistCfg = physicsConfig.assists;
+  const flags = physicsConfig.flags;
+  const constants = physicsConfig.constants;
+  const surfaceName = surfaceAt(aiCar.x, aiCar.y);
+  const targetSurface =
+    physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
+  const blendAlpha = flags.SURFACE_BLENDING
+    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
+    : 1;
+
+  aiPhysicsRuntime.surface.lateralGripMul +=
+    (targetSurface.lateralGripMul - aiPhysicsRuntime.surface.lateralGripMul) *
+    blendAlpha;
+  aiPhysicsRuntime.surface.longDragMul +=
+    (targetSurface.longDragMul - aiPhysicsRuntime.surface.longDragMul) *
+    blendAlpha;
+  aiPhysicsRuntime.surface.engineMul +=
+    (targetSurface.engineMul - aiPhysicsRuntime.surface.engineMul) * blendAlpha;
+  aiPhysicsRuntime.surface.coastDecelMul +=
+    (targetSurface.coastDecelMul - aiPhysicsRuntime.surface.coastDecelMul) *
+    blendAlpha;
+
+  const forwardX = Math.cos(aiCar.angle);
+  const forwardY = Math.sin(aiCar.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  let forwardSpeed = aiCar.vx * forwardX + aiCar.vy * forwardY;
+  let lateralSpeed = aiCar.vx * rightX + aiCar.vy * rightY;
+
+  if (aiPhysicsRuntime.input.throttle > 0.01) {
+    forwardSpeed +=
+      carCfg.engineAccel *
+      aiPhysicsRuntime.surface.engineMul *
+      aiPhysicsRuntime.input.throttle *
+      dt;
+  }
+  if (aiPhysicsRuntime.input.brake > 0.01) {
+    forwardSpeed -= carCfg.brakeDecel * aiPhysicsRuntime.input.brake * dt;
+  }
+  if (
+    aiPhysicsRuntime.input.throttle <= 0.01 &&
+    aiPhysicsRuntime.input.brake <= 0.01
+  ) {
+    forwardSpeed = moveTowards(
+      forwardSpeed,
+      0,
+      carCfg.coastDecel * aiPhysicsRuntime.surface.coastDecelMul * dt,
+    );
+  }
+  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
+    const handbrakeDecel =
+      assistCfg.handbrakeLongDecel * aiPhysicsRuntime.input.handbrake * dt;
+    if (forwardSpeed > 0) {
+      forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
+    } else {
+      forwardSpeed = moveTowards(
+        forwardSpeed,
+        0,
+        assistCfg.handbrakeReverseKillDecel *
+          aiPhysicsRuntime.input.handbrake *
+          dt,
+      );
+    }
+  }
+  forwardSpeed *= Math.exp(
+    -carCfg.longDrag * aiPhysicsRuntime.surface.longDragMul * dt,
+  );
+  const maxForwardSpeed = carCfg.maxSpeed;
+  const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
+
+  const speedAbs = Math.abs(forwardSpeed);
+  const lowSpeedSteerMul =
+    carCfg.steerAtLowSpeedMul +
+    (1 - carCfg.steerAtLowSpeedMul) *
+      clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
+  const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
+    ? 1 -
+      assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
+    : 1;
+  const targetYawRate =
+    aiPhysicsRuntime.input.steer *
+    carCfg.steerRate *
+    lowSpeedSteerMul *
+    speedSteerMul;
+  let desiredYawRate = targetYawRate;
+  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
+    desiredYawRate +=
+      assistCfg.handbrakeYawBoost *
+      aiPhysicsRuntime.input.handbrake *
+      aiPhysicsRuntime.input.steer;
+  }
+  aiPhysicsRuntime.steeringRate +=
+    (desiredYawRate - aiPhysicsRuntime.steeringRate) *
+    clamp(carCfg.yawDamping * dt, 0, 1);
+  const oldAngle = aiCar.angle;
+  aiCar.angle += aiPhysicsRuntime.steeringRate * dt;
+
+  let effectiveLateralGrip =
+    carCfg.lateralGrip * aiPhysicsRuntime.surface.lateralGripMul;
+  const allowAutoDrift = surfaceName !== "grass";
+  if (
+    flags.AUTO_DRIFT_ON_STEER &&
+    allowAutoDrift &&
+    Math.abs(aiPhysicsRuntime.input.steer) > constants.driftSteerThreshold
+  ) {
+    effectiveLateralGrip *=
+      1 - assistCfg.autoDriftGripCut * Math.abs(aiPhysicsRuntime.input.steer);
+  }
+  if (flags.DRIFT_ASSIST_RECOVERY) {
+    const steerAbs = Math.abs(aiPhysicsRuntime.input.steer);
+    if (
+      aiPhysicsRuntime.prevSteerAbs > constants.driftSteerThreshold &&
+      steerAbs <= constants.driftSteerThreshold
+    ) {
+      aiPhysicsRuntime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
+    }
+    aiPhysicsRuntime.prevSteerAbs = steerAbs;
+    if (aiPhysicsRuntime.recoveryTimer > 0) {
+      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
+      aiPhysicsRuntime.recoveryTimer = Math.max(
+        0,
+        aiPhysicsRuntime.recoveryTimer - dt,
+      );
+    }
+  }
+  if (
+    allowAutoDrift &&
+    aiPhysicsRuntime.input.throttle < 0.08 &&
+    speedAbs > assistCfg.throttleLiftMinSpeed
+  ) {
+    const liftBlend =
+      (1 - aiPhysicsRuntime.input.throttle) *
+      clamp(
+        (speedAbs - assistCfg.throttleLiftMinSpeed) /
+          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
+        0,
+        1,
+      );
+    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
+    lateralSpeed +=
+      aiPhysicsRuntime.input.steer *
+      speedAbs *
+      assistCfg.throttleLiftSlipBoost *
+      liftBlend *
+      dt;
+  }
+  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
+    const gripMul =
+      1 + (assistCfg.handbrakeGrip - 1) * aiPhysicsRuntime.input.handbrake;
+    effectiveLateralGrip *= gripMul;
+    lateralSpeed +=
+      aiPhysicsRuntime.input.steer *
+      Math.max(speedAbs, 0) *
+      assistCfg.handbrakeSlipBoost *
+      aiPhysicsRuntime.input.handbrake *
+      dt;
+  }
+  if (aiPhysicsRuntime.collisionGripTimer > 0) {
+    effectiveLateralGrip *= 0.7;
+    aiPhysicsRuntime.collisionGripTimer = Math.max(
+      0,
+      aiPhysicsRuntime.collisionGripTimer - dt,
+    );
+  }
+
+  lateralSpeed *= 1 - clamp(effectiveLateralGrip * dt, 0, 1);
+  aiCar.vx =
+    Math.cos(aiCar.angle) * forwardSpeed +
+    -Math.sin(aiCar.angle) * lateralSpeed;
+  aiCar.vy =
+    Math.sin(aiCar.angle) * forwardSpeed + Math.cos(aiCar.angle) * lateralSpeed;
+
+  const headingForwardX = Math.cos(aiCar.angle);
+  const headingForwardY = Math.sin(aiCar.angle);
+  const pivotBlend = clamp(
+    Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1),
+    0,
+    1,
+  );
+  let pivotRatio =
+    constants.pivotAtLowSpeedRatio +
+    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
+      pivotBlend;
+  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
+    pivotRatio +=
+      (constants.pivotAtLowSpeedRatio - pivotRatio) *
+      clamp(aiPhysicsRuntime.input.handbrake, 0, 1);
+  }
+  const pivotOffset = aiCar.width * (pivotRatio - 0.5);
+  const pivotShiftX =
+    Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
+  const pivotShiftY =
+    Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
+  const collision = resolveObjectCollisions(
+    aiCar.x + aiCar.vx * dt + pivotShiftX,
+    aiCar.y + aiCar.vy * dt + pivotShiftY,
+    0,
+  );
+  aiCar.x = collision.x;
+  aiCar.y = collision.y;
+  if (collision.hit) {
+    const inwardSpeed =
+      aiCar.vx * collision.normalX + aiCar.vy * collision.normalY;
+    if (inwardSpeed < 0) {
+      aiCar.vx -= inwardSpeed * collision.normalX;
+      aiCar.vy -= inwardSpeed * collision.normalY;
+    }
+    if (flags.ARCADE_COLLISION_PUSH) {
+      aiCar.vx *= 0.72;
+      aiCar.vy *= 0.72;
+      aiCar.vx += collision.normalX * 18;
+      aiCar.vy += collision.normalY * 18;
+      aiPhysicsRuntime.collisionGripTimer = 0.08;
+    } else {
+      aiCar.vx *= 0.55;
+      aiCar.vy *= 0.55;
+    }
+  }
+
+  const headingRightX = -headingForwardY;
+  const headingRightY = headingForwardX;
+  let rawHeadingForwardSpeed =
+    aiCar.vx * headingForwardX + aiCar.vy * headingForwardY;
+  if (
+    flags.HANDBRAKE_MODE &&
+    aiPhysicsRuntime.input.handbrake > 0.05 &&
+    rawHeadingForwardSpeed < 0
+  ) {
+    aiCar.vx -= rawHeadingForwardSpeed * headingForwardX;
+    aiCar.vy -= rawHeadingForwardSpeed * headingForwardY;
+    rawHeadingForwardSpeed = 0;
+  }
+  const maxVectorSpeed =
+    rawHeadingForwardSpeed >= 0
+      ? carCfg.maxSpeed
+      : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  const vectorSpeed = Math.hypot(aiCar.vx, aiCar.vy);
+  if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
+    const scale = maxVectorSpeed / vectorSpeed;
+    aiCar.vx *= scale;
+    aiCar.vy *= scale;
+  }
+
+  aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
+  aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
+  const headingForwardSpeed =
+    aiCar.vx * headingForwardX + aiCar.vy * headingForwardY;
+  const headingLateralSpeed =
+    aiCar.vx * headingRightX + aiCar.vy * headingRightY;
+  const prevForward = aiPhysicsRuntime.prevForwardSpeed;
+  const longAccel =
+    prevForward === null || dt <= 0
+      ? 0
+      : (headingForwardSpeed - prevForward) / dt;
+  aiPhysicsRuntime.prevForwardSpeed = headingForwardSpeed;
+  const skidSurface = surfaceAt(aiCar.x, aiCar.y);
+  const wheelPoints = wheelWorldPoints(aiCar);
+  recordSkids(
+    skidSurface,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    longAccel,
+    {
+      vehicle: aiCar,
+      runtime: aiPhysicsRuntime,
+    },
+  );
+  emitDrivingParticles({
+    dt,
+    vehicle: aiCar,
+    runtime: aiPhysicsRuntime,
+    wheelPoints,
+    forwardX: headingForwardX,
+    forwardY: headingForwardY,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    surfaceName: skidSurface,
+  });
+  updateAiVehicleAudioState({
+    surfaceName: skidSurface,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    longAccel,
+  });
+  updateAiProgressHealth(dt, collision);
+}
+
+export function resolveCarToCarCollision(
+  carA,
+  carB,
+  { radiusScale = 0.34, restitution = 0.14, pushBias = 0.5 } = {},
+) {
+  const radiusA = Math.max(carA.width, carA.height) * radiusScale;
+  const radiusB = Math.max(carB.width, carB.height) * radiusScale;
+  const dx = carB.x - carA.x;
+  const dy = carB.y - carA.y;
+  const distance = Math.hypot(dx, dy);
+  const minDistance = radiusA + radiusB;
+  if (distance >= minDistance || minDistance <= 0) return false;
+
+  const nx = distance > 1e-4 ? dx / distance : 1;
+  const ny = distance > 1e-4 ? dy / distance : 0;
+  const overlap = minDistance - distance;
+  carA.x -= nx * overlap * pushBias;
+  carA.y -= ny * overlap * pushBias;
+  carB.x += nx * overlap * (1 - pushBias);
+  carB.y += ny * overlap * (1 - pushBias);
+
+  const relativeNormalVelocity =
+    (carB.vx - carA.vx) * nx + (carB.vy - carA.vy) * ny;
+  if (relativeNormalVelocity < 0) {
+    const impulse = -(1 + restitution) * relativeNormalVelocity * 0.5;
+    carA.vx -= nx * impulse;
+    carA.vy -= ny * impulse;
+    carB.vx += nx * impulse;
+    carB.vy += ny * impulse;
+  }
+  carA.speed = Math.hypot(carA.vx, carA.vy);
+  carB.speed = Math.hypot(carB.vx, carB.vy);
+  return true;
+}
+
+function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
+  if (!checkpoints.length || targetLapData.finished) return;
+  const { blink = false, onFinish = null, racerKey = "player" } = options;
+  const startCheckpointIndex = getStartCheckpointIndex();
+  const targetIndex = targetLapData.nextCheckpointIndex % checkpoints.length;
+  const cp = checkpoints[targetIndex];
+  const frame = trackFrameAtAngle(cp.angle, track);
+  const checkpointSpan = frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
+  const halfSpan = checkpointSpan * 0.5;
+  const ax = frame.point.x - frame.normal.x * halfSpan;
+  const ay = frame.point.y - frame.normal.y * halfSpan;
+  const bx = frame.point.x + frame.normal.x * halfSpan;
+  const by = frame.point.y + frame.normal.y * halfSpan;
+  const triggerDistance = Math.max(15, vehicle.width * 0.55);
+  const nearCheckpoint =
+    distanceToSegment(vehicle.x, vehicle.y, ax, ay, bx, by) <= triggerDistance;
+  if (!nearCheckpoint) return;
+
+  if (blink) {
+    state.checkpointBlink.time = state.checkpointBlink.duration;
+  }
+
+  if (targetIndex !== startCheckpointIndex) {
+    targetLapData.passed.add(targetIndex);
+    targetLapData.nextCheckpointIndex = (targetIndex + 1) % checkpoints.length;
+    return;
+  }
+
+  if (targetLapData.passed.size !== checkpoints.length) return;
+  const lapTime = state.raceTime - targetLapData.currentLapStart;
+  if (lapTime <= 2) return;
+
+  targetLapData.lapTimes.push(lapTime);
+  targetLapData.currentLapStart = state.raceTime;
+  targetLapData.passed = new Set([startCheckpointIndex]);
+  targetLapData.nextCheckpointIndex =
+    (startCheckpointIndex + 1) % checkpoints.length;
+  targetLapData.lap += 1;
+
+  if (targetLapData.lap > targetLapData.maxLaps) {
+    targetLapData.finished = true;
+    targetLapData.finishTime = state.raceTime;
+    recordRaceFinish(racerKey);
+    if (typeof onFinish === "function") onFinish();
+  }
+}
+
+function wheelWorldPoints(vehicle = car) {
+  const forwardX = Math.cos(vehicle.angle);
+  const forwardY = Math.sin(vehicle.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  const frontOffset = vehicle.width * 0.36;
+  const rearOffset = -vehicle.width * 0.34;
+  const sideOffset = vehicle.height * 0.43;
   const localOffsets = [
     { x: frontOffset, y: -sideOffset },
     { x: frontOffset, y: sideOffset },
@@ -88,13 +1405,15 @@ function wheelWorldPoints() {
   ];
 
   return localOffsets.map((o) => ({
-    x: car.x + forwardX * o.x + rightX * o.y,
-    y: car.y + forwardY * o.x + rightY * o.y,
+    x: vehicle.x + forwardX * o.x + rightX * o.y,
+    y: vehicle.y + forwardY * o.x + rightY * o.y,
   }));
 }
 
 function emitDrivingParticles({
   dt,
+  vehicle = car,
+  runtime = physicsRuntime,
   wheelPoints,
   forwardX,
   forwardY,
@@ -102,16 +1421,16 @@ function emitDrivingParticles({
   headingLateralSpeed,
   surfaceName,
 }) {
-  const emitters = physicsRuntime.particleEmitters;
+  const emitters = runtime.particleEmitters;
   emitters.smokeCooldown = Math.max(0, emitters.smokeCooldown - dt);
   emitters.splashCooldown = Math.max(0, emitters.splashCooldown - dt);
   emitters.dustCooldown = Math.max(0, emitters.dustCooldown - dt);
 
   const speedAbs = Math.abs(headingForwardSpeed);
   const lateralAbs = Math.abs(headingLateralSpeed);
-  const speedFactor = clamp((car.speed - 28) / 110, 0, 1);
+  const speedFactor = clamp((vehicle.speed - 28) / 110, 0, 1);
   const handbrakeStrength =
-    physicsRuntime.input.handbrake *
+    runtime.input.handbrake *
     speedFactor *
     clamp((speedAbs - 35) / 85, 0, 1) *
     clamp((lateralAbs - 24) / 120, 0, 1);
@@ -146,8 +1465,8 @@ function emitDrivingParticles({
         y: wheelPoints[i].y,
         angle: sprayAngle,
         strength: 0.2 + waterStrength * 1.4,
-        inheritVx: car.vx * 0.16,
-        inheritVy: car.vy * 0.16,
+        inheritVx: vehicle.vx * 0.16,
+        inheritVy: vehicle.vy * 0.16,
       });
     }
     emitters.splashCooldown = 0.045 - waterStrength * 0.02;
@@ -166,23 +1485,29 @@ function emitDrivingParticles({
         y: wheelPoints[i].y,
         angle: dustAngle,
         strength: 0.2 + grassStrength * 1.35,
-        inheritVx: car.vx * 0.1,
-        inheritVy: car.vy * 0.1,
+        inheritVx: vehicle.vx * 0.1,
+        inheritVy: vehicle.vy * 0.1,
       });
     }
     emitters.dustCooldown = 0.05 - grassStrength * 0.022;
   }
 }
 
-function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
-  if (car.airborne) {
-    physicsRuntime.wheelLastPoints = null;
+function recordSkids(
+  surfaceName,
+  forwardSpeed,
+  lateralSpeed,
+  longAccel,
+  { vehicle = car, runtime = physicsRuntime } = {},
+) {
+  if (vehicle.airborne) {
+    runtime.wheelLastPoints = null;
     return;
   }
 
-  const points = wheelWorldPoints();
-  const lastPoints = physicsRuntime.wheelLastPoints;
-  physicsRuntime.wheelLastPoints = points;
+  const points = wheelWorldPoints(vehicle);
+  const lastPoints = runtime.wheelLastPoints;
+  runtime.wheelLastPoints = points;
   if (!lastPoints) return;
 
   const isGrass = surfaceName === "grass";
@@ -194,7 +1519,7 @@ function recordSkids(surfaceName, forwardSpeed, lateralSpeed, longAccel) {
   const strongAccel = longAccel > 480;
   const strongBrake = longAccel < -520;
   const skidding = Math.abs(lateralSpeed) > 95;
-  const handbrakeSkid = physicsRuntime.input.handbrake > 0.08 && speedAbs > 24;
+  const handbrakeSkid = runtime.input.handbrake > 0.08 && speedAbs > 24;
   const shouldDrawRoadSkids =
     isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid);
   if (!isGrass && !isWater && !shouldDrawRoadSkids) return;
@@ -278,6 +1603,39 @@ function updateVehicleAudioState({
     isMoving: car.speed > 4,
     airborne: car.airborne,
     airborneAmount,
+    wheelSpinAmount,
+  });
+}
+
+function updateAiVehicleAudioState({
+  surfaceName,
+  headingForwardSpeed = 0,
+  headingLateralSpeed = 0,
+  longAccel = 0,
+}) {
+  const carCfg = physicsConfig.car;
+  const airCfg = physicsConfig.air;
+  const wheelSpinAmount = aiCar.airborne
+    ? clamp(
+        aiPhysicsRuntime.input.throttle * 0.8 +
+          Math.abs(aiCar.vz) / Math.max(airCfg.maxJumpHeight * 4, 1),
+        0,
+        1,
+      )
+    : 0;
+
+  gameAudio.updateRivalVehicleAudio({
+    speedNormalized: clamp(aiCar.speed / Math.max(carCfg.maxSpeed, 1), 0, 1),
+    throttle: aiPhysicsRuntime.input.throttle,
+    acceleration: clamp(longAccel / Math.max(carCfg.engineAccel, 1), -1, 1),
+    skidAmount: aiCar.airborne
+      ? 0
+      : clamp(Math.abs(headingLateralSpeed) / 120, 0, 1) *
+        clamp(Math.abs(headingForwardSpeed) / 55, 0, 1),
+    surface: surfaceName,
+    isMoving: aiCar.speed > 4,
+    airborne: aiCar.airborne,
+    airborneAmount: clamp(aiCar.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1),
     wheelSpinAmount,
   });
 }
@@ -413,15 +1771,23 @@ export function resetRace() {
   state.finished = false;
   state.paused = false;
   state.pauseMenuIndex = 0;
+  state.raceStandings.nextFinishOrder = 1;
+  state.raceStandings.playerFinishOrder = 0;
+  state.raceStandings.aiFinishOrder = 0;
   const startCheckpointIndex = getStartCheckpointIndex();
-  lapData.currentLapStart = 0;
-  lapData.lapTimes = [];
-  lapData.passed = new Set([startCheckpointIndex]);
-  lapData.nextCheckpointIndex =
-    checkpoints.length > 0
-      ? (startCheckpointIndex + 1) % checkpoints.length
-      : 0;
-  lapData.lap = 1;
+  resetLapProgress(lapData, startCheckpointIndex);
+  aiCar.x = spawnPoint.x - Math.cos(car.angle) * 34 - Math.sin(car.angle) * 22;
+  aiCar.y = spawnPoint.y - Math.sin(car.angle) * 34 + Math.cos(car.angle) * 22;
+  aiCar.vx = 0;
+  aiCar.vy = 0;
+  aiCar.angle = car.angle;
+  aiCar.speed = 0;
+  aiCar.z = 0;
+  aiCar.vz = 0;
+  aiCar.airborne = false;
+  aiCar.airTime = 0;
+  aiCar.visualScale = 1;
+  resetLapProgress(aiLapData, startCheckpointIndex);
   state.startSequence.active = true;
   state.startSequence.elapsed = 0;
   state.startSequence.goTime = 3 + Math.random() * 2;
@@ -457,6 +1823,54 @@ export function resetRace() {
   physicsRuntime.particleEmitters.smokeCooldown = 0;
   physicsRuntime.particleEmitters.splashCooldown = 0;
   physicsRuntime.particleEmitters.dustCooldown = 0;
+  aiPhysicsRuntime.input.throttle = 0;
+  aiPhysicsRuntime.input.brake = 0;
+  aiPhysicsRuntime.input.steer = 0;
+  aiPhysicsRuntime.input.handbrake = 0;
+  aiPhysicsRuntime.steeringRate = 0;
+  aiPhysicsRuntime.recoveryTimer = 0;
+  aiPhysicsRuntime.collisionGripTimer = 0;
+  aiPhysicsRuntime.impactCooldown = 0;
+  aiPhysicsRuntime.prevSteerAbs = 0;
+  aiPhysicsRuntime.lastGroundedSpeed = 0;
+  aiPhysicsRuntime.landingBouncePending = false;
+  aiPhysicsRuntime.landingCooldown = 0;
+  aiPhysicsRuntime.mode = "race";
+  aiPhysicsRuntime.recoveryMode = "none";
+  aiPhysicsRuntime.targetLaneOffset = 0;
+  aiPhysicsRuntime.blockedTimer = 0;
+  aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
+  aiPhysicsRuntime.progressAtLastSample = aiPhysicsRuntime.progress;
+  aiPhysicsRuntime.lowProgressTimer = 0;
+  aiPhysicsRuntime.offRoadTimer = 0;
+  aiPhysicsRuntime.repeatedCollisionTimer = 0;
+  aiPhysicsRuntime.lastCollisionNormalX = 0;
+  aiPhysicsRuntime.lastCollisionNormalY = 0;
+  aiPhysicsRuntime.lastCollisionTime = 0;
+  aiPhysicsRuntime.softResetCooldown = 0;
+  aiPhysicsRuntime.replanCooldown = 0;
+  aiPhysicsRuntime.currentNodeId = -1;
+  aiPhysicsRuntime.lastValidNodeId = -1;
+  aiPhysicsRuntime.targetNodeId = -1;
+  aiPhysicsRuntime.routeNodeIndex = -1;
+  aiPhysicsRuntime.rejoinRouteIndex = -1;
+  aiPhysicsRuntime.pathCursor = 0;
+  aiPhysicsRuntime.plannedNodeIds = [];
+  aiPhysicsRuntime.desiredSpeed = 0;
+  aiPhysicsRuntime.targetPoint = { x: aiCar.x, y: aiCar.y };
+  aiPhysicsRuntime.debugPathPoints = [];
+  aiPhysicsRuntime.surface = {
+    lateralGripMul: 1,
+    longDragMul: 1,
+    engineMul: 1,
+    coastDecelMul: 1,
+  };
+  aiPhysicsRuntime.wheelLastPoints = null;
+  aiPhysicsRuntime.prevForwardSpeed = null;
+  aiPhysicsRuntime.particleEmitters.smokeCooldown = 0;
+  aiPhysicsRuntime.particleEmitters.splashCooldown = 0;
+  aiPhysicsRuntime.particleEmitters.dustCooldown = 0;
+  primeAiRaceStartPlan();
   skidMarks.length = 0;
   resetParticles();
   state.finishCelebration.bestLap = false;
@@ -519,6 +1933,17 @@ export function updateRace(dt) {
       airborneAmount: 0,
       wheelSpinAmount: 0,
     });
+    gameAudio.updateRivalVehicleAudio({
+      speedNormalized: 0,
+      throttle: 0,
+      acceleration: 0,
+      skidAmount: 0,
+      surface: "asphalt",
+      isMoving: false,
+      airborne: false,
+      airborneAmount: 0,
+      wheelSpinAmount: 0,
+    });
     return;
   }
 
@@ -569,8 +1994,47 @@ export function updateRace(dt) {
 
   if (car.airborne) {
     integrateAirborneMotion(dt, surfaceName);
+    if (aiOpponentsEnabled()) {
+      updateAiControl(dt);
+      updateAiVehicle(dt);
+      if (resolveCarToCarCollision(car, aiCar)) {
+        physicsRuntime.collisionGripTimer = Math.max(
+          physicsRuntime.collisionGripTimer,
+          0.06,
+        );
+        aiPhysicsRuntime.collisionGripTimer = Math.max(
+          aiPhysicsRuntime.collisionGripTimer,
+          0.06,
+        );
+      }
+    } else {
+      gameAudio.updateRivalVehicleAudio({
+        speedNormalized: 0,
+        throttle: 0,
+        acceleration: 0,
+        skidAmount: 0,
+        surface: "asphalt",
+        isMoving: false,
+        airborne: false,
+        airborneAmount: 0,
+        wheelSpinAmount: 0,
+      });
+    }
     if (!state.finished) {
-      checkCheckpoints();
+      checkCheckpointProgress(car, lapData, {
+        blink: true,
+        racerKey: "player",
+        onFinish: () => {
+          state.finished = true;
+          finalizeFinishCelebration();
+        },
+      });
+      if (aiOpponentsEnabled()) {
+        checkCheckpointProgress(aiCar, aiLapData, {
+          blink: false,
+          racerKey: "ai",
+        });
+      }
     }
     return;
   }
@@ -876,8 +2340,48 @@ export function updateRace(dt) {
     longAccel,
   });
 
+  if (aiOpponentsEnabled()) {
+    updateAiControl(dt);
+    updateAiVehicle(dt);
+    if (resolveCarToCarCollision(car, aiCar)) {
+      physicsRuntime.collisionGripTimer = Math.max(
+        physicsRuntime.collisionGripTimer,
+        0.06,
+      );
+      aiPhysicsRuntime.collisionGripTimer = Math.max(
+        aiPhysicsRuntime.collisionGripTimer,
+        0.06,
+      );
+    }
+  } else {
+    gameAudio.updateRivalVehicleAudio({
+      speedNormalized: 0,
+      throttle: 0,
+      acceleration: 0,
+      skidAmount: 0,
+      surface: "asphalt",
+      isMoving: false,
+      airborne: false,
+      airborneAmount: 0,
+      wheelSpinAmount: 0,
+    });
+  }
+
   if (!state.finished) {
-    checkCheckpoints();
+    checkCheckpointProgress(car, lapData, {
+      blink: true,
+      racerKey: "player",
+      onFinish: () => {
+        state.finished = true;
+        finalizeFinishCelebration();
+      },
+    });
+    if (aiOpponentsEnabled()) {
+      checkCheckpointProgress(aiCar, aiLapData, {
+        blink: false,
+        racerKey: "ai",
+      });
+    }
   } else if (
     !state.raceSubmission.completed &&
     !state.raceSubmission.inFlight
@@ -987,48 +2491,5 @@ function finalizeFinishCelebration() {
 
   if (bestLap || bestRace) {
     emitFinishConfetti({ bestLap, bestRace });
-  }
-}
-
-function checkCheckpoints() {
-  if (!checkpoints.length) return;
-  const startCheckpointIndex = getStartCheckpointIndex();
-  const targetIndex = lapData.nextCheckpointIndex % checkpoints.length;
-  const cp = checkpoints[targetIndex];
-  const frame = trackFrameAtAngle(cp.angle, track);
-  const checkpointSpan = frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
-  const halfSpan = checkpointSpan * 0.5;
-  const ax = frame.point.x - frame.normal.x * halfSpan;
-  const ay = frame.point.y - frame.normal.y * halfSpan;
-  const bx = frame.point.x + frame.normal.x * halfSpan;
-  const by = frame.point.y + frame.normal.y * halfSpan;
-  const triggerDistance = Math.max(15, car.width * 0.55);
-  const nearCheckpoint =
-    distanceToSegment(car.x, car.y, ax, ay, bx, by) <= triggerDistance;
-
-  if (!nearCheckpoint) return;
-
-  state.checkpointBlink.time = state.checkpointBlink.duration;
-
-  if (targetIndex !== startCheckpointIndex) {
-    lapData.passed.add(targetIndex);
-    lapData.nextCheckpointIndex = (targetIndex + 1) % checkpoints.length;
-    return;
-  }
-
-  if (lapData.passed.size !== checkpoints.length || state.finished) return;
-
-  const lapTime = state.raceTime - lapData.currentLapStart;
-  if (lapTime <= 2) return;
-
-  lapData.lapTimes.push(lapTime);
-  lapData.currentLapStart = state.raceTime;
-  lapData.passed = new Set([startCheckpointIndex]);
-  lapData.nextCheckpointIndex = (startCheckpointIndex + 1) % checkpoints.length;
-  lapData.lap += 1;
-
-  if (lapData.lap > lapData.maxLaps) {
-    state.finished = true;
-    finalizeFinishCelebration();
   }
 }

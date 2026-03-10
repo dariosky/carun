@@ -27,9 +27,11 @@ export class AudioManager {
     this.context = null;
     this.masterGain = null;
     this.vehicleBus = null;
+    this.rivalBus = null;
     this.uiBus = null;
     this.impactBus = null;
     this.engineSynth = null;
+    this.rivalEngineSynth = null;
     this.skidSynth = null;
     this.surfaceSynth = null;
     this.signalSynth = null;
@@ -47,25 +49,33 @@ export class AudioManager {
     this.context = new AudioContextCtor();
     this.masterGain = createGain(this.context, 0);
     this.vehicleBus = createGain(this.context, 0);
+    this.rivalBus = createGain(
+      this.context,
+      AUDIO_TUNING.vehicleBusGain * 0.38,
+    );
     this.uiBus = createGain(this.context, AUDIO_TUNING.uiBusGain);
     this.impactBus = createGain(this.context, AUDIO_TUNING.impactBusGain);
 
     this.masterGain.connect(this.context.destination);
     this.vehicleBus.connect(this.masterGain);
+    this.rivalBus.connect(this.masterGain);
     this.uiBus.connect(this.masterGain);
     this.impactBus.connect(this.masterGain);
 
     this.engineSynth = new EngineSynth(this.context);
+    this.rivalEngineSynth = new EngineSynth(this.context);
     this.skidSynth = new SkidSynth(this.context);
     this.surfaceSynth = new SurfaceSynth(this.context);
     this.signalSynth = new SignalSynth(this.context, this.uiBus);
     this.impactSynth = new ImpactSynth(this.context, this.impactBus);
 
     this.engineSynth.connect(this.vehicleBus);
+    this.rivalEngineSynth.connect(this.rivalBus);
     this.skidSynth.connect(this.vehicleBus);
     this.surfaceSynth.connect(this.vehicleBus);
 
     this.engineSynth.start();
+    this.rivalEngineSynth.start();
     this.skidSynth.start();
     this.surfaceSynth.start();
 
@@ -90,6 +100,12 @@ export class AudioManager {
       time,
       AUDIO_TUNING.smoothing.medium,
     );
+    smoothParam(
+      this.rivalBus.gain,
+      AUDIO_TUNING.vehicleBusGain * 0.38,
+      time,
+      AUDIO_TUNING.smoothing.medium,
+    );
     this.#applyVehicleState(this.lastVehicleState);
   }
 
@@ -98,7 +114,9 @@ export class AudioManager {
     this.started = false;
     const time = now(this.context);
     smoothParam(this.vehicleBus.gain, 0, time, AUDIO_TUNING.smoothing.medium);
+    smoothParam(this.rivalBus.gain, 0, time, AUDIO_TUNING.smoothing.medium);
     this.#applyVehicleState(DEFAULT_VEHICLE_STATE);
+    this.#applyRivalVehicleState(DEFAULT_VEHICLE_STATE);
   }
 
   async resume() {
@@ -125,6 +143,15 @@ export class AudioManager {
     };
     if (!this.context || !this.started) return;
     this.#applyVehicleState(this.lastVehicleState);
+  }
+
+  updateRivalVehicleAudio(params) {
+    const rivalState = {
+      ...DEFAULT_VEHICLE_STATE,
+      ...params,
+    };
+    if (!this.context || !this.started) return;
+    this.#applyRivalVehicleState(rivalState);
   }
 
   playCountdownBeep(step) {
@@ -173,5 +200,21 @@ export class AudioManager {
     this.engineSynth.update(normalized);
     this.skidSynth.update(normalized);
     this.surfaceSynth.update(normalized);
+  }
+
+  #applyRivalVehicleState(params) {
+    if (!this.context || !this.rivalEngineSynth) return;
+    const normalized = {
+      speedNormalized: clamp(params.speedNormalized, 0, 1),
+      throttle: clamp(params.throttle, 0, 1),
+      acceleration: clamp(params.acceleration, -1, 1),
+      skidAmount: 0,
+      surface: params.surface || "asphalt",
+      isMoving: Boolean(params.isMoving),
+      airborne: Boolean(params.airborne),
+      airborneAmount: clamp(params.airborneAmount, 0, 1),
+      wheelSpinAmount: clamp(params.wheelSpinAmount, 0, 1),
+    };
+    this.rivalEngineSynth.update(normalized);
   }
 }

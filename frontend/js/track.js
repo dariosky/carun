@@ -5,7 +5,10 @@ import {
   CURB_MAX_WIDTH,
   CURB_STRIPE_LENGTH,
   CURB_OUTSET,
+  CHECKPOINT_WIDTH_MULTIPLIER,
   ctx,
+  checkpoints,
+  physicsConfig,
 } from "./parameters.js";
 import { clamp, normalizeVec, signedAngleBetween } from "./utils.js";
 import {
@@ -486,6 +489,713 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
     outer,
     inner,
   };
+}
+
+let cachedTrackNavGraph = null;
+let cachedTrackNavSignature = "";
+
+function trackNavSignature(trackDef = track, objects = worldObjects) {
+  const loop = Array.isArray(trackDef.centerlineLoop)
+    ? trackDef.centerlineLoop
+    : [];
+  const widths = Array.isArray(trackDef.centerlineWidthProfile)
+    ? trackDef.centerlineWidthProfile
+    : [];
+  const checkpointSig = checkpoints
+    .map((checkpoint) => Number(checkpoint?.angle || 0).toFixed(4))
+    .join(",");
+  const objectSig = (objects || [])
+    .map((obj) => {
+      const normalized = normalizeWorldObject(obj);
+      if (!normalized) return "x";
+      return [
+        normalized.type,
+        Number(normalized.x || 0).toFixed(1),
+        Number(normalized.y || 0).toFixed(1),
+        Number(normalized.r || 0).toFixed(1),
+        Number(normalized.rx || 0).toFixed(1),
+        Number(normalized.ry || 0).toFixed(1),
+        Number(normalized.width || 0).toFixed(1),
+        Number(normalized.length || 0).toFixed(1),
+        Number(normalized.angle || 0).toFixed(3),
+      ].join(":");
+    })
+    .join("|");
+  return [
+    Number(trackDef.cx || 0).toFixed(1),
+    Number(trackDef.cy || 0).toFixed(1),
+    Number(trackDef.borderSize || 0).toFixed(1),
+    Number(trackDef.centerlineHalfWidth || 0).toFixed(1),
+    Number(trackDef.worldScale || 1).toFixed(2),
+    loop
+      .map(
+        (point) =>
+          `${Number(point.x || 0).toFixed(1)},${Number(point.y || 0).toFixed(1)}`,
+      )
+      .join(";"),
+    widths.map((value) => Number(value || 0).toFixed(1)).join(","),
+    checkpointSig,
+    objectSig,
+  ].join("#");
+}
+
+function addNavEdge(edges, fromNode, toNode, cost, step, kind = "progress") {
+  if (!fromNode || !toNode || toNode.id === fromNode.id) return;
+  const edgeList = edges[fromNode.id];
+  if (!edgeList) return;
+  const existing = edgeList.find((edge) => edge.to === toNode.id);
+  if (existing) {
+    if (cost < existing.cost) {
+      existing.cost = cost;
+      existing.step = step;
+      existing.kind = kind;
+    }
+    return;
+  }
+  edgeList.push({ to: toNode.id, cost, step, kind });
+}
+
+function nodeSurfacePenalty(surfaceName) {
+  const aiCfg = physicsConfig.ai;
+  if (surfaceName === "curb") return aiCfg.edgeCurbPenalty;
+  if (surfaceName === "grass") return aiCfg.edgeGrassPenalty;
+  if (surfaceName === "water") return aiCfg.edgeWaterPenalty;
+  return 0;
+}
+
+function computeBaseTargetSpeed(curvature) {
+  const aiCfg = physicsConfig.ai;
+  const excessCurvature = Math.max(0, curvature - aiCfg.fullThrottleCurvature);
+  return clamp(
+    aiCfg.targetSpeedMax -
+      excessCurvature * aiCfg.curvatureSpeedScale +
+      aiCfg.curvatureSpeedBias,
+    aiCfg.cornerSpeedMin,
+    aiCfg.targetSpeedMax,
+  );
+}
+
+function clamp01(value) {
+  return clamp(value, 0, 1);
+}
+
+function clearNavSegment(
+  ax,
+  ay,
+  bx,
+  by,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  const samples = 6;
+  for (let step = 0; step <= samples; step++) {
+    const t = step / samples;
+    const x = ax + (bx - ax) * t;
+    const y = ay + (by - ay) * t;
+    const surface = surfaceAtForTrack(x, y, trackDef, objects);
+    if (surface === "water") return false;
+    if (resolveObjectCollisions(x, y, 0, objects).hit) return false;
+  }
+  return true;
+}
+
+function distanceToSolidObject(x, y, obj) {
+  if (!obj) return Infinity;
+  if (obj.type === "wall") {
+    const dx = x - obj.x;
+    const dy = y - obj.y;
+    const cos = Math.cos(obj.angle);
+    const sin = Math.sin(obj.angle);
+    const localX = dx * cos + dy * sin;
+    const localY = -dx * sin + dy * cos;
+    const halfLength = obj.length * 0.5;
+    const halfWidth = obj.width * 0.5;
+    const deltaX = Math.abs(localX) - halfLength;
+    const deltaY = Math.abs(localY) - halfWidth;
+    if (deltaX <= 0 && deltaY <= 0) {
+      return -Math.min(-deltaX, -deltaY);
+    }
+    const outsideX = Math.max(deltaX, 0);
+    const outsideY = Math.max(deltaY, 0);
+    return Math.hypot(outsideX, outsideY);
+  }
+  if (obj.type === "tree" || obj.type === "barrel") {
+    return Math.hypot(x - obj.x, y - obj.y) - obj.r;
+  }
+  return Infinity;
+}
+
+function obstaclePenaltyAtPoint(x, y, objects = worldObjects) {
+  const aiCfg = physicsConfig.ai;
+  let penalty = 0;
+  let minClearance = Infinity;
+  for (const obj of getSolidObjects(objects)) {
+    const clearance = distanceToSolidObject(x, y, obj);
+    minClearance = Math.min(minClearance, clearance);
+    if (clearance <= aiCfg.obstacleHardClearance) {
+      return { penalty: aiCfg.obstaclePenalty * 4, blocked: true, clearance };
+    }
+    if (clearance < aiCfg.obstacleAvoidanceRadius) {
+      const t =
+        1 -
+        clearance /
+          Math.max(
+            aiCfg.obstacleAvoidanceRadius,
+            aiCfg.obstacleHardClearance + 1,
+          );
+      penalty += aiCfg.obstaclePenalty * t * t;
+    }
+  }
+  return { penalty, blocked: false, clearance: minClearance };
+}
+
+function obstaclePenaltyAlongSegment(ax, ay, bx, by, objects = worldObjects) {
+  const samples = 6;
+  let penalty = 0;
+  let minClearance = Infinity;
+  for (let step = 0; step <= samples; step++) {
+    const t = step / samples;
+    const x = ax + (bx - ax) * t;
+    const y = ay + (by - ay) * t;
+    const info = obstaclePenaltyAtPoint(x, y, objects);
+    if (info.blocked) {
+      return {
+        penalty: physicsConfig.ai.obstaclePenalty * 4,
+        blocked: true,
+        clearance: info.clearance,
+      };
+    }
+    penalty = Math.max(penalty, info.penalty);
+    minClearance = Math.min(minClearance, info.clearance);
+  }
+  return { penalty, blocked: false, clearance: minClearance };
+}
+
+function buildCheckpointGoalNodeIds(nodes, trackDef = track) {
+  const aiCfg = physicsConfig.ai;
+  return checkpoints.map((checkpoint) => {
+    const frame = trackFrameAtAngle(checkpoint.angle, trackDef);
+    const halfSpan =
+      frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER * 0.5 +
+      aiCfg.checkpointGoalLateralMargin;
+    const approachDepth = Math.max(
+      aiCfg.checkpointGoalDepth,
+      frame.roadWidth * 0.22,
+    );
+    const exitDepth = Math.max(
+      aiCfg.checkpointGoalExitDepth,
+      frame.roadWidth * 0.34,
+    );
+    const candidates = [];
+    for (const node of nodes) {
+      const dx = node.x - frame.point.x;
+      const dy = node.y - frame.point.y;
+      const approach = dx * frame.tangent.x + dy * frame.tangent.y;
+      if (approach < -approachDepth || approach > exitDepth) continue;
+      const lateral = Math.abs(dx * frame.normal.x + dy * frame.normal.y);
+      if (lateral > halfSpan) continue;
+      const headingAlignment =
+        node.tangentX * frame.tangent.x + node.tangentY * frame.tangent.y;
+      if (headingAlignment < aiCfg.checkpointGoalHeadingAlignment) continue;
+      candidates.push({
+        id: node.id,
+        score:
+          Math.abs(approach - Math.min(exitDepth * 0.35, 18)) * 1.4 +
+          lateral * 0.9 +
+          Math.max(0, 1 - headingAlignment) * 42 +
+          nodeSurfacePenalty(node.surface) * 0.15 +
+          node.obstaclePenalty * 0.05,
+      });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    return candidates
+      .slice(0, aiCfg.checkpointGoalNodeLimit)
+      .map((candidate) => candidate.id);
+  });
+}
+
+function positiveProgressDelta(from, to) {
+  const delta = to - from;
+  return delta >= 0 ? delta : delta + 1;
+}
+
+function pickRouteStartNodeId(trackDef, graph) {
+  const startAngle = trackStartAngle(trackDef);
+  const startFrame = trackFrameAtAngle(startAngle, trackDef);
+  const startSlice =
+    Math.round(
+      (normalizeAngle(startAngle) / (Math.PI * 2)) * graph.progressCount,
+    ) % graph.progressCount;
+  const sliceNodeIds = graph.nodesBySlice[startSlice].filter(
+    (nodeId) => nodeId >= 0,
+  );
+  if (sliceNodeIds.length) {
+    let bestNodeId = sliceNodeIds[0];
+    let bestDistance = Infinity;
+    for (const nodeId of sliceNodeIds) {
+      const node = graph.nodes[nodeId];
+      const distance = Math.hypot(
+        node.x - startFrame.point.x,
+        node.y - startFrame.point.y,
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestNodeId = nodeId;
+      }
+    }
+    return bestNodeId;
+  }
+  return graph.nodes[0]?.id ?? -1;
+}
+
+function chooseBestLapEdge(node, graph) {
+  const aiCfg = physicsConfig.ai;
+  let bestEdge = null;
+  let bestScore = Infinity;
+  for (const edge of graph.edges[node.id]) {
+    const nextNode = graph.nodes[edge.to];
+    if (!nextNode) continue;
+    let futureCost = 0;
+    let followNode = null;
+    if (graph.edges[nextNode.id].length) {
+      let bestFollowScore = Infinity;
+      for (const candidate of graph.edges[nextNode.id]) {
+        const candidateNode = graph.nodes[candidate.to];
+        if (!candidateNode) continue;
+        const score = candidate.cost + candidateNode.curvature * 65;
+        if (score < bestFollowScore) {
+          bestFollowScore = score;
+          futureCost = score;
+          followNode = candidateNode;
+        }
+      }
+    }
+    const futureTurn =
+      nextNode.signedCurvature + (followNode?.signedCurvature ?? 0) * 0.9;
+    const turnDir = Math.sign(futureTurn);
+    const turnStrength = clamp01(Math.abs(futureTurn) * 5.5);
+    const apexStrength = clamp01(Math.abs(nextNode.signedCurvature) * 7.5);
+    const entryTarget =
+      -turnDir * nextNode.roadHalfWidth * (0.5 + turnStrength * 0.22);
+    const apexTarget =
+      turnDir * nextNode.roadHalfWidth * (0.22 + turnStrength * 0.38);
+    const desiredOffset =
+      turnDir === 0 ? 0 : apexStrength > 0.52 ? apexTarget : entryTarget;
+    const linePenalty =
+      turnDir === 0
+        ? Math.abs(nextNode.laneOffset) * 0.04
+        : Math.abs(nextNode.laneOffset - desiredOffset) *
+          (apexStrength > 0.52
+            ? aiCfg.apexCommitWeight
+            : aiCfg.apexApproachWeight);
+    const transitionPenalty =
+      turnDir === 0
+        ? Math.abs(nextNode.laneOffset - node.laneOffset) * 0.04
+        : Math.abs(
+            nextNode.laneOffset -
+              node.laneOffset -
+              (desiredOffset - node.laneOffset),
+          ) * aiCfg.apexTransitionWeight;
+    const score =
+      edge.cost * 0.86 +
+      futureCost * 0.52 +
+      nextNode.curvature * 72 -
+      nextNode.baseTargetSpeed * 0.045 +
+      nextNode.obstaclePenalty * 0.9 +
+      linePenalty +
+      transitionPenalty;
+    if (score < bestScore) {
+      bestScore = score;
+      bestEdge = edge;
+    }
+  }
+  return bestEdge;
+}
+
+function buildBestLapRoute(graph, trackDef) {
+  if (!graph.nodes.length) {
+    return {
+      bestLapRouteNodeIds: [],
+      routeIndexByNodeId: new Int32Array(0),
+      routeTargetSpeeds: [],
+    };
+  }
+
+  const startNodeId = pickRouteStartNodeId(trackDef, graph);
+  const routeNodeIds = [];
+  const routeSlices = new Set();
+  let currentNodeId = startNodeId;
+  let guard = 0;
+  while (currentNodeId >= 0 && guard < graph.progressCount + 24) {
+    const currentNode = graph.nodes[currentNodeId];
+    if (!currentNode) break;
+    routeNodeIds.push(currentNodeId);
+    routeSlices.add(currentNode.sliceIndex);
+    const bestEdge = chooseBestLapEdge(currentNode, graph);
+    if (!bestEdge) break;
+    currentNodeId = bestEdge.to;
+    if (
+      routeSlices.size >= graph.progressCount &&
+      graph.nodes[currentNodeId]?.sliceIndex ===
+        graph.nodes[startNodeId]?.sliceIndex
+    ) {
+      break;
+    }
+    guard += 1;
+  }
+
+  if (!routeNodeIds.length) {
+    routeNodeIds.push(startNodeId);
+  }
+
+  const routeTargetSpeeds = routeNodeIds.map(
+    (nodeId) => graph.nodes[nodeId].baseTargetSpeed,
+  );
+  for (let i = routeTargetSpeeds.length - 2; i >= 0; i--) {
+    const node = graph.nodes[routeNodeIds[i]];
+    const nextNode = graph.nodes[routeNodeIds[i + 1]];
+    const segmentDistance = Math.hypot(
+      nextNode.x - node.x,
+      nextNode.y - node.y,
+    );
+    const carrySpeed =
+      routeTargetSpeeds[i + 1] +
+      segmentDistance * physicsConfig.ai.brakeCarryPerUnit;
+    routeTargetSpeeds[i] = Math.min(routeTargetSpeeds[i], carrySpeed);
+  }
+  if (routeTargetSpeeds.length > 1) {
+    const tailDistance = Math.hypot(
+      graph.nodes[routeNodeIds[0]].x -
+        graph.nodes[routeNodeIds[routeNodeIds.length - 1]].x,
+      graph.nodes[routeNodeIds[0]].y -
+        graph.nodes[routeNodeIds[routeNodeIds.length - 1]].y,
+    );
+    routeTargetSpeeds[routeTargetSpeeds.length - 1] = Math.min(
+      routeTargetSpeeds[routeTargetSpeeds.length - 1],
+      routeTargetSpeeds[0] + tailDistance * physicsConfig.ai.brakeCarryPerUnit,
+    );
+  }
+
+  const routeIndexByNodeId = new Int32Array(graph.nodes.length);
+  routeIndexByNodeId.fill(-1);
+  routeNodeIds.forEach((nodeId, routeIndex) => {
+    if (routeIndexByNodeId[nodeId] < 0) routeIndexByNodeId[nodeId] = routeIndex;
+    graph.nodes[nodeId].targetSpeed = routeTargetSpeeds[routeIndex];
+  });
+
+  return {
+    bestLapRouteNodeIds: routeNodeIds,
+    routeIndexByNodeId,
+    routeTargetSpeeds,
+  };
+}
+
+export function getTrackNavigationGraph(
+  trackDef = track,
+  objects = worldObjects,
+) {
+  const signature = trackNavSignature(trackDef, objects);
+  if (cachedTrackNavGraph && cachedTrackNavSignature === signature) {
+    return cachedTrackNavGraph;
+  }
+
+  const aiCfg = physicsConfig.ai;
+  const progressCount = Math.max(
+    24,
+    Math.floor(aiCfg.navProgressSamples || 96),
+  );
+  const laneFactors =
+    Array.isArray(aiCfg.navLaneSamples) && aiCfg.navLaneSamples.length
+      ? [...aiCfg.navLaneSamples]
+      : [-1.35, -1.1, -0.84, -0.56, -0.28, 0, 0.28, 0.56, 0.84, 1.1, 1.35];
+  const sliceFrames = new Array(progressCount);
+  const sliceCurvatures = new Array(progressCount).fill(0);
+  const sliceSignedCurvatures = new Array(progressCount).fill(0);
+  const nodes = [];
+  const nodesBySlice = Array.from({ length: progressCount }, () =>
+    new Array(laneFactors.length).fill(-1),
+  );
+
+  for (let i = 0; i < progressCount; i++) {
+    const progress = i / progressCount;
+    sliceFrames[i] = trackFrameAtAngle(progress * Math.PI * 2, trackDef);
+  }
+  for (let i = 0; i < progressCount; i++) {
+    const prev = sliceFrames[(i - 1 + progressCount) % progressCount].tangent;
+    const next = sliceFrames[(i + 1) % progressCount].tangent;
+    const signedCurvature = signedAngleBetween(prev, next);
+    sliceSignedCurvatures[i] = signedCurvature;
+    sliceCurvatures[i] = Math.abs(signedCurvature);
+  }
+
+  for (let sliceIndex = 0; sliceIndex < progressCount; sliceIndex++) {
+    const progress = sliceIndex / progressCount;
+    const frame = sliceFrames[sliceIndex];
+    const roadHalfWidth = frame.roadWidth * 0.5;
+    const curvature = sliceCurvatures[sliceIndex];
+    for (let laneIndex = 0; laneIndex < laneFactors.length; laneIndex++) {
+      const laneFactor = laneFactors[laneIndex];
+      const laneOffset = roadHalfWidth * laneFactor * 0.92;
+      const x = frame.point.x + frame.normal.x * laneOffset;
+      const y = frame.point.y + frame.normal.y * laneOffset;
+      const surface = surfaceAtForTrack(x, y, trackDef, objects);
+      if (surface === "water") continue;
+      if (resolveObjectCollisions(x, y, 0, objects).hit) continue;
+      const obstacleInfo = obstaclePenaltyAtPoint(x, y, objects);
+      if (obstacleInfo.blocked) continue;
+      const baseTargetSpeed = computeBaseTargetSpeed(curvature);
+      const nodeId = nodes.length;
+      nodes.push({
+        id: nodeId,
+        sliceIndex,
+        laneIndex,
+        progress,
+        x,
+        y,
+        surface,
+        laneOffset,
+        roadHalfWidth,
+        tangentX: frame.tangent.x,
+        tangentY: frame.tangent.y,
+        normalX: frame.normal.x,
+        normalY: frame.normal.y,
+        curvature,
+        signedCurvature: sliceSignedCurvatures[sliceIndex],
+        obstaclePenalty: obstacleInfo.penalty,
+        obstacleClearance: obstacleInfo.clearance,
+        baseTargetSpeed,
+        targetSpeed: baseTargetSpeed,
+      });
+      nodesBySlice[sliceIndex][laneIndex] = nodeId;
+    }
+  }
+
+  const edges = Array.from({ length: nodes.length }, () => []);
+  for (const node of nodes) {
+    for (const step of [1, 2]) {
+      const nextSliceIndex = (node.sliceIndex + step) % progressCount;
+      for (
+        let nextLaneIndex = Math.max(0, node.laneIndex - 1);
+        nextLaneIndex <= Math.min(laneFactors.length - 1, node.laneIndex + 1);
+        nextLaneIndex++
+      ) {
+        const nextNodeId = nodesBySlice[nextSliceIndex][nextLaneIndex];
+        if (nextNodeId < 0) continue;
+        const nextNode = nodes[nextNodeId];
+        if (
+          !clearNavSegment(
+            node.x,
+            node.y,
+            nextNode.x,
+            nextNode.y,
+            trackDef,
+            objects,
+          )
+        ) {
+          continue;
+        }
+        const segmentObstacleInfo = obstaclePenaltyAlongSegment(
+          node.x,
+          node.y,
+          nextNode.x,
+          nextNode.y,
+          objects,
+        );
+        if (segmentObstacleInfo.blocked) continue;
+        const distance = Math.hypot(nextNode.x - node.x, nextNode.y - node.y);
+        const laneChangePenalty =
+          Math.abs(nextNode.laneIndex - node.laneIndex) *
+          aiCfg.laneChangePenalty;
+        const surfacePenalty =
+          nodeSurfacePenalty(node.surface) +
+          nodeSurfacePenalty(nextNode.surface);
+        const curvaturePenalty = nextNode.curvature * 42;
+        const cost =
+          distance +
+          laneChangePenalty +
+          surfacePenalty +
+          curvaturePenalty +
+          (node.obstaclePenalty + nextNode.obstaclePenalty) * 0.35 +
+          segmentObstacleInfo.penalty * 0.8 +
+          (step - 1) * 4;
+        addNavEdge(edges, node, nextNode, cost, step, "progress");
+      }
+    }
+  }
+
+  for (const node of nodes) {
+    const shortcutEdges = [];
+    for (const candidate of nodes) {
+      if (candidate.id === node.id) continue;
+      const sliceGapRaw = Math.abs(candidate.sliceIndex - node.sliceIndex);
+      const sliceGap = Math.min(sliceGapRaw, progressCount - sliceGapRaw);
+      if (sliceGap < aiCfg.navIntersectionMinSliceGap) continue;
+      const dx = candidate.x - node.x;
+      const dy = candidate.y - node.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance <= 1e-5 || distance > aiCfg.navIntersectionLinkRadius)
+        continue;
+      const dir = normalizeVec(dx, dy);
+      const departureAlignment = node.tangentX * dir.x + node.tangentY * dir.y;
+      const arrivalAlignment =
+        candidate.tangentX * dir.x + candidate.tangentY * dir.y;
+      if (
+        departureAlignment < aiCfg.navIntersectionHeadingThreshold ||
+        arrivalAlignment < aiCfg.navIntersectionHeadingThreshold
+      ) {
+        continue;
+      }
+      if (
+        !clearNavSegment(
+          node.x,
+          node.y,
+          candidate.x,
+          candidate.y,
+          trackDef,
+          objects,
+        )
+      ) {
+        continue;
+      }
+      const segmentObstacleInfo = obstaclePenaltyAlongSegment(
+        node.x,
+        node.y,
+        candidate.x,
+        candidate.y,
+        objects,
+      );
+      if (segmentObstacleInfo.blocked) continue;
+      const surfacePenalty =
+        nodeSurfacePenalty(node.surface) +
+        nodeSurfacePenalty(candidate.surface);
+      const cost =
+        distance +
+        surfacePenalty +
+        candidate.curvature * 24 +
+        (node.obstaclePenalty + candidate.obstaclePenalty) * 0.2 +
+        segmentObstacleInfo.penalty * 0.85 +
+        aiCfg.navIntersectionPenalty;
+      shortcutEdges.push({
+        toNode: candidate,
+        cost,
+        step: sliceGap,
+      });
+    }
+    shortcutEdges.sort((a, b) => a.cost - b.cost);
+    for (const edge of shortcutEdges.slice(0, aiCfg.navIntersectionMaxLinks)) {
+      addNavEdge(edges, node, edge.toNode, edge.cost, edge.step, "junction");
+    }
+  }
+
+  const checkpointNodeIds = checkpoints.map((checkpoint) => {
+    const checkpointProgress = normalizeAngle(checkpoint.angle) / (Math.PI * 2);
+    const centerSlice =
+      Math.round(checkpointProgress * progressCount) % progressCount;
+    const nodeIds = [];
+    for (let offset = -1; offset <= 1; offset++) {
+      const sliceIndex = (centerSlice + offset + progressCount) % progressCount;
+      for (const nodeId of nodesBySlice[sliceIndex]) {
+        if (nodeId >= 0) nodeIds.push(nodeId);
+      }
+    }
+    return [...new Set(nodeIds)];
+  });
+  const checkpointGoalNodeIds = buildCheckpointGoalNodeIds(nodes, trackDef).map(
+    (nodeIds, index) =>
+      nodeIds.length ? nodeIds : checkpointNodeIds[index] || [],
+  );
+
+  cachedTrackNavSignature = signature;
+  const lapRoute = buildBestLapRoute(
+    {
+      progressCount,
+      laneFactors,
+      nodes,
+      edges,
+      nodesBySlice,
+      checkpointNodeIds,
+      checkpointGoalNodeIds,
+      averageSegmentLength:
+        nodes.length > 1
+          ? nodes.reduce((sum, node) => {
+              const nextSlice = (node.sliceIndex + 1) % progressCount;
+              const nextNodeId = nodesBySlice[nextSlice][node.laneIndex];
+              if (nextNodeId < 0) return sum;
+              return (
+                sum +
+                Math.hypot(
+                  nodes[nextNodeId].x - node.x,
+                  nodes[nextNodeId].y - node.y,
+                )
+              );
+            }, 0) / Math.max(nodes.length, 1)
+          : 1,
+    },
+    trackDef,
+  );
+  cachedTrackNavGraph = {
+    progressCount,
+    laneFactors,
+    nodes,
+    edges,
+    nodesBySlice,
+    checkpointNodeIds,
+    checkpointGoalNodeIds,
+    bestLapRouteNodeIds: lapRoute.bestLapRouteNodeIds,
+    routeIndexByNodeId: lapRoute.routeIndexByNodeId,
+    routeTargetSpeeds: lapRoute.routeTargetSpeeds,
+    averageSegmentLength:
+      nodes.length > 1
+        ? nodes.reduce((sum, node) => {
+            const nextSlice = (node.sliceIndex + 1) % progressCount;
+            const nextNodeId = nodesBySlice[nextSlice][node.laneIndex];
+            if (nextNodeId < 0) return sum;
+            return (
+              sum +
+              Math.hypot(
+                nodes[nextNodeId].x - node.x,
+                nodes[nextNodeId].y - node.y,
+              )
+            );
+          }, 0) / Math.max(nodes.length, 1)
+        : 1,
+  };
+  return cachedTrackNavGraph;
+}
+
+export function findNearestTrackNavNode(
+  x,
+  y,
+  {
+    trackDef = track,
+    objects = worldObjects,
+    maxDistance = Infinity,
+    progressHint = null,
+    preferForwardProgress = null,
+  } = {},
+) {
+  const graph = getTrackNavigationGraph(trackDef, objects);
+  let bestNode = null;
+  let bestScore = Infinity;
+  for (const node of graph.nodes) {
+    const distance = Math.hypot(node.x - x, node.y - y);
+    if (distance > maxDistance) continue;
+    let score = distance;
+    if (progressHint !== null) {
+      const progressDelta = Math.abs(
+        positiveProgressDelta(progressHint, node.progress),
+      );
+      score += Math.min(progressDelta, 1 - progressDelta) * 90;
+    }
+    if (preferForwardProgress !== null) {
+      score += positiveProgressDelta(preferForwardProgress, node.progress) * 40;
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestNode = node;
+    }
+  }
+  return bestNode;
 }
 
 export function sampleClosedPath(sampleFn, segments = 220) {

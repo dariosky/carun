@@ -16,6 +16,9 @@ import {
   worldObjects,
 } from "./parameters.js";
 import {
+  aiCar,
+  aiLapData,
+  aiPhysicsRuntime,
   appLogo,
   appLogoReady,
   car,
@@ -38,6 +41,7 @@ import {
   getSettingsRenderLayout,
   getTrackSelectRenderModel,
 } from "./menus.js";
+import { getRacePosition, getRaceStandings } from "./physics.js";
 import { formatTime } from "./utils.js";
 import {
   blobRadius,
@@ -59,6 +63,10 @@ import { drawParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
+
+function aiOpponentsEnabled() {
+  return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
+}
 
 function activeMenuTagline() {
   const rotation = state.menuTagline;
@@ -1092,8 +1100,23 @@ function drawTrack() {
   }
 }
 
-function drawCar() {
-  const blinkActive = state.checkpointBlink.time > 0;
+function getRaceOrder() {
+  return getRacePosition("player");
+}
+
+function getBestLapTime(lapTimes) {
+  if (!Array.isArray(lapTimes) || !lapTimes.length) return null;
+  return lapTimes.reduce(
+    (best, value) => (value < best ? value : best),
+    lapTimes[0],
+  );
+}
+
+function drawVehicle(
+  vehicle,
+  { accent = "#d22525", blink = false, label = "" } = {},
+) {
+  const blinkActive = blink && state.checkpointBlink.time > 0;
   let blinkT = 0;
   if (blinkActive) {
     blinkT =
@@ -1102,21 +1125,21 @@ function drawCar() {
   }
 
   const airCfg = physicsConfig.air;
-  const scale = Math.max(1, car.visualScale || 1);
-  const screenLiftPx = Math.max(0, car.z) * airCfg.liftPxPerMeter;
+  const scale = Math.max(1, vehicle.visualScale || 1);
+  const screenLiftPx = Math.max(0, vehicle.z) * airCfg.liftPxPerMeter;
 
   ctx.save();
-  ctx.translate(car.x, car.y + 7);
-  ctx.scale(1 + Math.max(0, car.z) * 0.015, 0.5);
-  ctx.fillStyle = `rgba(10, 12, 18, ${Math.max(0.08, 0.26 - car.z * 0.025).toFixed(3)})`;
+  ctx.translate(vehicle.x, vehicle.y + 7);
+  ctx.scale(1 + Math.max(0, vehicle.z) * 0.015, 0.5);
+  ctx.fillStyle = `rgba(10, 12, 18, ${Math.max(0.08, 0.26 - vehicle.z * 0.025).toFixed(3)})`;
   ctx.beginPath();
   ctx.arc(0, 0, 18, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  ctx.translate(car.x, car.y - screenLiftPx);
-  ctx.rotate(car.angle + Math.PI * 0.5);
+  ctx.translate(vehicle.x, vehicle.y - screenLiftPx);
+  ctx.rotate(vehicle.angle + Math.PI * 0.5);
   ctx.scale(scale, scale);
 
   if (blinkActive) {
@@ -1136,14 +1159,39 @@ function drawCar() {
       spriteWidth,
       spriteLength,
     );
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.92;
+    ctx.fillRect(-8, -24, 16, 7);
+    ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = "#d22525";
-    ctx.fillRect(-car.height / 2, -car.width / 2, car.height, car.width);
+    ctx.fillStyle = accent;
+    ctx.fillRect(
+      -vehicle.height / 2,
+      -vehicle.width / 2,
+      vehicle.height,
+      vehicle.width,
+    );
     ctx.fillStyle = "#ffd34d";
     ctx.fillRect(-6, -8, 12, 16);
   }
 
   ctx.restore();
+
+  if (label) {
+    ctx.save();
+    ctx.fillStyle = "#f4fbff";
+    ctx.font = "bold 12px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(label, vehicle.x, vehicle.y - screenLiftPx - 18);
+    ctx.restore();
+  }
+}
+
+function drawCar() {
+  if (aiOpponentsEnabled()) {
+    drawVehicle(aiCar, { accent: "#4db3ff", label: aiCar.label });
+  }
+  drawVehicle(car, { accent: "#d22525", blink: true, label: state.playerName });
 }
 
 function drawDebugVectors() {
@@ -1183,6 +1231,35 @@ function drawDebugVectors() {
   ctx.moveTo(originX, originY);
   ctx.lineTo(originX + lateralWorldX * scale, originY + lateralWorldY * scale);
   ctx.stroke();
+
+  if (aiOpponentsEnabled() && aiPhysicsRuntime.debugPathPoints.length > 1) {
+    ctx.strokeStyle = "rgba(110, 205, 255, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(
+      aiPhysicsRuntime.debugPathPoints[0].x,
+      aiPhysicsRuntime.debugPathPoints[0].y,
+    );
+    for (let i = 1; i < aiPhysicsRuntime.debugPathPoints.length; i++) {
+      ctx.lineTo(
+        aiPhysicsRuntime.debugPathPoints[i].x,
+        aiPhysicsRuntime.debugPathPoints[i].y,
+      );
+    }
+    ctx.stroke();
+  }
+  if (aiOpponentsEnabled()) {
+    ctx.fillStyle = "#72d8ff";
+    ctx.beginPath();
+    ctx.arc(
+      aiPhysicsRuntime.targetPoint.x,
+      aiPhysicsRuntime.targetPoint.y,
+      6,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
   ctx.restore();
 
   const panelX = 20;
@@ -1222,8 +1299,15 @@ function drawDebugVectors() {
     firstLineY + lineStep * 3,
   );
   ctx.fillText(
-    `FPS: ${toStableInt(state.performance.fps)}`,
+    aiOpponentsEnabled()
+      ? `AI: ${String(aiPhysicsRuntime.mode).toUpperCase()}`
+      : "AI: OFF",
     lineX,
+    firstLineY + lineStep * 4,
+  );
+  ctx.fillText(
+    `FPS: ${toStableInt(state.performance.fps)}`,
+    lineX + 150,
     firstLineY + lineStep * 4,
   );
 }
@@ -1406,6 +1490,14 @@ function drawTitleBar() {
   ctx.fillText(lapLabel, x, 38);
   x += ctx.measureText(lapLabel).width + 16;
 
+  if (aiOpponentsEnabled()) {
+    const raceOrder = getRaceOrder();
+    const racePlace = raceOrder === 1 ? "P1/2" : "P2/2";
+    ctx.fillStyle = raceOrder === 1 ? "#7df0a8" : "#ff9b8d";
+    ctx.fillText(racePlace, x, 38);
+    x += ctx.measureText(racePlace).width + 16;
+  }
+
   const liveLap = state.finished
     ? lapData.lapTimes[lapData.lapTimes.length - 1] || 0
     : state.raceTime - lapData.currentLapStart;
@@ -1432,6 +1524,18 @@ function drawTitleBar() {
         : `L${i + 1} --:--.---`;
     ctx.fillText(label, x, 38);
     x += ctx.measureText(label).width + 14;
+  }
+
+  if (aiOpponentsEnabled()) {
+    const standings = getRaceStandings();
+    const rivalStanding = standings.find((entry) => entry.id === "ai");
+    const rivalLap = Math.min(aiLapData.lap, aiLapData.maxLaps);
+    const rivalBestLap = getBestLapTime(aiLapData.lapTimes);
+    const rivalStatus = aiLapData.finished
+      ? `${aiCar.label} P${rivalStanding?.finishOrder || getRacePosition("ai")} FIN ${formatTime(aiLapData.finishTime)} BEST ${rivalBestLap ? formatTime(rivalBestLap) : "--:--.---"}`
+      : `${aiCar.label} P${getRacePosition("ai")} L${rivalLap}/${aiLapData.maxLaps} BEST ${rivalBestLap ? formatTime(rivalBestLap) : "--:--.---"}`;
+    ctx.fillStyle = "#8fd2ff";
+    ctx.fillText(rivalStatus, x, 38);
   }
 }
 

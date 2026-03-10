@@ -174,6 +174,7 @@ test("settings render layout uses longest rendered row label", () => {
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
     "MENU MUSIC",
+    "AI OPPONENTS",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",

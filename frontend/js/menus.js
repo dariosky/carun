@@ -12,6 +12,7 @@ import {
   importTrackPresetData,
   removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
+  saveAiOpponentsEnabled,
   saveTrackPresetToDb,
   saveMenuMusicEnabled,
   setTrackPresetMetadata,
@@ -599,6 +600,9 @@ export function getSettingsRenderLayout(measureTextWidth) {
     }
     if (item === "MENU MUSIC") {
       return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
+    }
+    if (item === "AI OPPONENTS") {
+      return `${item}: ${physicsConfig.flags.AI_OPPONENTS_ENABLED ? "ON" : "OFF"}`;
     }
     if (item === "DEBUG MODE") {
       return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
@@ -1369,6 +1373,12 @@ function toggleMenuMusic() {
   setMenuMusicEnabled(nextValue);
 }
 
+function toggleAiOpponents() {
+  physicsConfig.flags.AI_OPPONENTS_ENABLED =
+    !physicsConfig.flags.AI_OPPONENTS_ENABLED;
+  saveAiOpponentsEnabled(physicsConfig.flags.AI_OPPONENTS_ENABLED);
+}
+
 function createEmptyTrackAndEdit() {
   const id = `track-${Date.now()}`;
   const newTrack = {
@@ -1530,6 +1540,10 @@ function activateSelection() {
     }
     if (selectedSetting === "MENU MUSIC") {
       toggleMenuMusic();
+      return;
+    }
+    if (selectedSetting === "AI OPPONENTS") {
+      toggleAiOpponents();
       return;
     }
     if (selectedSetting === "DEBUG MODE") {
@@ -2061,6 +2075,7 @@ function onKeyDown(e) {
     state.mode === "settings"
   ) {
     const selected = currentSettingsItems()[state.settingsIndex];
+    if (selected === "AI OPPONENTS") toggleAiOpponents();
     if (selected === "DEBUG MODE") toggleDebugMode();
   }
   if (key === "enter") activateSelection();

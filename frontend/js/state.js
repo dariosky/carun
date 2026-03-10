@@ -32,6 +32,11 @@ export const state = {
     inFlight: false,
     completed: false,
   },
+  raceStandings: {
+    nextFinishOrder: 1,
+    playerFinishOrder: 0,
+    aiFinishOrder: 0,
+  },
   raceReturn: {
     mode: "trackSelect",
     editorTrackIndex: null,
@@ -132,6 +137,19 @@ export const lapData = {
   passed: new Set([0]),
   nextCheckpointIndex: 1,
   lap: 1,
+  finished: false,
+  finishTime: 0,
+};
+
+export const aiLapData = {
+  currentLapStart: 0,
+  lapTimes: [],
+  maxLaps: 3,
+  passed: new Set([0]),
+  nextCheckpointIndex: 1,
+  lap: 1,
+  finished: false,
+  finishTime: 0,
 };
 
 export const car = {
@@ -148,6 +166,23 @@ export const car = {
   visualScale: 1,
   width: 34,
   height: 20,
+};
+
+export const aiCar = {
+  x: track.cx,
+  y: track.cy + 170,
+  vx: 0,
+  vy: 0,
+  angle: Math.PI,
+  speed: 0,
+  z: 0,
+  vz: 0,
+  airborne: false,
+  airTime: 0,
+  visualScale: 1,
+  width: 34,
+  height: 20,
+  label: "RIVAL",
 };
 
 export const physicsRuntime = {
@@ -175,6 +210,55 @@ export const physicsRuntime = {
     pivotY: track.cy,
     z: 0,
     vz: 0,
+  },
+  wheelLastPoints: null,
+  prevForwardSpeed: null,
+  particleEmitters: {
+    smokeCooldown: 0,
+    splashCooldown: 0,
+    dustCooldown: 0,
+  },
+};
+
+export const aiPhysicsRuntime = {
+  input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
+  steeringRate: 0,
+  recoveryTimer: 0,
+  collisionGripTimer: 0,
+  impactCooldown: 0,
+  prevSteerAbs: 0,
+  lastGroundedSpeed: 0,
+  landingBouncePending: false,
+  landingCooldown: 0,
+  mode: "race",
+  recoveryMode: "none",
+  targetLaneOffset: 0,
+  blockedTimer: 0,
+  progress: 0,
+  progressAtLastSample: 0,
+  lowProgressTimer: 0,
+  offRoadTimer: 0,
+  repeatedCollisionTimer: 0,
+  lastCollisionNormalX: 0,
+  lastCollisionNormalY: 0,
+  lastCollisionTime: 0,
+  softResetCooldown: 0,
+  replanCooldown: 0,
+  currentNodeId: -1,
+  lastValidNodeId: -1,
+  targetNodeId: -1,
+  routeNodeIndex: -1,
+  rejoinRouteIndex: -1,
+  pathCursor: 0,
+  plannedNodeIds: [],
+  desiredSpeed: 0,
+  targetPoint: { x: track.cx, y: track.cy },
+  debugPathPoints: [],
+  surface: {
+    lateralGripMul: 1,
+    longDragMul: 1,
+    engineMul: 1,
+    coastDecelMul: 1,
   },
   wheelLastPoints: null,
   prevForwardSpeed: null,
