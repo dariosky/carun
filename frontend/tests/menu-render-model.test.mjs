@@ -87,6 +87,7 @@ const {
   getSettingsRenderLayout,
   getSettingsHeaderRenderModel,
   getTrackSelectRenderModel,
+  syncTrackSelectWindow,
 } = await import("../js/menus.js");
 
 function makeTrackData({
@@ -174,7 +175,6 @@ test("settings render layout uses longest rendered row label", () => {
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
     "MENU MUSIC",
-    "AI OPPONENTS",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",
@@ -248,21 +248,61 @@ test("track selector render model windows large catalogs and exposes admin actio
 
   state.auth.userId = "admin-1";
   state.auth.isAdmin = true;
-  state.trackSelectIndex = trackOptions.findIndex(
+  const selector4Index = trackOptions.findIndex(
     (track) => track.id === "selector-4",
   );
-  state.trackSelectViewOffset = 2;
+  state.trackSelectIndex = selector4Index;
+  state.trackSelectViewOffset = 0;
 
   const model = getTrackSelectRenderModel();
 
-  assert.equal(model.visibleTracks.length, 4);
-  assert.equal(model.visibleTracks[0].id, "selector-1");
-  assert.equal(model.visibleTracks[3].id, "selector-4");
-  assert.equal(model.showLeftHint, true);
-  assert.equal(model.showRightHint, false);
+  // Grid model exposes cells rather than flat visibleTracks
+  assert.ok(model.gridCells.length > 0);
+  assert.equal(model.totalCount, trackOptions.length);
   assert.equal(model.selectedTrackCanPublish, true);
   assert.equal(model.selectedTrackCanRename, true);
   assert.equal(model.selectedTrackCanDelete, false);
+
+  for (const id of addedIds)
+    removeTrackPresetById(id, { removePersisted: false });
+});
+
+test("track selector sync keeps a deep-linked track visible in the grid", () => {
+  const addedIds = [];
+  for (let i = 0; i < 24; i++) {
+    const imported = importTrackPresetData({
+      id: `grid-sync-${i}`,
+      name: `GRID SYNC ${i}`,
+      source: "user",
+      ownerUserId: "user-1",
+      isPublished: true,
+      canDelete: false,
+      fromDb: true,
+      track: makeTrackData(),
+      checkpoints: [],
+      worldObjects: [],
+      centerlineStrokes: [],
+      editStack: [],
+    });
+    addedIds.push(imported.id);
+  }
+
+  const deepLinkedIndex = trackOptions.findIndex(
+    (track) => track.id === "grid-sync-23",
+  );
+  state.trackSelectIndex = deepLinkedIndex;
+  state.trackSelectViewOffset = 0;
+
+  syncTrackSelectWindow();
+  const model = getTrackSelectRenderModel();
+  const selectedColumn = Math.floor(deepLinkedIndex / model.rows);
+  const expectedOffset = Math.max(0, selectedColumn - model.visibleColumns + 1);
+
+  assert.equal(model.viewColumnOffset, expectedOffset);
+  assert.equal(
+    model.gridCells.some((cell) => cell.trackIndex === deepLinkedIndex),
+    true,
+  );
 
   for (const id of addedIds)
     removeTrackPresetById(id, { removePersisted: false });

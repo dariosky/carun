@@ -114,5 +114,10 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - Car selection in settings (placeholder assets acceptable)
 - Multiple track presets with irregular handcrafted layouts
 - Better collision boundaries for non-circular props
-- Simple AI opponent prototype
-- Persist the best laps and player settings
+- ~~Simple AI opponent prototype~~ (done)
+- ~~Persist the best laps and player settings~~ (done)
+- ~~Game mode selection (Single Race / Tournament)~~ (done)
+- ~~Tournament mode with cumulative scoring, standings, and podium~~ (done)
+- ~~3-row grid track selection with horizontal scrolling~~ (done)
+- ~~Breadcrumb navigation bar across all menus~~ (done)
+- Additional game modes (time trial, etc.)

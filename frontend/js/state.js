@@ -18,6 +18,15 @@ export const state = {
   trackSelectViewOffset: 0,
   selectedTrackIndex: 0,
   settingsIndex: 0,
+  gameModeIndex: 0,
+  gameMode: "single",
+  tournament: {
+    selectedTrackIndices: new Set(),
+    trackOrder: [],
+    currentRaceIndex: 0,
+    scores: {},
+    raceResults: [],
+  },
   playerName: loadPlayerName(),
   auth: {
     authenticated: false,

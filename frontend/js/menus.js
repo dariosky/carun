@@ -6,6 +6,7 @@ import {
   DEFAULT_CENTERLINE_SMOOTHING_MODE,
   deleteOwnTrackFromApi,
   getMenuItems,
+  getGameModeItems,
   getLoginProviderItems,
   getTrackPreset,
   getSettingsItems,
@@ -24,9 +25,10 @@ import {
   trackOptions,
   track,
   normalizeCenterlineSmoothingMode,
+  TOURNAMENT_POINTS,
 } from "./parameters.js";
 import { keys, setCurbSegments, state } from "./state.js";
-import { clearRaceInputs, resetRace } from "./physics.js";
+import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments } from "./track.js";
 import {
@@ -44,7 +46,6 @@ import {
 import { emitFinishConfetti } from "./particles.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
-const TRACK_SELECT_VISIBLE_CARDS = 4;
 const EDITOR_OBJECT_PLACE_TOOLS = [
   { id: "water", label: "Water", icon: "≈", shortcut: "W" },
   { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
@@ -601,9 +602,6 @@ export function getSettingsRenderLayout(measureTextWidth) {
     if (item === "MENU MUSIC") {
       return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
     }
-    if (item === "AI OPPONENTS") {
-      return `${item}: ${physicsConfig.flags.AI_OPPONENTS_ENABLED ? "ON" : "OFF"}`;
-    }
     if (item === "DEBUG MODE") {
       return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
     }
@@ -635,30 +633,69 @@ export function getSettingsHeaderRenderModel() {
   };
 }
 
-function trackSelectVisibleCount() {
-  return Math.min(TRACK_SELECT_VISIBLE_CARDS, Math.max(1, trackOptions.length));
+export function getGameModeRenderModel(measureTextWidth) {
+  const items = getGameModeItems();
+  const selectedIndex = Math.max(
+    0,
+    Math.min(state.gameModeIndex, items.length - 1),
+  );
+  let maxWidth = 0;
+  for (const item of items) {
+    maxWidth = Math.max(maxWidth, measureTextWidth(item));
+  }
+  const highlightWidth = Math.max(460, maxWidth + 96);
+  return { items, selectedIndex, highlightWidth };
 }
 
-function syncTrackSelectWindow() {
-  const cardCount = trackSelectCardCount();
-  const visibleCount = trackSelectVisibleCount();
-  const maxOffset = Math.max(0, cardCount - visibleCount);
-  if (state.trackSelectIndex >= cardCount) {
-    state.trackSelectViewOffset = Math.max(
-      0,
-      Math.min(state.trackSelectViewOffset, maxOffset),
-    );
+export function getBreadcrumbs() {
+  if (state.mode === "menu") return ["CARUN"];
+  if (state.mode === "loginProviders") return ["CARUN", "LOGIN"];
+  if (state.mode === "settings") return ["CARUN", "SETTINGS"];
+  if (state.mode === "gameModeSelect") return ["CARUN", "RACE"];
+  if (state.mode === "trackSelect") {
+    return state.gameMode === "tournament"
+      ? ["CARUN", "RACE", "TOURNAMENT"]
+      : ["CARUN", "RACE", "SINGLE RACE"];
+  }
+  if (state.mode === "tournamentStandings") {
+    return ["CARUN", "RACE", "TOURNAMENT", "STANDINGS"];
+  }
+  if (state.mode === "tournamentFinal") {
+    return ["CARUN", "RACE", "TOURNAMENT", "FINAL"];
+  }
+  return ["CARUN"];
+}
+
+const TRACK_GRID_ROWS = 3;
+const TRACK_GRID_CARD_SIZE = 140;
+const TRACK_GRID_CARD_GAP = 16;
+const TRACK_GRID_LABEL_HEIGHT = 24;
+
+function trackGridColumnCount() {
+  return Math.max(1, Math.ceil(trackOptions.length / TRACK_GRID_ROWS));
+}
+
+function trackGridVisibleColumns() {
+  const availableWidth = canvas.width - 80;
+  const colWidth = TRACK_GRID_CARD_SIZE + TRACK_GRID_CARD_GAP;
+  return Math.max(1, Math.floor(availableWidth / colWidth));
+}
+
+export function syncTrackSelectWindow() {
+  const totalTracks = trackOptions.length;
+  if (totalTracks === 0) return;
+  if (state.trackSelectIndex < 0) state.trackSelectIndex = 0;
+  if (state.trackSelectIndex >= totalTracks) {
+    // On the back/start button row — keep current offset
     return;
   }
-
-  let nextOffset = Math.max(
-    0,
-    Math.min(state.trackSelectViewOffset, maxOffset),
-  );
-  if (state.trackSelectIndex < nextOffset) nextOffset = state.trackSelectIndex;
-  if (state.trackSelectIndex >= nextOffset + visibleCount)
-    nextOffset = state.trackSelectIndex - visibleCount + 1;
-  state.trackSelectViewOffset = Math.max(0, Math.min(nextOffset, maxOffset));
+  const col = Math.floor(state.trackSelectIndex / TRACK_GRID_ROWS);
+  const visCols = trackGridVisibleColumns();
+  const maxColOffset = Math.max(0, trackGridColumnCount() - visCols);
+  let offset = state.trackSelectViewOffset;
+  if (col < offset) offset = col;
+  if (col >= offset + visCols) offset = col - visCols + 1;
+  state.trackSelectViewOffset = Math.max(0, Math.min(offset, maxColOffset));
 }
 
 function selectedTrackPreset() {
@@ -687,30 +724,50 @@ function selectedTrackCanRename() {
 }
 
 export function getTrackSelectRenderModel() {
-  const visibleCount = trackSelectVisibleCount();
   const totalCount = trackOptions.length;
-  const maxOffset = Math.max(0, totalCount - visibleCount);
-  const viewOffset = Math.max(
+  const rows = TRACK_GRID_ROWS;
+  const totalColumns = trackGridColumnCount();
+  const visibleColumns = trackGridVisibleColumns();
+  const maxColOffset = Math.max(0, totalColumns - visibleColumns);
+  const viewColumnOffset = Math.max(
     0,
-    Math.min(state.trackSelectViewOffset, maxOffset),
-  );
-  const visibleTracks = trackOptions.slice(
-    viewOffset,
-    viewOffset + visibleCount,
+    Math.min(state.trackSelectViewOffset, maxColOffset),
   );
   const selectedTrack = selectedTrackPreset();
 
+  // Build grid cells for visible columns
+  const gridCells = [];
+  for (let c = viewColumnOffset; c < viewColumnOffset + visibleColumns; c++) {
+    for (let r = 0; r < rows; r++) {
+      const trackIndex = c * rows + r;
+      if (trackIndex >= totalCount) continue;
+      gridCells.push({
+        trackIndex,
+        column: c - viewColumnOffset,
+        row: r,
+        option: trackOptions[trackIndex],
+      });
+    }
+  }
+
   return {
-    visibleTracks,
-    viewOffset,
-    visibleCount,
+    gridCells,
+    rows,
+    totalColumns,
+    visibleColumns,
+    viewColumnOffset,
     totalCount,
-    showLeftHint: viewOffset > 0,
-    showRightHint: viewOffset + visibleCount < totalCount,
+    cardSize: TRACK_GRID_CARD_SIZE,
+    cardGap: TRACK_GRID_CARD_GAP,
+    labelHeight: TRACK_GRID_LABEL_HEIGHT,
+    showLeftHint: viewColumnOffset > 0,
+    showRightHint: viewColumnOffset + visibleColumns < totalColumns,
     selectedTrackCanDelete: selectedTrackCanDelete(),
     selectedTrackCanPublish: selectedTrackCanPublish(),
     selectedTrackCanRename: selectedTrackCanRename(),
     selectedTrackIsPublished: Boolean(selectedTrack?.isPublished),
+    isTournament: state.gameMode === "tournament",
+    tournamentSelected: state.tournament.selectedTrackIndices,
   };
 }
 
@@ -1293,6 +1350,10 @@ function trackSelectBackIndex() {
   return trackSelectCardCount();
 }
 
+function trackSelectStartTournamentIndex() {
+  return trackSelectCardCount() + 1;
+}
+
 async function saveEditorTrack(requestedName) {
   const trackIndex = state.editor.trackIndex;
   const previousPreset = getTrackPreset(trackIndex);
@@ -1444,6 +1505,100 @@ export function enterEditor(trackIndex) {
   if (preset) setTrackEditorUrl(preset.id);
 }
 
+function enterTrackSelect() {
+  if (trackOptions.length > 0) {
+    state.selectedTrackIndex = Math.max(
+      0,
+      Math.min(state.selectedTrackIndex, trackOptions.length - 1),
+    );
+  } else {
+    state.selectedTrackIndex = 0;
+  }
+  state.mode = "trackSelect";
+  setTrackSelectUrl();
+  syncMenuMusicForMode(state.mode);
+  state.trackSelectIndex = state.selectedTrackIndex;
+  state.trackSelectViewOffset = 0;
+  syncTrackSelectWindow();
+}
+
+function startTournament() {
+  const indices = Array.from(state.tournament.selectedTrackIndices);
+  if (indices.length === 0) return;
+  // Shuffle
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  state.tournament.trackOrder = indices;
+  state.tournament.currentRaceIndex = 0;
+  state.tournament.scores = {};
+  state.tournament.raceResults = [];
+  // Force AI on for tournament
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  startTournamentRace(0);
+}
+
+function startTournamentRace(raceIndex) {
+  const trackIndex = state.tournament.trackOrder[raceIndex];
+  state.selectedTrackIndex = trackIndex;
+  applyTrackPreset(trackIndex);
+  setCurbSegments(initCurbSegments());
+  setRaceReturnTarget("trackSelect");
+  state.mode = "racing";
+  syncMenuMusicForMode(state.mode);
+  resetRace();
+  const selected = trackOptions[trackIndex];
+  if (selected) setTrackInUrl(selected.id);
+}
+
+function finishTournamentRace() {
+  const standings = getRaceStandings();
+  const playerName = state.playerName || "PLAYER";
+  const nameMap = { player: playerName, ai: "RIVAL" };
+  const result = {};
+  standings.forEach((entry, idx) => {
+    const name = nameMap[entry.id] || entry.id;
+    const pts = TOURNAMENT_POINTS[idx] || 0;
+    result[name] = { order: idx + 1, points: pts };
+    state.tournament.scores[name] = (state.tournament.scores[name] || 0) + pts;
+  });
+  state.tournament.raceResults.push(result);
+  state.tournament.currentRaceIndex += 1;
+  state.mode = "tournamentStandings";
+  syncMenuMusicForMode(state.mode);
+  state.paused = false;
+  state.pauseMenuIndex = 0;
+}
+
+function advanceFromTournamentStandings() {
+  if (state.tournament.currentRaceIndex < state.tournament.trackOrder.length) {
+    startTournamentRace(state.tournament.currentRaceIndex);
+  } else {
+    state.mode = "tournamentFinal";
+    syncMenuMusicForMode(state.mode);
+    emitScreenConfettiFromMenus();
+  }
+}
+
+function emitScreenConfettiFromMenus() {
+  import("./particles.js").then(({ emitScreenConfetti }) => {
+    emitScreenConfetti({ x: canvas.width * 0.5, y: 80 });
+  });
+}
+
+export function getTournamentStandingsData() {
+  const scores = { ...state.tournament.scores };
+  const sorted = Object.entries(scores)
+    .map(([name, total]) => ({ name, total }))
+    .sort((a, b) => b.total - a.total);
+  const raceIndex = state.tournament.currentRaceIndex;
+  const totalRaces = state.tournament.trackOrder.length;
+  const lastResult =
+    state.tournament.raceResults[state.tournament.raceResults.length - 1] || {};
+  return { sorted, raceIndex, totalRaces, lastResult };
+}
+
 function activateSelection() {
   state.menuIndex = Math.max(
     0,
@@ -1467,19 +1622,9 @@ function activateSelection() {
       return;
     }
     if (selectedItem === "RACE" || selectedItem === "RACE ANONYMOUSLY") {
-      if (trackOptions.length > 0) {
-        state.selectedTrackIndex = Math.max(
-          0,
-          Math.min(state.selectedTrackIndex, trackOptions.length - 1),
-        );
-      } else {
-        state.selectedTrackIndex = 0;
-      }
-      state.mode = "trackSelect";
-      setTrackSelectUrl();
+      state.mode = "gameModeSelect";
       syncMenuMusicForMode(state.mode);
-      state.trackSelectIndex = state.selectedTrackIndex;
-      syncTrackSelectWindow();
+      state.gameModeIndex = 0;
       return;
     }
     if (selectedItem === "SETTINGS") {
@@ -1487,6 +1632,30 @@ function activateSelection() {
       syncMenuMusicForMode(state.mode);
       state.settingsIndex = 0;
       state.editingName = false;
+      return;
+    }
+    return;
+  }
+
+  if (state.mode === "gameModeSelect") {
+    const items = getGameModeItems();
+    const selectedItem = items[state.gameModeIndex];
+    if (selectedItem === "SINGLE RACE") {
+      state.gameMode = "single";
+      state.tournament.selectedTrackIndices.clear();
+      enterTrackSelect();
+      return;
+    }
+    if (selectedItem === "TOURNAMENT") {
+      state.gameMode = "tournament";
+      state.tournament.selectedTrackIndices.clear();
+      enterTrackSelect();
+      return;
+    }
+    if (selectedItem === "BACK") {
+      state.mode = "menu";
+      syncMenuMusicForMode(state.mode);
+      state.menuIndex = raceMenuIndex();
       return;
     }
     return;
@@ -1513,12 +1682,40 @@ function activateSelection() {
 
   if (state.mode === "trackSelect") {
     const backIndex = trackSelectBackIndex();
+    const startTournamentIdx = trackSelectStartTournamentIndex();
+
     if (state.trackSelectIndex === backIndex) {
-      state.mode = "menu";
-      setMainMenuUrl();
+      state.mode = "gameModeSelect";
       syncMenuMusicForMode(state.mode);
-      state.menuIndex = raceMenuIndex();
-    } else {
+      return;
+    }
+
+    if (
+      state.gameMode === "tournament" &&
+      state.trackSelectIndex === startTournamentIdx
+    ) {
+      startTournament();
+      return;
+    }
+
+    if (state.gameMode === "tournament") {
+      // Toggle track selection
+      const idx = state.trackSelectIndex;
+      if (idx >= 0 && idx < trackOptions.length) {
+        if (state.tournament.selectedTrackIndices.has(idx)) {
+          state.tournament.selectedTrackIndices.delete(idx);
+        } else {
+          state.tournament.selectedTrackIndices.add(idx);
+        }
+      }
+      return;
+    }
+
+    // Single race mode
+    if (
+      state.trackSelectIndex >= 0 &&
+      state.trackSelectIndex < trackOptions.length
+    ) {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
       setCurbSegments(initCurbSegments());
@@ -1540,10 +1737,6 @@ function activateSelection() {
     }
     if (selectedSetting === "MENU MUSIC") {
       toggleMenuMusic();
-      return;
-    }
-    if (selectedSetting === "AI OPPONENTS") {
-      toggleAiOpponents();
       return;
     }
     if (selectedSetting === "DEBUG MODE") {
@@ -1583,14 +1776,30 @@ function activateSelection() {
     return;
   }
 
+  if (state.mode === "tournamentStandings") {
+    advanceFromTournamentStandings();
+    return;
+  }
+
+  if (state.mode === "tournamentFinal") {
+    state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
+    state.menuIndex = 0;
+    state.paused = false;
+    state.pauseMenuIndex = 0;
+    return;
+  }
+
   if (state.mode === "racing" && state.finished) {
     if (state.raceReturn.mode === "editor") {
       returnFromRace();
+    } else if (state.gameMode === "tournament") {
+      // Only allow finishing tournament race when all human players have finished
+      if (state.raceStandings.playerFinishOrder > 0) {
+        finishTournamentRace();
+      }
     } else {
-      state.mode = "menu";
-      syncMenuMusicForMode(state.mode);
-      state.paused = false;
-      state.pauseMenuIndex = 0;
+      returnToTrackSelect();
     }
   }
 }
@@ -1738,12 +1947,9 @@ function onKeyDown(e) {
   if (state.mode === "racing") {
     if (state.finished && key === "escape") {
       if (state.raceReturn.mode === "editor") returnFromRace();
-      else {
-        state.mode = "menu";
-        syncMenuMusicForMode(state.mode);
-        state.paused = false;
-        state.pauseMenuIndex = 0;
-      }
+      else if (state.gameMode === "tournament") {
+        if (state.raceStandings.playerFinishOrder > 0) finishTournamentRace();
+      } else returnToTrackSelect();
       clearRaceInputs();
       return;
     }
@@ -1786,10 +1992,25 @@ function onKeyDown(e) {
   }
 
   if (state.mode === "trackSelect" && key === "escape") {
+    state.mode = "gameModeSelect";
+    syncMenuMusicForMode(state.mode);
+    return;
+  }
+  if (state.mode === "gameModeSelect" && key === "escape") {
     state.mode = "menu";
     setMainMenuUrl();
     syncMenuMusicForMode(state.mode);
     state.menuIndex = raceMenuIndex();
+    return;
+  }
+  if (state.mode === "tournamentStandings" && key === "escape") {
+    advanceFromTournamentStandings();
+    return;
+  }
+  if (state.mode === "tournamentFinal" && key === "escape") {
+    state.mode = "menu";
+    syncMenuMusicForMode(state.mode);
+    state.menuIndex = 0;
     return;
   }
   if (state.mode === "settings" && key === "escape") {
@@ -1969,6 +2190,15 @@ function onKeyDown(e) {
     return;
   }
 
+  if (
+    key === "a" &&
+    state.mode === "trackSelect" &&
+    state.gameMode === "single"
+  ) {
+    toggleAiOpponents();
+    return;
+  }
+
   if (state.mode === "editor") {
     if (key === "s") {
       if (e.repeat) return;
@@ -2015,6 +2245,11 @@ function onKeyDown(e) {
       const items = currentMenuItems();
       state.menuIndex = (state.menuIndex + items.length - 1) % items.length;
     }
+    if (state.mode === "gameModeSelect") {
+      const items = getGameModeItems();
+      state.gameModeIndex =
+        (state.gameModeIndex + items.length - 1) % items.length;
+    }
     if (state.mode === "settings") {
       const items = currentSettingsItems();
       state.settingsIndex =
@@ -2026,9 +2261,24 @@ function onKeyDown(e) {
         (state.loginProviderIndex + items.length - 1) % items.length;
     }
     if (state.mode === "trackSelect") {
-      if (state.trackSelectIndex === trackSelectBackIndex()) {
-        state.trackSelectIndex = state.selectedTrackIndex;
-        syncTrackSelectWindow();
+      const backIndex = trackSelectBackIndex();
+      const startIdx = trackSelectStartTournamentIndex();
+      if (
+        state.trackSelectIndex === backIndex ||
+        state.trackSelectIndex === startIdx
+      ) {
+        // Jump from button row back to last track
+        const lastTrack = trackOptions.length - 1;
+        if (lastTrack >= 0) {
+          state.trackSelectIndex = lastTrack;
+          syncTrackSelectWindow();
+        }
+      } else if (state.trackSelectIndex > 0) {
+        // Move up one row (previous index in same column)
+        const row = state.trackSelectIndex % TRACK_GRID_ROWS;
+        if (row > 0) {
+          state.trackSelectIndex -= 1;
+        }
       }
     }
     keys.up = true;
@@ -2037,6 +2287,10 @@ function onKeyDown(e) {
     if (state.mode === "menu") {
       const items = currentMenuItems();
       state.menuIndex = (state.menuIndex + 1) % items.length;
+    }
+    if (state.mode === "gameModeSelect") {
+      const items = getGameModeItems();
+      state.gameModeIndex = (state.gameModeIndex + 1) % items.length;
     }
     if (state.mode === "settings") {
       const items = currentSettingsItems();
@@ -2047,7 +2301,25 @@ function onKeyDown(e) {
       state.loginProviderIndex = (state.loginProviderIndex + 1) % items.length;
     }
     if (state.mode === "trackSelect") {
-      state.trackSelectIndex = trackSelectBackIndex();
+      if (
+        state.trackSelectIndex >= 0 &&
+        state.trackSelectIndex < trackOptions.length
+      ) {
+        const row = state.trackSelectIndex % TRACK_GRID_ROWS;
+        const col = Math.floor(state.trackSelectIndex / TRACK_GRID_ROWS);
+        if (
+          row < TRACK_GRID_ROWS - 1 &&
+          col * TRACK_GRID_ROWS + row + 1 < trackOptions.length
+        ) {
+          state.trackSelectIndex += 1;
+        } else {
+          // Bottom of grid — go to primary action button
+          state.trackSelectIndex =
+            state.gameMode === "tournament"
+              ? trackSelectStartTournamentIndex()
+              : trackSelectBackIndex();
+        }
+      }
     }
     keys.down = true;
   }
@@ -2056,26 +2328,57 @@ function onKeyDown(e) {
     state.mode === "trackSelect" &&
     state.trackSelectIndex < trackSelectCardCount()
   ) {
-    state.trackSelectIndex =
-      (state.trackSelectIndex + trackSelectCardCount() - 1) %
-      trackSelectCardCount();
-    syncTrackSelectWindow();
+    // Move left one column (subtract TRACK_GRID_ROWS)
+    const newIdx = state.trackSelectIndex - TRACK_GRID_ROWS;
+    if (newIdx >= 0) {
+      state.trackSelectIndex = newIdx;
+      syncTrackSelectWindow();
+    }
   }
   if (
     key === "arrowright" &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex < trackSelectCardCount()
   ) {
-    state.trackSelectIndex =
-      (state.trackSelectIndex + 1) % trackSelectCardCount();
-    syncTrackSelectWindow();
+    // Move right one column (add TRACK_GRID_ROWS)
+    const newIdx = state.trackSelectIndex + TRACK_GRID_ROWS;
+    if (newIdx < trackOptions.length) {
+      state.trackSelectIndex = newIdx;
+      syncTrackSelectWindow();
+    }
+  }
+  if (
+    key === "arrowleft" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= trackSelectCardCount()
+  ) {
+    // On button row: toggle between back and start tournament
+    if (state.gameMode === "tournament") {
+      if (state.trackSelectIndex === trackSelectBackIndex()) {
+        state.trackSelectIndex = trackSelectStartTournamentIndex();
+      } else {
+        state.trackSelectIndex = trackSelectBackIndex();
+      }
+    }
+  }
+  if (
+    key === "arrowright" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= trackSelectCardCount()
+  ) {
+    if (state.gameMode === "tournament") {
+      if (state.trackSelectIndex === trackSelectBackIndex()) {
+        state.trackSelectIndex = trackSelectStartTournamentIndex();
+      } else {
+        state.trackSelectIndex = trackSelectBackIndex();
+      }
+    }
   }
   if (
     (key === "arrowleft" || key === "arrowright") &&
     state.mode === "settings"
   ) {
     const selected = currentSettingsItems()[state.settingsIndex];
-    if (selected === "AI OPPONENTS") toggleAiOpponents();
     if (selected === "DEBUG MODE") toggleDebugMode();
   }
   if (key === "enter") activateSelection();

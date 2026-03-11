@@ -107,6 +107,91 @@ export function emitFinishConfetti({ bestLap = false, bestRace = false } = {}) {
   state.finishCelebration.confettiActive = true;
 }
 
+const screenParticles = [];
+
+export function emitScreenConfetti({ x, y } = {}) {
+  const palette = [
+    "#ffe066",
+    "#ffb703",
+    "#ff5d8f",
+    "#57ccff",
+    "#ffffff",
+    "#6af0a8",
+  ];
+  for (let i = 0; i < 3; i++) {
+    const burstX = x + (i - 1) * 120;
+    for (let j = 0; j < 32; j++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = randomRange(60, 260);
+      screenParticles.push({
+        kind: "confetti",
+        x: burstX,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - randomRange(40, 120),
+        ax: 0,
+        ay: 110,
+        life: randomRange(1.2, 2.6),
+        age: 0,
+        size: randomRange(5, 12),
+        color: palette[Math.floor(Math.random() * palette.length)],
+        drag: 0.8,
+        rotation: randomRange(0, Math.PI * 2),
+        spin: randomRange(-10, 10),
+        aspect: randomRange(0.45, 1.6),
+      });
+    }
+  }
+}
+
+export function updateScreenParticles(dt) {
+  for (let i = screenParticles.length - 1; i >= 0; i--) {
+    const p = screenParticles[i];
+    p.age += dt;
+    if (p.age >= p.life) {
+      screenParticles.splice(i, 1);
+      continue;
+    }
+    p.vx *= Math.exp(-p.drag * dt);
+    p.vy *= Math.exp(-p.drag * dt);
+    p.vx += p.ax * dt;
+    p.vy += p.ay * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.rotation += p.spin * dt;
+  }
+}
+
+export function drawScreenParticles(ctx) {
+  for (let i = 0; i < screenParticles.length; i++) {
+    const p = screenParticles[i];
+    const lifeT = 1 - p.age / Math.max(p.life, 0.0001);
+    if (lifeT <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, lifeT * 1.15);
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    ctx.fillStyle = p.color;
+    if (p.kind === "confetti") {
+      ctx.fillRect(
+        -p.size * 0.5,
+        -p.size * p.aspect * 0.5,
+        p.size,
+        p.size * p.aspect,
+      );
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+export function resetScreenParticles() {
+  screenParticles.length = 0;
+}
+
 export function emitHandbrakeSmoke({ x, y, angle = 0, strength = 1 } = {}) {
   emitBurst({
     x,

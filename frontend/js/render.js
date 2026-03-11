@@ -33,13 +33,16 @@ import {
   state,
 } from "./state.js";
 import {
+  getBreadcrumbs,
   getEditorTopBarLayout,
   getEditorToolbarLayout,
+  getGameModeRenderModel,
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
   getSettingsHeaderRenderModel,
   getSettingsRenderLayout,
   getTrackSelectRenderModel,
+  getTournamentStandingsData,
 } from "./menus.js";
 import { getRacePosition, getRaceStandings } from "./physics.js";
 import { formatTime } from "./utils.js";
@@ -59,7 +62,7 @@ import {
   trackStartAngle,
 } from "./track.js";
 import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
-import { drawParticles } from "./particles.js";
+import { drawParticles, drawScreenParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
@@ -1906,7 +1909,9 @@ function drawFinishOverlay() {
   }
 
   ctx.fillStyle = "#ffffff";
-  ctx.fillText("ENTER TO RETURN MENU", WIDTH / 2 - 144, viewportCenterY + 96);
+  const isTournament = state.gameMode === "tournament";
+  const returnText = isTournament ? "ENTER FOR STANDINGS" : "ENTER TO CONTINUE";
+  ctx.fillText(returnText, WIDTH / 2 - 144, viewportCenterY + 96);
 }
 
 function drawPauseOverlay() {
@@ -1950,6 +1955,185 @@ function drawPauseOverlay() {
   ctx.fillText("A/D or Left/Right: Steer", x + 46, y + 238);
   ctx.fillText("Space: Handbrake", x + 46, y + 262);
   ctx.fillText("P or Esc: Open pause", x + 46, y + 286);
+}
+
+const BREADCRUMB_BAR_HEIGHT = 40;
+
+function drawBreadcrumbBar() {
+  const segments = getBreadcrumbs();
+  ctx.fillStyle = "rgba(6, 14, 26, 0.88)";
+  ctx.fillRect(0, 0, WIDTH, BREADCRUMB_BAR_HEIGHT);
+  ctx.strokeStyle = "rgba(255, 210, 94, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, BREADCRUMB_BAR_HEIGHT);
+  ctx.lineTo(WIDTH, BREADCRUMB_BAR_HEIGHT);
+  ctx.stroke();
+
+  ctx.font = "bold 16px Verdana";
+  let x = 18;
+  const y = 26;
+  for (let i = 0; i < segments.length; i++) {
+    const isLast = i === segments.length - 1;
+    ctx.fillStyle = isLast ? "#ffd25e" : "#8aa4b8";
+    ctx.fillText(segments[i], x, y);
+    x += ctx.measureText(segments[i]).width;
+    if (!isLast) {
+      ctx.fillStyle = "#5a7a90";
+      ctx.fillText("  ›  ", x, y);
+      x += ctx.measureText("  ›  ").width;
+    }
+  }
+}
+
+function drawGameModeSelect() {
+  ctx.fillStyle = "#0f2640";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawPixelNoise();
+  drawBreadcrumbBar();
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 70px Verdana";
+  const titleText = "GAME MODE";
+  const titleWidth = ctx.measureText(titleText).width;
+  ctx.fillText(titleText, WIDTH * 0.5 - titleWidth * 0.5, 160);
+
+  ctx.font = "bold 42px Verdana";
+  const { items, selectedIndex, highlightWidth } = getGameModeRenderModel(
+    (text) => ctx.measureText(text).width,
+  );
+  const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
+  items.forEach((item, idx) => {
+    const y = 280 + idx * 80;
+    const textWidth = ctx.measureText(item).width;
+    const textX = WIDTH * 0.5 - textWidth * 0.5;
+    if (idx === selectedIndex) {
+      ctx.fillStyle = "#ec4f4f";
+      ctx.fillRect(highlightX, y - 43, highlightWidth, 56);
+      ctx.fillStyle = "#ffffff";
+    } else {
+      ctx.fillStyle = "#8aa4b8";
+    }
+    ctx.fillText(item, textX, y);
+  });
+}
+
+function drawTournamentStandings() {
+  ctx.fillStyle = "#0f2640";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawPixelNoise();
+  drawBreadcrumbBar();
+
+  const data = getTournamentStandingsData();
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 48px Verdana";
+  const titleText = `Race ${data.raceIndex} of ${data.totalRaces}`;
+  const titleWidth = ctx.measureText(titleText).width;
+  ctx.fillText(titleText, WIDTH * 0.5 - titleWidth * 0.5, 120);
+
+  ctx.fillStyle = "#d8e8f7";
+  ctx.font = "bold 28px Verdana";
+  const subtitleText = "STANDINGS";
+  const subtitleWidth = ctx.measureText(subtitleText).width;
+  ctx.fillText(subtitleText, WIDTH * 0.5 - subtitleWidth * 0.5, 170);
+
+  const panelX = WIDTH * 0.5 - 260;
+  const panelW = 520;
+  const rowH = 56;
+  const startY = 210;
+
+  ctx.fillStyle = "rgba(8, 18, 34, 0.72)";
+  ctx.fillRect(panelX, startY - 10, panelW, data.sorted.length * rowH + 20);
+
+  data.sorted.forEach((entry, idx) => {
+    const y = startY + idx * rowH + 38;
+    const isFirst = idx === 0;
+    const racePoints = data.lastResult[entry.name]?.points ?? 0;
+
+    // Medal/rank
+    ctx.font = "bold 28px Verdana";
+    ctx.fillStyle = isFirst ? "#ffd25e" : "#c3d9ec";
+    ctx.fillText(`${idx + 1}.`, panelX + 20, y);
+
+    // Name
+    ctx.fillStyle = isFirst ? "#ffffff" : "#c3d9ec";
+    ctx.fillText(entry.name, panelX + 70, y);
+
+    // This race points
+    ctx.font = "20px Verdana";
+    ctx.fillStyle = "#6af0a8";
+    ctx.fillText(`+${racePoints}`, panelX + 320, y);
+
+    // Total
+    ctx.font = "bold 28px Verdana";
+    ctx.fillStyle = isFirst ? "#ffd25e" : "#c3d9ec";
+    ctx.fillText(`${entry.total} pts`, panelX + 400, y);
+  });
+
+  const moreRaces = data.raceIndex < data.totalRaces;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 24px Verdana";
+  const hint = moreRaces ? "ENTER for next race" : "ENTER for final results";
+  const hintWidth = ctx.measureText(hint).width;
+  ctx.fillText(hint, WIDTH * 0.5 - hintWidth * 0.5, HEIGHT - 50);
+}
+
+function drawTournamentFinal() {
+  ctx.fillStyle = "#0a1c2e";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawPixelNoise();
+  drawBreadcrumbBar();
+
+  const data = getTournamentStandingsData();
+
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 60px Verdana";
+  const titleText = "TOURNAMENT RESULTS";
+  const titleWidth = ctx.measureText(titleText).width;
+  ctx.fillText(titleText, WIDTH * 0.5 - titleWidth * 0.5, 130);
+
+  const medals = ["🥇", "🥈", "🥉"];
+  const medalColors = ["#ffd25e", "#c0c0c0", "#cd7f32"];
+  const panelX = WIDTH * 0.5 - 280;
+  const panelW = 560;
+  const rowH = 72;
+  const startY = 190;
+
+  ctx.fillStyle = "rgba(8, 18, 34, 0.72)";
+  ctx.fillRect(panelX, startY - 10, panelW, data.sorted.length * rowH + 20);
+
+  data.sorted.forEach((entry, idx) => {
+    const y = startY + idx * rowH + 48;
+
+    // Medal or rank
+    if (idx < 3) {
+      ctx.font = "36px Verdana";
+      ctx.fillText(medals[idx], panelX + 16, y);
+    } else {
+      ctx.font = "bold 30px Verdana";
+      ctx.fillStyle = "#8aa4b8";
+      ctx.fillText(`${idx + 1}.`, panelX + 22, y);
+    }
+
+    // Name
+    ctx.font = "bold 32px Verdana";
+    ctx.fillStyle = idx < 3 ? medalColors[idx] : "#c3d9ec";
+    ctx.fillText(entry.name, panelX + 80, y);
+
+    // Total points
+    ctx.font = "bold 30px Verdana";
+    ctx.fillStyle = idx === 0 ? "#ffd25e" : "#c3d9ec";
+    ctx.fillText(`${entry.total} pts`, panelX + 380, y);
+  });
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 24px Verdana";
+  const hint = "ENTER to return to menu";
+  const hintWidth = ctx.measureText(hint).width;
+  ctx.fillText(hint, WIDTH * 0.5 - hintWidth * 0.5, HEIGHT - 50);
+
+  drawScreenParticles(ctx);
 }
 
 function drawMenu() {
@@ -2086,6 +2270,7 @@ function drawLoginProviders() {
   ctx.fillStyle = "#13283a";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   drawPixelNoise();
+  drawBreadcrumbBar();
 
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 84px Verdana";
@@ -2124,108 +2309,151 @@ function drawTrackSelection() {
   ctx.fillStyle = "#11283e";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   drawPixelNoise();
+  drawBreadcrumbBar();
 
-  ctx.fillStyle = "#ffd25e";
-  ctx.font = "bold 70px Verdana";
-  ctx.fillText("SELECT TRACK", WIDTH * 0.5 - 248, 148);
-
-  const cardSize = 220;
-  const gap = 40;
-  const cardY = 198;
   const model = getTrackSelectRenderModel();
-  const cardCount = model.visibleTracks.length;
-  const totalWidth = cardCount * cardSize + Math.max(0, cardCount - 1) * gap;
-  const startX = WIDTH * 0.5 - totalWidth * 0.5;
+  const cardSize = model.cardSize;
+  const gap = model.cardGap;
+  const labelH = model.labelHeight;
+  const rows = model.rows;
 
-  for (let i = 0; i < cardCount; i++) {
-    const trackIndex = model.viewOffset + i;
-    const cardX = startX + i * (cardSize + gap);
-    const selected = state.trackSelectIndex === trackIndex;
-    const trackOption = model.visibleTracks[i];
+  // Title
+  ctx.fillStyle = "#ffd25e";
+  ctx.font = "bold 36px Verdana";
+  const titleText = model.isTournament ? "SELECT TRACKS" : "SELECT TRACK";
+  const titleWidth = ctx.measureText(titleText).width;
+  ctx.fillText(
+    titleText,
+    WIDTH * 0.35 - titleWidth * 0.5,
+    BREADCRUMB_BAR_HEIGHT + 38,
+  );
+
+  // Grid area
+  const gridTop = BREADCRUMB_BAR_HEIGHT + 56;
+  const colWidth = cardSize + gap;
+  const gridLeftMargin = 40;
+  const gridWidth = model.visibleColumns * colWidth - gap;
+  const startX = gridLeftMargin;
+
+  // Draw grid cards
+  for (let i = 0; i < model.gridCells.length; i++) {
+    const cell = model.gridCells[i];
+    const cardX = startX + cell.column * colWidth;
+    const cardY = gridTop + cell.row * (cardSize + labelH + gap);
+    const selected = state.trackSelectIndex === cell.trackIndex;
+
     drawTrackPreviewCard(
       cardX,
       cardY,
       cardSize,
       selected,
-      getTrackPreset(trackIndex),
+      getTrackPreset(cell.trackIndex),
     );
 
+    // Track name label
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
-    ctx.font = "bold 24px Verdana";
-    const label = trackOption.name;
+    ctx.font = "bold 13px Verdana";
+    const label = cell.option.name;
     const labelWidth = ctx.measureText(label).width;
     ctx.fillText(
       label,
       cardX + cardSize * 0.5 - labelWidth * 0.5,
-      cardY + cardSize + 34,
+      cardY + cardSize + 16,
     );
-    if (!trackOption.isPublished) {
+
+    // Private badge
+    if (!cell.option.isPublished) {
       ctx.fillStyle = "#f26b6b";
-      ctx.fillRect(cardX + 10, cardY + 10, 92, 26);
+      ctx.fillRect(cardX + 4, cardY + 4, 56, 16);
       ctx.fillStyle = "#3d1010";
-      ctx.font = "bold 12px Verdana";
-      ctx.fillText("PRIVATE", cardX + 26, cardY + 28);
+      ctx.font = "bold 9px Verdana";
+      ctx.fillText("PRIVATE", cardX + 10, cardY + 15);
+    }
+
+    // Tournament checkbox
+    if (model.isTournament) {
+      const checkX = cardX + cardSize - 24;
+      const checkY = cardY + 4;
+      const checked = model.tournamentSelected.has(cell.trackIndex);
+      ctx.fillStyle = checked ? "#6af0a8" : "rgba(255,255,255,0.15)";
+      ctx.fillRect(checkX, checkY, 20, 20);
+      ctx.strokeStyle = checked ? "#2e8c42" : "#8aa4b8";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(checkX, checkY, 20, 20);
+      if (checked) {
+        ctx.fillStyle = "#0a3018";
+        ctx.font = "bold 14px Verdana";
+        ctx.fillText("✓", checkX + 4, checkY + 16);
+      }
     }
   }
 
+  // Left/right scroll hints
   if (model.showLeftHint) {
     ctx.fillStyle = "#ffd25e";
     ctx.font = "bold 34px Verdana";
-    ctx.fillText("\u2039", startX - 36, cardY + cardSize * 0.5 + 10);
+    ctx.fillText(
+      "\u2039",
+      startX - 30,
+      gridTop + rows * (cardSize + labelH + gap) * 0.5,
+    );
   }
   if (model.showRightHint) {
     ctx.fillStyle = "#ffd25e";
     ctx.font = "bold 34px Verdana";
     ctx.fillText(
       "\u203a",
-      startX + totalWidth + 12,
-      cardY + cardSize * 0.5 + 10,
+      startX + gridWidth + 12,
+      gridTop + rows * (cardSize + labelH + gap) * 0.5,
     );
   }
 
-  const backY = cardY + cardSize + 106;
+  // Bottom buttons
+  const buttonsY = HEIGHT - 56;
+
+  // Start tournament button (left side, only in tournament mode)
+  if (model.isTournament) {
+    const startTournamentIdx = trackOptions.length + 1;
+    const startSelected = state.trackSelectIndex === startTournamentIdx;
+    const selectedCount = model.tournamentSelected.size;
+    const startLabel =
+      selectedCount > 0
+        ? `START TOURNAMENT (${selectedCount})`
+        : "START TOURNAMENT";
+    ctx.font = "bold 28px Verdana";
+    const startBtnW = ctx.measureText(startLabel).width + 40;
+    const startBtnX = 40;
+    if (selectedCount > 0) {
+      if (startSelected) {
+        ctx.fillStyle = "#2e8c42";
+        ctx.fillRect(startBtnX, buttonsY - 34, startBtnW, 44);
+      }
+      ctx.fillStyle = startSelected ? "#ffffff" : "#6af0a8";
+      ctx.fillText(startLabel, startBtnX + 20, buttonsY);
+    } else {
+      ctx.fillStyle = "#5a7a90";
+      ctx.fillText(startLabel, startBtnX + 20, buttonsY);
+    }
+  }
+
+  // Back button (right side)
   const backIndex = trackOptions.length;
   const backSelected = state.trackSelectIndex === backIndex;
-  const backWidth = 290;
-  const backX = WIDTH - backWidth - 48;
+  const backWidth = 160;
+  const backX = WIDTH - backWidth - 320 - 40;
   if (backSelected) {
     ctx.fillStyle = "#ec4f4f";
-    ctx.fillRect(backX, backY - 39, backWidth, 52);
+    ctx.fillRect(backX, buttonsY - 34, backWidth, 44);
   }
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 40px Verdana";
-  ctx.fillText("BACK", backX + 82, backY);
+  ctx.fillStyle = backSelected ? "#ffffff" : "#8aa4b8";
+  ctx.font = "bold 28px Verdana";
+  ctx.fillText("BACK", backX + 36, buttonsY);
 
-  const helpLines = [];
-  const deleteKeyLabel = (() => {
-    if (typeof navigator === "undefined") return "DEL";
-    const platform =
-      typeof navigator.userAgentData?.platform === "string"
-        ? navigator.userAgentData.platform
-        : typeof navigator.platform === "string"
-          ? navigator.platform
-          : "";
-    return /mac/i.test(platform) ? "BACKSPACE" : "DEL";
-  })();
-  if (model.selectedTrackCanDelete)
-    helpLines.push(`${deleteKeyLabel} deletes your selected draft track`);
-  if (model.selectedTrackCanPublish) {
-    helpLines.push(
-      model.selectedTrackIsPublished
-        ? "Press P to unpublish selected track"
-        : "Press P to publish selected track",
-    );
-  }
-  if (physicsConfig.flags.DEBUG_MODE)
-    helpLines.push("Press E to edit selected track");
-  if (model.selectedTrackCanRename)
-    helpLines.push("Press R to rename selected track");
-  ctx.font = "20px Verdana";
-  ctx.fillStyle = "#c3d9ec";
-  const helpStartY = HEIGHT - 42 - Math.max(0, helpLines.length - 1) * 28;
-  for (let i = 0; i < helpLines.length; i++) {
-    ctx.fillText(helpLines[i], WIDTH * 0.5 - 180, helpStartY + i * 28);
-  }
+  // Detail panel (bottom-right)
+  const detailPanelX = WIDTH - 320;
+  const detailPanelY = gridTop + 10;
+  const detailPanelW = 300;
+  const detailPanelH = rows * (cardSize + labelH + gap) - gap;
 
   if (
     state.trackSelectIndex >= 0 &&
@@ -2262,18 +2490,83 @@ function drawTrackSelection() {
       centerlineLengthCache.set(selectedPreset.track, centerlineLength);
     }
 
-    const statsX = 72;
-    const statsY = cardY + cardSize + 98;
+    // Panel background
+    ctx.fillStyle = "rgba(8, 18, 34, 0.72)";
+    ctx.fillRect(detailPanelX, detailPanelY, detailPanelW, detailPanelH);
+    ctx.strokeStyle = "rgba(255, 210, 94, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(detailPanelX, detailPanelY, detailPanelW, detailPanelH);
+
+    const sx = detailPanelX + 16;
+    let sy = detailPanelY + 28;
+
+    // Track name
+    ctx.fillStyle = "#ffd25e";
+    ctx.font = "bold 22px Verdana";
+    ctx.fillText(selectedOption.name, sx, sy);
+    sy += 36;
+
     const distanceMeters = centerlineLength / 15;
     const distanceLabel = Number.isInteger(distanceMeters)
       ? `${distanceMeters} m`
       : `${distanceMeters.toFixed(1)} m`;
     ctx.fillStyle = "#d8e7f5";
-    ctx.font = "bold 20px Verdana";
-    ctx.fillText(`Owner: ${ownerName}`, statsX, statsY);
-    ctx.fillText(`Distance: ${distanceLabel}`, statsX, statsY + 28);
-    ctx.fillText(`Best lap: ${bestLapText}`, statsX, statsY + 56);
-    ctx.fillText(`Best total: ${bestRaceText}`, statsX, statsY + 84);
+    ctx.font = "bold 16px Verdana";
+    ctx.fillText(`Owner: ${ownerName}`, sx, sy);
+    sy += 24;
+    ctx.fillText(`Distance: ${distanceLabel}`, sx, sy);
+    sy += 24;
+    ctx.fillText(`\u{1F947}lap: ${bestLapText}`, sx, sy);
+    sy += 24;
+    ctx.fillText(`\u{1F3C6}race: ${bestRaceText}`, sx, sy);
+    sy += 36;
+
+    // AI toggle for single race mode
+    if (!model.isTournament) {
+      ctx.fillStyle = "#c3d9ec";
+      ctx.font = "bold 16px Verdana";
+      const aiLabel = `AI Opponents: ${aiOpponentsEnabled() ? "ON" : "OFF"}`;
+      ctx.fillText(aiLabel, sx, sy);
+      sy += 20;
+      ctx.fillStyle = "#8aa4b8";
+      ctx.font = "14px Verdana";
+      ctx.fillText("Press A to toggle", sx, sy);
+    } else {
+      ctx.fillStyle = "#6af0a8";
+      ctx.font = "bold 16px Verdana";
+      ctx.fillText("AI Opponents: ALWAYS ON", sx, sy);
+      sy += 24;
+    }
+
+    // Help lines inside the panel
+    const helpLines = [];
+    const deleteKeyLabel = (() => {
+      if (typeof navigator === "undefined") return "DEL";
+      const platform =
+        typeof navigator.userAgentData?.platform === "string"
+          ? navigator.userAgentData.platform
+          : typeof navigator.platform === "string"
+            ? navigator.platform
+            : "";
+      return /mac/i.test(platform) ? "⌫" : "DEL";
+    })();
+    if (model.selectedTrackCanDelete)
+      helpLines.push(`${deleteKeyLabel} Delete`);
+    if (model.selectedTrackCanPublish) {
+      helpLines.push(
+        model.selectedTrackIsPublished ? "P Unpublish" : "P Publish",
+      );
+    }
+    if (physicsConfig.flags.DEBUG_MODE) helpLines.push("E Edit");
+    if (model.selectedTrackCanRename) helpLines.push("R Rename");
+    if (helpLines.length > 0) {
+      sy += 8;
+      ctx.font = "13px Verdana";
+      ctx.fillStyle = "#8aa4b8";
+      for (let i = 0; i < helpLines.length; i++) {
+        ctx.fillText(helpLines[i], sx, sy + i * 18);
+      }
+    }
   }
 }
 
@@ -2370,6 +2663,7 @@ function drawSettings() {
   ctx.fillStyle = "#142a36";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   drawPixelNoise();
+  drawBreadcrumbBar();
 
   ctx.fillStyle = "#ffd25e";
   ctx.font = "bold 76px Verdana";
@@ -2581,9 +2875,12 @@ export function render() {
 
   if (state.mode === "menu") drawMenu();
   else if (state.mode === "loginProviders") drawLoginProviders();
+  else if (state.mode === "gameModeSelect") drawGameModeSelect();
   else if (state.mode === "trackSelect") drawTrackSelection();
   else if (state.mode === "editor") drawEditor();
   else if (state.mode === "settings") drawSettings();
+  else if (state.mode === "tournamentStandings") drawTournamentStandings();
+  else if (state.mode === "tournamentFinal") drawTournamentFinal();
   else {
     drawTitleBar();
     ctx.save();
@@ -2608,6 +2905,7 @@ export function render() {
     drawPauseOverlay();
   }
 
+  drawScreenParticles(ctx);
   drawModal();
   drawSnackbar();
 }

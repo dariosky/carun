@@ -1,5 +1,9 @@
 import { startGameLoop } from "./game-loop.js";
-import { enterEditor, initInputHandlers } from "./menus.js";
+import {
+  enterEditor,
+  initInputHandlers,
+  syncTrackSelectWindow,
+} from "./menus.js";
 import {
   applyTrackPreset,
   loadSharedTrackFromApi,
@@ -17,7 +21,7 @@ import { initCurbSegments } from "./track.js";
 import { fetchAuthMe } from "./api.js";
 import { initAudio, syncMenuMusicForMode } from "./audio.js";
 import { gameAudio } from "./game-audio.js";
-import { updateParticles } from "./particles.js";
+import { updateParticles, updateScreenParticles } from "./particles.js";
 
 function decodePathSegment(value) {
   if (typeof value !== "string" || !value) return "";
@@ -136,10 +140,8 @@ if (trackOptions.length > 0) {
     : -1;
   state.selectedTrackIndex = targetIndex >= 0 ? targetIndex : 0;
   state.trackSelectIndex = state.selectedTrackIndex;
-  state.trackSelectViewOffset = Math.max(
-    0,
-    Math.min(state.selectedTrackIndex, Math.max(0, trackOptions.length - 4)),
-  );
+  state.trackSelectViewOffset = 0;
+  syncTrackSelectWindow();
 }
 if (editTrackIdFromPath) {
   enterEditor(state.selectedTrackIndex);
@@ -177,6 +179,7 @@ startGameLoop({
       gameAudio.stop();
       raceAudioActive = false;
     }
+    updateScreenParticles(dt);
     if (state.mode === "racing" && !state.paused) {
       updateParticles(dt);
       updateRace(dt);

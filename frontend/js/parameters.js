@@ -120,17 +120,16 @@ export function getLoginProviderItems() {
   return ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"];
 }
 
+export const TOURNAMENT_POINTS = [10, 8, 6, 4, 3, 2];
+
+export function getGameModeItems() {
+  return ["SINGLE RACE", "TOURNAMENT", "BACK"];
+}
+
 export function getSettingsItems(authenticated) {
   return authenticated
-    ? [
-        "PLAYER NAME",
-        "MENU MUSIC",
-        "AI OPPONENTS",
-        "DEBUG MODE",
-        "LOGOUT",
-        "BACK",
-      ]
-    : ["PLAYER NAME", "MENU MUSIC", "AI OPPONENTS", "DEBUG MODE", "BACK"];
+    ? ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "LOGOUT", "BACK"]
+    : ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "BACK"];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
