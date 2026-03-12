@@ -120,6 +120,21 @@ export function getLoginProviderItems() {
   return ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"];
 }
 
+export const AI_OPPONENT_COUNT = 5;
+export const AI_OPPONENT_NAME_POOL = [
+  "Max Oversteer",
+  "Chuck Chicane",
+  "Pete Stop",
+  "Nitro Nick",
+  "Drift King",
+  "Turbo Tina",
+  "Burnout Ben",
+  "Skidmark Steve",
+  "Cpt. Sideways",
+  "Bumpy Bumper",
+  "Squeaky Brakes",
+  "Greasy Gears",
+];
 export const TOURNAMENT_POINTS = [10, 8, 6, 4, 3, 2];
 
 export function getGameModeItems() {

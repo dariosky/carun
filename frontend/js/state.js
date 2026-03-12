@@ -1,4 +1,9 @@
-import { loadPlayerName, track } from "./parameters.js";
+import {
+  AI_OPPONENT_COUNT,
+  AI_OPPONENT_NAME_POOL,
+  loadPlayerName,
+  track,
+} from "./parameters.js";
 import { nextTaglineSet } from "./taglines.js";
 
 const initialTaglines = nextTaglineSet();
@@ -44,8 +49,9 @@ export const state = {
   raceStandings: {
     nextFinishOrder: 1,
     playerFinishOrder: 0,
-    aiFinishOrder: 0,
+    finishOrders: { player: 0 },
   },
+  aiRoster: [],
   raceReturn: {
     mode: "trackSelect",
     editorTrackIndex: null,
@@ -139,144 +145,215 @@ export const keys = {
   handbrake: false,
 };
 
-export const lapData = {
-  currentLapStart: 0,
-  lapTimes: [],
-  maxLaps: 3,
-  passed: new Set([0]),
-  nextCheckpointIndex: 1,
-  lap: 1,
-  finished: false,
-  finishTime: 0,
-};
+function createLapProgressState() {
+  return {
+    currentLapStart: 0,
+    lapTimes: [],
+    maxLaps: 3,
+    passed: new Set([0]),
+    nextCheckpointIndex: 1,
+    lap: 1,
+    finished: false,
+    finishTime: 0,
+  };
+}
 
-export const aiLapData = {
-  currentLapStart: 0,
-  lapTimes: [],
-  maxLaps: 3,
-  passed: new Set([0]),
-  nextCheckpointIndex: 1,
-  lap: 1,
-  finished: false,
-  finishTime: 0,
-};
-
-export const car = {
-  x: track.cx,
-  y: track.cy + 205,
-  vx: 0,
-  vy: 0,
-  angle: Math.PI,
-  speed: 0,
-  z: 0,
-  vz: 0,
-  airborne: false,
-  airTime: 0,
-  visualScale: 1,
-  width: 34,
-  height: 20,
-};
-
-export const aiCar = {
-  x: track.cx,
-  y: track.cy + 170,
-  vx: 0,
-  vy: 0,
-  angle: Math.PI,
-  speed: 0,
-  z: 0,
-  vz: 0,
-  airborne: false,
-  airTime: 0,
-  visualScale: 1,
-  width: 34,
-  height: 20,
-  label: "RIVAL",
-};
-
-export const physicsRuntime = {
-  input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
-  steeringRate: 0,
-  recoveryTimer: 0,
-  collisionGripTimer: 0,
-  impactCooldown: 0,
-  lastGroundedSpeed: 0,
-  landingBouncePending: false,
-  landingCooldown: 0,
-  prevSteerAbs: 0,
-  surface: {
-    lateralGripMul: 1,
-    longDragMul: 1,
-    engineMul: 1,
-    coastDecelMul: 1,
-  },
-  debug: {
-    slipAngle: 0,
-    surface: "asphalt",
-    vForward: 0,
-    vLateral: 0,
-    pivotX: track.cx,
-    pivotY: track.cy,
+function createVehicleState({
+  id = "vehicle",
+  x = track.cx,
+  y = track.cy + 205,
+  label = "",
+} = {}) {
+  return {
+    id,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    angle: Math.PI,
+    speed: 0,
     z: 0,
     vz: 0,
-  },
-  wheelLastPoints: null,
-  prevForwardSpeed: null,
-  particleEmitters: {
-    smokeCooldown: 0,
-    splashCooldown: 0,
-    dustCooldown: 0,
-  },
-};
+    airborne: false,
+    airTime: 0,
+    visualScale: 1,
+    width: 34,
+    height: 20,
+    label,
+  };
+}
 
-export const aiPhysicsRuntime = {
-  input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
-  steeringRate: 0,
-  recoveryTimer: 0,
-  collisionGripTimer: 0,
-  impactCooldown: 0,
-  prevSteerAbs: 0,
-  lastGroundedSpeed: 0,
-  landingBouncePending: false,
-  landingCooldown: 0,
-  mode: "race",
-  recoveryMode: "none",
-  targetLaneOffset: 0,
-  blockedTimer: 0,
-  progress: 0,
-  progressAtLastSample: 0,
-  lowProgressTimer: 0,
-  offRoadTimer: 0,
-  repeatedCollisionTimer: 0,
-  lastCollisionNormalX: 0,
-  lastCollisionNormalY: 0,
-  lastCollisionTime: 0,
-  softResetCooldown: 0,
-  replanCooldown: 0,
-  currentNodeId: -1,
-  lastValidNodeId: -1,
-  targetNodeId: -1,
-  routeNodeIndex: -1,
-  rejoinRouteIndex: -1,
-  pathCursor: 0,
-  plannedNodeIds: [],
-  desiredSpeed: 0,
-  targetPoint: { x: track.cx, y: track.cy },
-  debugPathPoints: [],
-  surface: {
-    lateralGripMul: 1,
-    longDragMul: 1,
-    engineMul: 1,
-    coastDecelMul: 1,
-  },
-  wheelLastPoints: null,
-  prevForwardSpeed: null,
-  particleEmitters: {
-    smokeCooldown: 0,
-    splashCooldown: 0,
-    dustCooldown: 0,
-  },
-};
+function createPhysicsRuntimeState() {
+  return {
+    input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
+    steeringRate: 0,
+    recoveryTimer: 0,
+    collisionGripTimer: 0,
+    impactCooldown: 0,
+    lastGroundedSpeed: 0,
+    landingBouncePending: false,
+    landingCooldown: 0,
+    prevSteerAbs: 0,
+    surface: {
+      lateralGripMul: 1,
+      longDragMul: 1,
+      engineMul: 1,
+      coastDecelMul: 1,
+    },
+    debug: {
+      slipAngle: 0,
+      surface: "asphalt",
+      vForward: 0,
+      vLateral: 0,
+      pivotX: track.cx,
+      pivotY: track.cy,
+      z: 0,
+      vz: 0,
+    },
+    wheelLastPoints: null,
+    prevForwardSpeed: null,
+    particleEmitters: {
+      smokeCooldown: 0,
+      splashCooldown: 0,
+      dustCooldown: 0,
+    },
+  };
+}
+
+function createAiPhysicsRuntimeState() {
+  return {
+    input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
+    steeringRate: 0,
+    recoveryTimer: 0,
+    collisionGripTimer: 0,
+    impactCooldown: 0,
+    prevSteerAbs: 0,
+    lastGroundedSpeed: 0,
+    landingBouncePending: false,
+    landingCooldown: 0,
+    mode: "race",
+    recoveryMode: "none",
+    targetLaneOffset: 0,
+    blockedTimer: 0,
+    progress: 0,
+    progressAtLastSample: 0,
+    lowProgressTimer: 0,
+    offRoadTimer: 0,
+    repeatedCollisionTimer: 0,
+    lastCollisionNormalX: 0,
+    lastCollisionNormalY: 0,
+    lastCollisionTime: 0,
+    softResetCooldown: 0,
+    replanCooldown: 0,
+    currentNodeId: -1,
+    lastValidNodeId: -1,
+    targetNodeId: -1,
+    routeNodeIndex: -1,
+    rejoinRouteIndex: -1,
+    pathCursor: 0,
+    plannedNodeIds: [],
+    desiredSpeed: 0,
+    targetPoint: { x: track.cx, y: track.cy },
+    debugPathPoints: [],
+    surface: {
+      lateralGripMul: 1,
+      longDragMul: 1,
+      engineMul: 1,
+      coastDecelMul: 1,
+    },
+    wheelLastPoints: null,
+    prevForwardSpeed: null,
+    particleEmitters: {
+      smokeCooldown: 0,
+      splashCooldown: 0,
+      dustCooldown: 0,
+    },
+  };
+}
+
+export function getAiLabel(index) {
+  return `AI ${index + 1}`;
+}
+
+function shuffleArray(values) {
+  const copy = [...values];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function syncAiRosterToCars() {
+  aiCars.forEach((vehicle, index) => {
+    vehicle.label = state.aiRoster[index]?.name || getAiLabel(index);
+  });
+}
+
+export function assignAiRoster(profiles = []) {
+  state.aiRoster = Array.from({ length: AI_OPPONENT_COUNT }, (_, index) => {
+    const name = String(profiles[index]?.name || "").trim();
+    return {
+      id: `ai-${index + 1}`,
+      name: name || getAiLabel(index),
+    };
+  });
+  syncAiRosterToCars();
+  return state.aiRoster;
+}
+
+export function assignRandomAiRoster() {
+  const pickedNames = shuffleArray(AI_OPPONENT_NAME_POOL).slice(
+    0,
+    AI_OPPONENT_COUNT,
+  );
+  return assignAiRoster(
+    pickedNames.map((name, index) => ({
+      id: `ai-${index + 1}`,
+      name,
+    })),
+  );
+}
+
+export const lapData = createLapProgressState();
+
+export const aiLapDataList = Array.from({ length: AI_OPPONENT_COUNT }, () =>
+  createLapProgressState(),
+);
+
+export const car = createVehicleState({
+  id: "player",
+  x: track.cx,
+  y: track.cy + 205,
+});
+
+export const aiCars = Array.from({ length: AI_OPPONENT_COUNT }, (_, index) =>
+  createVehicleState({
+    id: `ai-${index + 1}`,
+    x: track.cx,
+    y: track.cy + 170 - index * 6,
+    label: getAiLabel(index),
+  }),
+);
+
+export const aiCar = aiCars[0];
+export const aiLapData = aiLapDataList[0];
+
+export const physicsRuntime = createPhysicsRuntimeState();
+
+export const aiPhysicsRuntimes = Array.from({ length: AI_OPPONENT_COUNT }, () =>
+  createAiPhysicsRuntimeState(),
+);
+
+export const aiPhysicsRuntime = aiPhysicsRuntimes[0];
+
+Object.assign(
+  state.raceStandings.finishOrders,
+  ...aiCars.map((vehicle) => ({
+    [vehicle.id]: 0,
+  })),
+);
+assignAiRoster();
 
 export let curbSegments = { outer: [], inner: [] };
 export const skidMarks = [];

@@ -15,7 +15,7 @@ import {
 import { resetRace, updateRace } from "./physics.js";
 import { render } from "./render.js";
 import { showSnackbar, tickSnackbar } from "./snackbar.js";
-import { setCurbSegments, state } from "./state.js";
+import { assignRandomAiRoster, setCurbSegments, state } from "./state.js";
 import { nextTaglineSet } from "./taglines.js";
 import { initCurbSegments } from "./track.js";
 import { fetchAuthMe } from "./api.js";
@@ -153,6 +153,9 @@ if (editTrackIdFromPath) {
 } else if (raceTrackIdFromPath) {
   applyTrackPreset(state.selectedTrackIndex);
   setCurbSegments(initCurbSegments());
+  if (state.gameMode !== "tournament") {
+    assignRandomAiRoster();
+  }
   resetRace();
   state.raceReturn.mode = "trackSelect";
   state.raceReturn.editorTrackIndex = null;

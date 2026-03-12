@@ -16,9 +16,9 @@ import {
   worldObjects,
 } from "./parameters.js";
 import {
-  aiCar,
-  aiLapData,
-  aiPhysicsRuntime,
+  aiCars,
+  aiLapDataList,
+  aiPhysicsRuntimes,
   appLogo,
   appLogoReady,
   car,
@@ -66,6 +66,7 @@ import { drawParticles, drawScreenParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
+const AI_ACCENTS = ["#4db3ff", "#66d987", "#ffd25e", "#ff8f5c", "#bf8cff"];
 
 function aiOpponentsEnabled() {
   return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
@@ -1191,10 +1192,28 @@ function drawVehicle(
 }
 
 function drawCar() {
+  const vehicles = [
+    {
+      vehicle: car,
+      accent: "#d22525",
+      blink: true,
+      label: state.playerName,
+    },
+  ];
   if (aiOpponentsEnabled()) {
-    drawVehicle(aiCar, { accent: "#4db3ff", label: aiCar.label });
+    aiCars.forEach((vehicle, index) => {
+      vehicles.push({
+        vehicle,
+        accent: AI_ACCENTS[index % AI_ACCENTS.length],
+        label: vehicle.label,
+      });
+    });
   }
-  drawVehicle(car, { accent: "#d22525", blink: true, label: state.playerName });
+  vehicles
+    .sort((a, b) => a.vehicle.y + a.vehicle.z - (b.vehicle.y + b.vehicle.z))
+    .forEach(({ vehicle, accent, blink = false, label }) => {
+      drawVehicle(vehicle, { accent, blink, label });
+    });
 }
 
 function drawDebugVectors() {
@@ -1235,33 +1254,27 @@ function drawDebugVectors() {
   ctx.lineTo(originX + lateralWorldX * scale, originY + lateralWorldY * scale);
   ctx.stroke();
 
-  if (aiOpponentsEnabled() && aiPhysicsRuntime.debugPathPoints.length > 1) {
-    ctx.strokeStyle = "rgba(110, 205, 255, 0.85)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(
-      aiPhysicsRuntime.debugPathPoints[0].x,
-      aiPhysicsRuntime.debugPathPoints[0].y,
-    );
-    for (let i = 1; i < aiPhysicsRuntime.debugPathPoints.length; i++) {
-      ctx.lineTo(
-        aiPhysicsRuntime.debugPathPoints[i].x,
-        aiPhysicsRuntime.debugPathPoints[i].y,
-      );
-    }
-    ctx.stroke();
-  }
   if (aiOpponentsEnabled()) {
-    ctx.fillStyle = "#72d8ff";
-    ctx.beginPath();
-    ctx.arc(
-      aiPhysicsRuntime.targetPoint.x,
-      aiPhysicsRuntime.targetPoint.y,
-      6,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
+    aiPhysicsRuntimes.forEach((runtime, index) => {
+      const accent = AI_ACCENTS[index % AI_ACCENTS.length];
+      if (runtime.debugPathPoints.length > 1) {
+        ctx.strokeStyle = `${accent}cc`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(runtime.debugPathPoints[0].x, runtime.debugPathPoints[0].y);
+        for (let i = 1; i < runtime.debugPathPoints.length; i++) {
+          ctx.lineTo(
+            runtime.debugPathPoints[i].x,
+            runtime.debugPathPoints[i].y,
+          );
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.arc(runtime.targetPoint.x, runtime.targetPoint.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
   }
   ctx.restore();
 
@@ -1302,9 +1315,7 @@ function drawDebugVectors() {
     firstLineY + lineStep * 3,
   );
   ctx.fillText(
-    aiOpponentsEnabled()
-      ? `AI: ${String(aiPhysicsRuntime.mode).toUpperCase()}`
-      : "AI: OFF",
+    aiOpponentsEnabled() ? `AI: ${aiCars.length} ACTIVE` : "AI: OFF",
     lineX,
     firstLineY + lineStep * 4,
   );
@@ -1471,35 +1482,37 @@ function drawTitleBar() {
   ctx.lineTo(WIDTH, TOP_BAR_HEIGHT - 1);
   ctx.stroke();
 
+  const drawHudPanel = (x, y, w, h, strokeStyle) => {
+    ctx.fillStyle = "rgba(8, 18, 30, 0.72)";
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 10);
+    ctx.fill();
+    ctx.stroke();
+  };
+
+  const top = 7;
+  const panelHeight = TOP_BAR_HEIGHT - 14;
+  const playerPanelWidth = 238;
+  const lapPanelWidth = 118;
+  const panelGap = 8;
+  const aiTileWidth = 112;
+  const aiAreaWidth = aiOpponentsEnabled()
+    ? aiCars.length * aiTileWidth + (aiCars.length - 1) * panelGap
+    : 0;
+  const rightPad = 18;
+
   let x = 18;
   ctx.fillStyle = "#ffe167";
-  ctx.font = "bold 28px Verdana";
-  ctx.fillText("Carun", x, 38);
+  ctx.font = "bold 24px Verdana";
+  ctx.fillText("Carun", x, 34);
   x += ctx.measureText("Carun").width + 10;
 
   if (appLogoReady) {
-    ctx.drawImage(appLogo, x, 6, 44, 44);
+    ctx.drawImage(appLogo, x, 8, 38, 38);
   }
-  x += 44 + 12;
-
-  ctx.fillStyle = "#f4fbff";
-  ctx.font = "bold 20px Verdana";
-  ctx.fillText(state.playerName, x, 38);
-  x += ctx.measureText(state.playerName).width + 18;
-
-  const lapLabel = `LAP ${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`;
-  ctx.fillStyle = "#d8e8f7";
-  ctx.font = "bold 18px Verdana";
-  ctx.fillText(lapLabel, x, 38);
-  x += ctx.measureText(lapLabel).width + 16;
-
-  if (aiOpponentsEnabled()) {
-    const raceOrder = getRaceOrder();
-    const racePlace = raceOrder === 1 ? "P1/2" : "P2/2";
-    ctx.fillStyle = raceOrder === 1 ? "#7df0a8" : "#ff9b8d";
-    ctx.fillText(racePlace, x, 38);
-    x += ctx.measureText(racePlace).width + 16;
-  }
+  x += 38 + 12;
 
   const liveLap = state.finished
     ? lapData.lapTimes[lapData.lapTimes.length - 1] || 0
@@ -1512,7 +1525,33 @@ function drawTitleBar() {
         )
       : -1;
 
-  ctx.font = "16px Verdana";
+  drawHudPanel(
+    x,
+    top,
+    playerPanelWidth,
+    panelHeight,
+    "rgba(148, 200, 230, 0.34)",
+  );
+  ctx.fillStyle = "#f4fbff";
+  ctx.font = "bold 17px Verdana";
+  ctx.fillText(state.playerName, x + 12, 25);
+  ctx.fillStyle = "#d8e8f7";
+  ctx.font = "bold 11px Verdana";
+  ctx.fillText(
+    `P${getRaceOrder()}/${aiOpponentsEnabled() ? aiCars.length + 1 : 1}  L${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`,
+    x + 12,
+    42,
+  );
+
+  const lapPanelX = x + playerPanelWidth + panelGap;
+  drawHudPanel(
+    lapPanelX,
+    top,
+    lapPanelWidth,
+    panelHeight,
+    "rgba(255, 225, 103, 0.28)",
+  );
+  ctx.font = "bold 10px Verdana";
   for (let i = 0; i < lapData.maxLaps; i++) {
     const isCurrent = !state.finished && i === lapData.lapTimes.length;
     const isCompleted = i < lapData.lapTimes.length;
@@ -1525,20 +1564,47 @@ function drawTitleBar() {
       value !== undefined
         ? `L${i + 1} ${formatTime(value)}`
         : `L${i + 1} --:--.---`;
-    ctx.fillText(label, x, 38);
-    x += ctx.measureText(label).width + 14;
+    ctx.fillText(label, lapPanelX + 10, 21 + i * 11);
   }
 
   if (aiOpponentsEnabled()) {
-    const standings = getRaceStandings();
-    const rivalStanding = standings.find((entry) => entry.id === "ai");
-    const rivalLap = Math.min(aiLapData.lap, aiLapData.maxLaps);
-    const rivalBestLap = getBestLapTime(aiLapData.lapTimes);
-    const rivalStatus = aiLapData.finished
-      ? `${aiCar.label} P${rivalStanding?.finishOrder || getRacePosition("ai")} FIN ${formatTime(aiLapData.finishTime)} BEST ${rivalBestLap ? formatTime(rivalBestLap) : "--:--.---"}`
-      : `${aiCar.label} P${getRacePosition("ai")} L${rivalLap}/${aiLapData.maxLaps} BEST ${rivalBestLap ? formatTime(rivalBestLap) : "--:--.---"}`;
-    ctx.fillStyle = "#8fd2ff";
-    ctx.fillText(rivalStatus, x, 38);
+    const aiStandings = getRaceStandings().filter((entry) =>
+      String(entry.id).startsWith("ai-"),
+    );
+    let aiX = WIDTH - rightPad - aiAreaWidth;
+    aiStandings.forEach((entry) => {
+      const index = aiCars.findIndex((vehicle) => vehicle.id === entry.id);
+      if (index < 0) return;
+      const vehicle = aiCars[index];
+      const aiLapData = aiLapDataList[index];
+      const bestLap = getBestLapTime(aiLapData.lapTimes);
+      const accent = AI_ACCENTS[index % AI_ACCENTS.length];
+      drawHudPanel(aiX, top, aiTileWidth, panelHeight, `${accent}66`);
+      ctx.fillStyle = accent;
+      ctx.font = "bold 15px Verdana";
+      ctx.fillText(`P${getRacePosition(vehicle.id)}`, aiX + 8, 36);
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.font = "bold 10px Verdana";
+      ctx.fillText(vehicle.label, aiX + 8, 20);
+      ctx.fillStyle = "#d8e8f7";
+      ctx.fillText(
+        aiLapData.finished
+          ? "FINISHED"
+          : `L${Math.min(aiLapData.lap, aiLapData.maxLaps)}/${aiLapData.maxLaps}`,
+        aiX + 35,
+        33,
+      );
+      ctx.restore();
+      ctx.fillStyle = "#b9ccdc";
+      ctx.font = "bold 9px Verdana";
+      ctx.fillText(
+        `BEST ${bestLap ? formatTime(bestLap) : "--:--.---"}`,
+        aiX + 8,
+        46,
+      );
+      aiX += aiTileWidth + panelGap;
+    });
   }
 }
 

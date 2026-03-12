@@ -78,6 +78,7 @@ function setupDomStubs() {
 setupDomStubs();
 
 const {
+  AI_OPPONENT_NAME_POOL,
   getTrackPresetById,
   importTrackPresetData,
   physicsConfig,
@@ -86,8 +87,12 @@ const {
 } = await import("../js/parameters.js");
 const {
   aiCar,
+  aiCars,
   aiLapData,
+  aiLapDataList,
   aiPhysicsRuntime,
+  aiPhysicsRuntimes,
+  assignRandomAiRoster,
   car,
   keys,
   lapData,
@@ -267,26 +272,45 @@ test("updateRace launches on spring and disables steering while airborne", () =>
   assert.equal(car.angle, angleBefore);
 });
 
-test("resetRace spawns an AI rival with matching heading and lap state", () => {
+test("resetRace spawns a five-car AI field with matching heading and lap state", () => {
   enableAiOpponents();
   resetRace();
   const graph = getTrackNavigationGraph();
-  const nextCheckpointIndex = aiLapData.nextCheckpointIndex;
-  const goalNodeIds = graph.checkpointGoalNodeIds[nextCheckpointIndex]?.length
-    ? graph.checkpointGoalNodeIds[nextCheckpointIndex]
-    : graph.checkpointNodeIds[nextCheckpointIndex];
-  const goalIndex = aiPhysicsRuntime.plannedNodeIds.findIndex((nodeId) =>
-    goalNodeIds.includes(nodeId),
-  );
+  assert.equal(aiCars.length, 5);
+  aiCars.forEach((vehicle, index) => {
+    const lap = aiLapDataList[index];
+    const runtime = aiPhysicsRuntimes[index];
+    const nextCheckpointIndex = lap.nextCheckpointIndex;
+    const goalNodeIds = graph.checkpointGoalNodeIds[nextCheckpointIndex]?.length
+      ? graph.checkpointGoalNodeIds[nextCheckpointIndex]
+      : graph.checkpointNodeIds[nextCheckpointIndex];
+    const goalIndex = runtime.plannedNodeIds.findIndex((nodeId) =>
+      goalNodeIds.includes(nodeId),
+    );
 
-  assert.equal(aiLapData.lap, 1);
-  assert.equal(aiLapData.finished, false);
-  assert.equal(aiCar.angle, car.angle);
-  assert.ok(Math.hypot(aiCar.x - car.x, aiCar.y - car.y) > 20);
-  assert.ok(aiPhysicsRuntime.plannedNodeIds.length > 3);
-  assert.notEqual(aiPhysicsRuntime.targetNodeId, -1);
-  assert.ok(goalIndex >= 0);
-  assert.ok(goalIndex < aiPhysicsRuntime.plannedNodeIds.length - 1);
+    assert.equal(lap.lap, 1);
+    assert.equal(lap.finished, false);
+    assert.equal(vehicle.angle, car.angle);
+    assert.ok(Math.hypot(vehicle.x - car.x, vehicle.y - car.y) > 20);
+    assert.ok(runtime.plannedNodeIds.length > 3);
+    assert.notEqual(runtime.targetNodeId, -1);
+    assert.ok(goalIndex >= 0);
+    assert.ok(goalIndex < runtime.plannedNodeIds.length - 1);
+  });
+});
+
+test("random ai roster uses unique names from the configured pool", () => {
+  const roster = assignRandomAiRoster();
+
+  assert.equal(roster.length, aiCars.length);
+  assert.equal(new Set(roster.map((entry) => entry.name)).size, aiCars.length);
+  assert.ok(
+    roster.every((entry) => AI_OPPONENT_NAME_POOL.includes(entry.name)),
+  );
+  assert.deepEqual(
+    aiCars.map((vehicle) => vehicle.label),
+    roster.map((entry) => entry.name),
+  );
 });
 
 test("car-to-car collision separates overlapping racers and exchanges velocity", () => {
@@ -507,7 +531,7 @@ test("race standings rank completed laps ahead of local checkpoint position", ()
   aiCar.y = 360;
 
   assert.equal(getRacePosition("player"), 1);
-  assert.equal(getRacePosition("ai"), 2);
+  assert.ok(getRacePosition("ai") > 1);
 });
 
 test("finish order stays locked once a racer completes the race", () => {
@@ -517,7 +541,8 @@ test("finish order stays locked once a racer completes the race", () => {
   lapData.finishTime = 92;
   state.finished = true;
   state.raceStandings.playerFinishOrder = 1;
-  state.raceStandings.aiFinishOrder = 0;
+  state.raceStandings.finishOrders.player = 1;
+  state.raceStandings.finishOrders["ai-1"] = 0;
   state.raceStandings.nextFinishOrder = 2;
   aiLapData.finished = false;
   aiLapData.lap = 3;
@@ -525,18 +550,33 @@ test("finish order stays locked once a racer completes the race", () => {
   aiCar.y = 220;
 
   assert.equal(getRacePosition("player"), 1);
-  assert.equal(getRacePosition("ai"), 2);
+  assert.ok(getRacePosition("ai") > 1);
 
   aiLapData.finished = true;
   aiLapData.finishTime = 97;
-  state.raceStandings.aiFinishOrder = 2;
+  state.raceStandings.finishOrders["ai-1"] = 2;
 
   const standings = getRaceStandings();
-  assert.deepEqual(
-    standings.map((entry) => entry.id),
-    ["player", "ai"],
-  );
+  assert.equal(standings[0].id, "player");
+  assert.ok(standings.some((entry) => entry.id === "ai-1"));
   assert.equal(getRacePosition("player"), 1);
+});
+
+test("race standings include the full five-ai field", () => {
+  enableAiOpponents();
+  resetRace();
+
+  const standings = getRaceStandings();
+
+  assert.equal(standings.length, 6);
+  assert.deepEqual(standings.map((entry) => entry.id).sort(), [
+    "ai-1",
+    "ai-2",
+    "ai-3",
+    "ai-4",
+    "ai-5",
+    "player",
+  ]);
 });
 
 test("spring launches stay within the tuned apex and airborne frames do not draw skid bridges", () => {

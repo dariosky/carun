@@ -27,7 +27,13 @@ import {
   normalizeCenterlineSmoothingMode,
   TOURNAMENT_POINTS,
 } from "./parameters.js";
-import { keys, setCurbSegments, state } from "./state.js";
+import {
+  aiCars,
+  assignRandomAiRoster,
+  keys,
+  setCurbSegments,
+  state,
+} from "./state.js";
 import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments } from "./track.js";
@@ -1541,6 +1547,7 @@ function startTournament() {
   state.tournament.raceResults = [];
   // Force AI on for tournament
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  assignRandomAiRoster();
   startTournamentRace(0);
 }
 
@@ -1560,7 +1567,10 @@ function startTournamentRace(raceIndex) {
 function finishTournamentRace() {
   const standings = getRaceStandings();
   const playerName = state.playerName || "PLAYER";
-  const nameMap = { player: playerName, ai: "RIVAL" };
+  const nameMap = { player: playerName };
+  aiCars.forEach((vehicle) => {
+    nameMap[vehicle.id] = vehicle.label;
+  });
   const result = {};
   standings.forEach((entry, idx) => {
     const name = nameMap[entry.id] || entry.id;
@@ -1727,6 +1737,9 @@ function activateSelection() {
       setRaceReturnTarget("trackSelect");
       state.mode = "racing";
       syncMenuMusicForMode(state.mode);
+      if (physicsConfig.flags.AI_OPPONENTS_ENABLED !== false) {
+        assignRandomAiRoster();
+      }
       resetRace();
       const selected = trackOptions[state.selectedTrackIndex];
       if (selected) setTrackInUrl(selected.id);
