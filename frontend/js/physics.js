@@ -94,6 +94,30 @@ function getFinishOrder(racerKey) {
   return state.raceStandings.finishOrders[racerKey] || 0;
 }
 
+function getActiveAiProfile() {
+  return (
+    state.aiRoster[aiOpponentIndex] || {
+      id: aiCar.id,
+      name: aiCar.label,
+      style: "precise",
+      topSpeedMul: 1,
+      laneOffset: 0,
+    }
+  );
+}
+
+function getAiProfileByIndex(index) {
+  return (
+    state.aiRoster[index] || {
+      id: aiCars[index]?.id || `ai-${index + 1}`,
+      name: aiCars[index]?.label || `AI ${index + 1}`,
+      style: "precise",
+      topSpeedMul: 1,
+      laneOffset: 0,
+    }
+  );
+}
+
 function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
   const response = clamp((1 - smoothing) * dt * 60, 0, 1);
@@ -160,6 +184,7 @@ function resetLapProgress(targetLapData, startCheckpointIndex) {
   targetLapData.lap = 1;
   if ("finished" in targetLapData) targetLapData.finished = false;
   if ("finishTime" in targetLapData) targetLapData.finishTime = 0;
+  if ("finalPosition" in targetLapData) targetLapData.finalPosition = 0;
 }
 
 function aiOpponentsEnabled() {
@@ -197,10 +222,13 @@ function getRacerSnapshot(racerKey) {
     racerKey === "player"
       ? state.raceStandings.playerFinishOrder
       : getFinishOrder(racerKey);
+  const finalPosition =
+    racerLapData.finalPosition > 0 ? racerLapData.finalPosition : finishOrder;
   return {
     id: racerKey,
     finished: racerLapData.finished,
     finishOrder,
+    finalPosition,
     finishTime: racerLapData.finishTime || 0,
     lapsCompleted: Math.max(
       0,
@@ -213,6 +241,9 @@ function getRacerSnapshot(racerKey) {
 function compareRaceSnapshots(a, b) {
   if (a.finished || b.finished) {
     if (a.finished && b.finished) {
+      if (a.finalPosition !== b.finalPosition) {
+        return a.finalPosition - b.finalPosition;
+      }
       if (a.finishOrder !== b.finishOrder) return a.finishOrder - b.finishOrder;
       return a.finishTime - b.finishTime;
     }
@@ -241,9 +272,23 @@ export function getRaceStandings() {
 }
 
 export function getRacePosition(racerKey = "player") {
+  const targetLapData =
+    racerKey === "player" ? lapData : getAiStateById(racerKey)?.lapData;
+  if (targetLapData?.finished && targetLapData.finalPosition > 0) {
+    return targetLapData.finalPosition;
+  }
   const standings = getRaceStandings();
   const index = standings.findIndex((entry) => entry.id === racerKey);
   return index >= 0 ? index + 1 : standings.length;
+}
+
+function anyAiStillRacing() {
+  if (!aiOpponentsEnabled()) return false;
+  return aiLapDataList.some((entry) => !entry.finished);
+}
+
+function raceClockShouldAdvance() {
+  return !lapData.finished || anyAiStillRacing();
 }
 
 function progressDeltaForward(from, to) {
@@ -736,6 +781,7 @@ function buildAiTargetPreview(graph) {
 function updateAiPathCursor(graph) {
   if (!aiPhysicsRuntime.plannedNodeIds.length) return null;
   const aiCfg = physicsConfig.ai;
+  const profile = getActiveAiProfile();
   while (
     aiPhysicsRuntime.pathCursor <
     aiPhysicsRuntime.plannedNodeIds.length - 1
@@ -764,11 +810,17 @@ function updateAiPathCursor(graph) {
   const targetNode = graph.nodes[targetNodeId] || null;
   const preview = buildAiTargetPreview(graph);
   if (preview) {
+    const offset =
+      profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
+    const rightX = -(preview.node?.tangentY ?? targetNode?.tangentY ?? 0);
+    const rightY = preview.node?.tangentX ?? targetNode?.tangentX ?? 1;
+    const offsetX = rightX * offset;
+    const offsetY = rightY * offset;
     aiPhysicsRuntime.targetPoint = { x: preview.x, y: preview.y };
     return {
       ...(targetNode || {}),
-      x: preview.x,
-      y: preview.y,
+      x: preview.x + offsetX,
+      y: preview.y + offsetY,
       tangentX: preview.node?.tangentX ?? targetNode?.tangentX ?? 1,
       tangentY: preview.node?.tangentY ?? targetNode?.tangentY ?? 0,
       targetSpeed:
@@ -777,7 +829,15 @@ function updateAiPathCursor(graph) {
         physicsConfig.ai.targetSpeedMax,
     };
   }
-  return targetNode;
+  if (!targetNode) return null;
+  const offset = profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
+  const rightX = -(targetNode.tangentY ?? 0);
+  const rightY = targetNode.tangentX ?? 1;
+  return {
+    ...targetNode,
+    x: targetNode.x + rightX * offset,
+    y: targetNode.y + rightY * offset,
+  };
 }
 
 function computeAiTargetSpeed(graph) {
@@ -817,8 +877,9 @@ function computeAiTargetSpeed(graph) {
           );
     targetSpeed = Math.min(targetSpeed, allowedSpeed);
   }
+  const profile = getActiveAiProfile();
   aiPhysicsRuntime.desiredSpeed = clamp(
-    targetSpeed * aiCfg.targetSpeedBias,
+    targetSpeed * aiCfg.targetSpeedBias * (profile.topSpeedMul || 1),
     aiCfg.targetSpeedMin,
     aiCfg.targetSpeedMax,
   );
@@ -839,8 +900,35 @@ function getNearestBlockingRival(forwardX, forwardY) {
   return bestDistance;
 }
 
+function getNearestRivalMetrics(forwardX, forwardY, rightX, rightY) {
+  let best = null;
+  for (const rival of [car, ...aiCars]) {
+    if (rival === aiCar) continue;
+    const dx = rival.x - aiCar.x;
+    const dy = rival.y - aiCar.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= 1e-4) continue;
+    const forwardDistance = dx * forwardX + dy * forwardY;
+    const lateralDistance = dx * rightX + dy * rightY;
+    const relVx = aiCar.vx - rival.vx;
+    const relVy = aiCar.vy - rival.vy;
+    const closingSpeed = (relVx * dx + relVy * dy) / distance;
+    if (!best || distance < best.distance) {
+      best = {
+        rival,
+        distance,
+        forwardDistance,
+        lateralDistance,
+        closingSpeed,
+      };
+    }
+  }
+  return best;
+}
+
 function updateAiRaceControl(dt, graph) {
   const aiCfg = physicsConfig.ai;
+  const profile = getActiveAiProfile();
   if (
     !aiPhysicsRuntime.plannedNodeIds.length ||
     aiPhysicsRuntime.replanCooldown <= 0
@@ -905,7 +993,10 @@ function updateAiRaceControl(dt, graph) {
   }
 
   const rivalDistance = getNearestBlockingRival(forwardX, forwardY);
-  if (rivalDistance < physicsConfig.ai.rivalAvoidanceRadius) {
+  if (
+    rivalDistance < physicsConfig.ai.rivalAvoidanceRadius &&
+    profile.style !== "bump"
+  ) {
     brakeTarget = Math.max(
       brakeTarget,
       0.04 *
@@ -913,6 +1004,38 @@ function updateAiRaceControl(dt, graph) {
           rivalDistance / Math.max(physicsConfig.ai.rivalAvoidanceRadius, 1)),
     );
   }
+
+  if (profile.style === "bump") {
+    const rivalMetrics = getNearestRivalMetrics(
+      forwardX,
+      forwardY,
+      rightX,
+      rightY,
+    );
+    const closeThreat =
+      rivalMetrics &&
+      rivalMetrics.distance < 86 &&
+      rivalMetrics.forwardDistance > -24 &&
+      rivalMetrics.forwardDistance < 72 &&
+      (Math.abs(rivalMetrics.lateralDistance) < 64 ||
+        rivalMetrics.closingSpeed > 14);
+    if (closeThreat) {
+      steerTarget = clamp(
+        steerTarget + clamp(rivalMetrics.lateralDistance / 26, -0.65, 0.65),
+        -1,
+        1,
+      );
+      throttleTarget = Math.max(throttleTarget, 0.82);
+      brakeTarget *= 0.35;
+      if (
+        Math.abs(rivalMetrics.lateralDistance) > 10 &&
+        Math.abs(forwardSpeed) > 95
+      ) {
+        handbrakeTarget = Math.max(handbrakeTarget, 0.14);
+      }
+    }
+  }
+
   setAiInputTargets(dt, {
     throttle: throttleTarget,
     brake: brakeTarget,
@@ -980,8 +1103,11 @@ function updateAiRecoveryControl(dt, graph) {
 
 function updateAiControl(dt) {
   const aiCfg = physicsConfig.ai;
+  const profile = getActiveAiProfile();
   const graph = getTrackNavigationGraph(track);
   const currentSurface = surfaceAt(aiCar.x, aiCar.y);
+  aiPhysicsRuntime.targetLaneOffset =
+    profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
   aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
   aiPhysicsRuntime.replanCooldown = Math.max(
     0,
@@ -1502,7 +1628,7 @@ function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
   if (targetLapData.lap > targetLapData.maxLaps) {
     targetLapData.finished = true;
     targetLapData.finishTime = state.raceTime;
-    recordRaceFinish(racerKey);
+    targetLapData.finalPosition = recordRaceFinish(racerKey);
     if (typeof onFinish === "function") onFinish();
   }
 }
@@ -1875,6 +2001,7 @@ function resetAiOpponentForRace(
   startCheckpoint,
 ) {
   withAiOpponent(index, () => {
+    const profile = getAiProfileByIndex(index);
     const forwardX = Math.cos(headingAngle);
     const forwardY = Math.sin(headingAngle);
     const rightX = -forwardY;
@@ -1916,7 +2043,8 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.landingCooldown = 0;
     aiPhysicsRuntime.mode = "race";
     aiPhysicsRuntime.recoveryMode = "none";
-    aiPhysicsRuntime.targetLaneOffset = 0;
+    aiPhysicsRuntime.targetLaneOffset =
+      profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
     aiPhysicsRuntime.blockedTimer = 0;
     aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
     aiPhysicsRuntime.progressAtLastSample = aiPhysicsRuntime.progress;
@@ -2158,7 +2286,7 @@ export function updateRace(dt) {
     return;
   }
 
-  if (!state.finished) {
+  if (raceClockShouldAdvance()) {
     state.raceTime += dt;
   }
   if (state.checkpointBlink.time > 0) {
@@ -2206,7 +2334,7 @@ export function updateRace(dt) {
   if (car.airborne) {
     integrateAirborneMotion(dt, surfaceName);
     updateAiField(dt);
-    if (!state.finished) {
+    if (!lapData.finished) {
       checkCheckpointProgress(car, lapData, {
         blink: true,
         racerKey: "player",
@@ -2215,8 +2343,8 @@ export function updateRace(dt) {
           finalizeFinishCelebration();
         },
       });
-      updateAiCheckpointProgress();
     }
+    updateAiCheckpointProgress();
     return;
   }
 
@@ -2523,7 +2651,7 @@ export function updateRace(dt) {
 
   updateAiField(dt);
 
-  if (!state.finished) {
+  if (!lapData.finished) {
     checkCheckpointProgress(car, lapData, {
       blink: true,
       racerKey: "player",
@@ -2532,8 +2660,11 @@ export function updateRace(dt) {
         finalizeFinishCelebration();
       },
     });
-    updateAiCheckpointProgress();
-  } else if (
+  }
+  updateAiCheckpointProgress();
+
+  if (
+    state.finished &&
     !state.raceSubmission.completed &&
     !state.raceSubmission.inFlight
   ) {

@@ -1,67 +1,131 @@
-# AI Planning Notes
+# AI Racers
 
-This document captures the current planning contract for AI racers in CaRun.
+This document describes the current AI racer system in CaRun.
 
-## Core Destination Rule
+## Field Size
 
-- The AI planning destination is always the next unpassed checkpoint.
-- The destination does not switch to centerline progress, best-lap route, or later checkpoints.
-- Hitting an obstacle, touching grass, or replanning after displacement must not change the destination away from that same next checkpoint.
+- A race can include up to 5 AI opponents plus the human player.
+- In single race mode, the AI roster is regenerated when a race starts.
+- In tournament mode, one AI roster is generated at tournament start and reused for every race in that tournament.
 
-## Path Shape
+## Roster Model
 
-- The planner should find the fastest valid path to the next checkpoint.
-- The path may use shortcuts.
-- Asphalt is preferred, but grass and water is allowed when it is faster.
+Each AI racer has a persistent profile for the current event:
+
+- `name`
+- `style`
+- `topSpeedMul`
+- `laneOffset`
+
+Current styles:
+
+- `precise`
+- `long`
+- `bump`
+
+## Roster Constraints
+
+Random roster generation follows these rules:
+
+- Exactly 1 `precise` driver is created.
+- That `precise` driver always has `topSpeedMul = 1.0`.
+- At least 2 `bump` drivers are created.
+- Remaining drivers are `long`.
+- Names are unique within the generated 5-driver roster.
+
+## Style-Specific Name Pools
+
+`precise` names:
+
+- `Nitro Nick`
+- `Drift King`
+- `Burnout Ben`
+- `Max Oversteer`
+- `Lenny Launch`
+- `Polly Piston`
+
+`bump` names:
+
+- `Skidmark Steve`
+- `Burnout Ben`
+- `Bumpy Bumper`
+- `Cpt. Sideways`
+- `Squeaky Brakes`
+- `Greasy Gears`
+- `Ollie Oilspill`
+- `Crashy Carl`
+
+`long` names:
+
+- `Chuck Chicane`
+- `Pete Stop`
+- `Turbo Tina`
+- `Loopy Lap`
+
+## Driving Parameters
+
+### Top Speed Handicap
+
+- AI target speed is scaled by `topSpeedMul`.
+- `topSpeedMul` is in the range `0.80` to `1.00`.
+- This is applied through AI target speed selection, not by giving the AI different core car physics.
+
+### Style Behavior
+
+`precise`
+
+- Follows the shortest / fastest planned route to the next checkpoint.
+- Uses no lane offset.
+- Keeps the default path-following behavior.
+
+`long`
+
+- Uses a persistent lateral lane offset.
+- This makes the car follow a slightly longer line than the fastest route.
+- Current random offsets are typically in the `14` to `22` pixel range, left or right.
+
+`bump`
+
+- Reduces normal yielding behavior around nearby rivals.
+- Adds steering bias toward close cars to lean into contact.
+- Can use small handbrake input in close side-by-side situations.
+
+## Planning Contract
+
+- The planning destination is always the next unpassed checkpoint.
+- Replanning does not change the objective to a later checkpoint.
+- After reaching the next checkpoint goal window, the AI appends a short continuation so steering remains stable through the gate.
 - Solid obstacles are hard blockers.
-- The planner should avoid unnecessary long detours and should not bias toward the centerline just for comfort.
-
-## Checkpoint Margin
-
-- The path should not stop exactly at the next checkpoint node.
-- After reaching the next checkpoint goal window, the planner should append a short continuation beyond it.
-- That continuation exists only to preserve steering/lookahead near the checkpoint.
-- The objective still remains the next checkpoint until it is crossed.
+- Intersections and alternate branches are allowed if they are faster for reaching the next checkpoint.
 
 ## Recovery
 
-- Brief grass contact on a valid shortcut should not trigger reverse recovery.
-- Recovery should trigger only when the AI is actually stuck, trapped, blocked, or off the planned corridor for too long.
-- When replanning after contact with an obstacle, the destination remains the next unpassed checkpoint.
+- Brief grass contact on a valid shortcut should not trigger reverse recovery by itself.
+- Recovery is intended for genuinely stuck states: low progress, repeated collisions, or prolonged off-road travel.
+- When recovery or replanning happens, the next unpassed checkpoint remains the destination.
 
-## Physics
+## Physics Contract
 
-- AI cars use the same driving physics as the player.
-- Surface slowdowns, skid marks, and drift/slip behavior should match player physics.
-- The AI should not get hidden speed or grip buffs.
+- AI cars use the same underlying driving model as the player.
+- Surface drag, grip, drift, skid marks, and collision rules are shared.
+- AI advantages should come from planning and control choices, not hidden grip or acceleration buffs.
 
-## Speed Control — Physics-Based Braking
+## Race Position Rules
 
-- Target speeds for corners are derived from curvature via `computeBaseTargetSpeed`.
-- The pre-computed best-lap route propagates speeds backward using kinematic braking:
-  `v_entry = sqrt(v_exit² + 2 × brakeDecel × brakingEfficiency × distance)`.
-- At runtime, `computeAiTargetSpeed` accumulates real pixel distance along the
-  planned path and applies the same kinematic formula for each look-ahead node.
-- `brakingEfficiency` (0–1) is a safety margin below theoretical maximum braking
-  to account for surface changes, lateral slip, and reaction delay.
-- `targetSpeedMax` matches `car.maxSpeed` so the AI uses the full speed range.
-- A trail-braking zone between 0 and `lateBrakeMargin` modulates throttle rather
-  than applying the brakes, keeping the car on the limit through corner entry.
+- Live race positions are computed from:
+  - finished state
+  - finish order
+  - completed laps
+  - lap progress
+- Each racer stores a `finalPosition` when they finish.
+- That finishing place is frozen immediately and does not change while the rest of the field is still racing.
+- The race clock continues running after the player finishes if any AI racers are still active, so AI opponents can still complete laps and finish properly.
 
-## Steering Control
+## HUD
 
-- The AI uses near-instant input response (`inputSmoothing: 0.04`) — no human-like
-  input lag. The vehicle physics (yaw damping, lateral grip) still govern actual turn rate.
-- Steering combines heading-error proportional gain (`steeringGain`) with lateral-error
-  correction (`lateralErrorGain`) for path-following accuracy.
-- The target preview extends further at high speed (`targetPreviewSpeedMul × speed`),
-  capped at `targetPreviewMaxDistance`, so the AI steers smoothly on fast straights.
-- Handbrake is triggered at heading errors above `handbrakeHeadingThreshold` radians
-  when speed exceeds `handbrakeSpeedThreshold`, enabling tight hairpin handling.
-
-## Driving Style
-
-- This is an arcade racer.
-- Throttle should be effectively 100% whenever the near-future path allows it.
-- Slowing down is acceptable only to take faster lines through real corners or avoid real blockers.
-- At intersections, the AI should choose the branch that gives the fastest route to the next checkpoint.
+- AI HUD tiles in the race top bar are sorted by current race position, left to right.
+- Each tile shows compact AI information:
+  - name
+  - position
+  - lap
+  - best lap

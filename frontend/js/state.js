@@ -1,6 +1,10 @@
 import {
   AI_OPPONENT_COUNT,
+  AI_DRIVING_STYLE_POOL,
+  AI_BUMP_NAME_POOL,
+  AI_LONG_NAME_POOL,
   AI_OPPONENT_NAME_POOL,
+  AI_PRECISE_NAME_POOL,
   loadPlayerName,
   track,
 } from "./parameters.js";
@@ -155,6 +159,7 @@ function createLapProgressState() {
     lap: 1,
     finished: false,
     finishTime: 0,
+    finalPosition: 0,
   };
 }
 
@@ -284,6 +289,27 @@ function shuffleArray(values) {
   return copy;
 }
 
+function pickUniqueNames(pool, count, usedNames) {
+  const names = [];
+  const shuffled = shuffleArray(pool);
+  for (const candidate of shuffled) {
+    if (usedNames.has(candidate)) continue;
+    names.push(candidate);
+    usedNames.add(candidate);
+    if (names.length >= count) break;
+  }
+  if (names.length >= count) return names;
+
+  const fallback = shuffleArray(AI_OPPONENT_NAME_POOL);
+  for (const candidate of fallback) {
+    if (usedNames.has(candidate)) continue;
+    names.push(candidate);
+    usedNames.add(candidate);
+    if (names.length >= count) break;
+  }
+  return names;
+}
+
 function syncAiRosterToCars() {
   aiCars.forEach((vehicle, index) => {
     vehicle.label = state.aiRoster[index]?.name || getAiLabel(index);
@@ -293,9 +319,23 @@ function syncAiRosterToCars() {
 export function assignAiRoster(profiles = []) {
   state.aiRoster = Array.from({ length: AI_OPPONENT_COUNT }, (_, index) => {
     const name = String(profiles[index]?.name || "").trim();
+    const style = AI_DRIVING_STYLE_POOL.includes(profiles[index]?.style)
+      ? profiles[index].style
+      : "precise";
+    const topSpeedMul = Number.isFinite(profiles[index]?.topSpeedMul)
+      ? Math.max(0.8, Math.min(1, Number(profiles[index].topSpeedMul)))
+      : 1;
+    const laneOffset = Number.isFinite(profiles[index]?.laneOffset)
+      ? Number(profiles[index].laneOffset)
+      : style === "long"
+        ? 18
+        : 0;
     return {
       id: `ai-${index + 1}`,
       name: name || getAiLabel(index),
+      style,
+      topSpeedMul,
+      laneOffset,
     };
   });
   syncAiRosterToCars();
@@ -303,14 +343,41 @@ export function assignAiRoster(profiles = []) {
 }
 
 export function assignRandomAiRoster() {
-  const pickedNames = shuffleArray(AI_OPPONENT_NAME_POOL).slice(
-    0,
-    AI_OPPONENT_COUNT,
-  );
-  return assignAiRoster(
-    pickedNames.map((name, index) => ({
-      id: `ai-${index + 1}`,
+  const usedNames = new Set();
+  const bumpCount = Math.random() < 0.5 ? 2 : 3;
+  const longCount = AI_OPPONENT_COUNT - 1 - bumpCount;
+  const preciseNames = pickUniqueNames(AI_PRECISE_NAME_POOL, 1, usedNames);
+  const bumpNames = pickUniqueNames(AI_BUMP_NAME_POOL, bumpCount, usedNames);
+  const longNames = pickUniqueNames(AI_LONG_NAME_POOL, longCount, usedNames);
+
+  const profiles = [
+    {
+      style: "precise",
+      name: preciseNames[0] || getAiLabel(0),
+      topSpeedMul: 1,
+      laneOffset: 0,
+    },
+    ...bumpNames.map((name) => ({
+      style: "bump",
       name,
+      topSpeedMul: Number((0.8 + Math.random() * 0.2).toFixed(2)),
+      laneOffset: 0,
+    })),
+    ...longNames.map((name) => {
+      const laneSign = Math.random() < 0.5 ? -1 : 1;
+      return {
+        style: "long",
+        name,
+        topSpeedMul: Number((0.8 + Math.random() * 0.2).toFixed(2)),
+        laneOffset: laneSign * (14 + Math.round(Math.random() * 8)),
+      };
+    }),
+  ];
+
+  return assignAiRoster(
+    shuffleArray(profiles).map((profile, index) => ({
+      id: `ai-${index + 1}`,
+      ...profile,
     })),
   );
 }

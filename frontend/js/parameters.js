@@ -121,20 +121,38 @@ export function getLoginProviderItems() {
 }
 
 export const AI_OPPONENT_COUNT = 5;
-export const AI_OPPONENT_NAME_POOL = [
-  "Max Oversteer",
-  "Chuck Chicane",
-  "Pete Stop",
+export const AI_PRECISE_NAME_POOL = [
   "Nitro Nick",
   "Drift King",
-  "Turbo Tina",
   "Burnout Ben",
+  "Max Oversteer",
+  "Lenny Launch",
+  "Polly Piston",
+];
+export const AI_BUMP_NAME_POOL = [
   "Skidmark Steve",
-  "Cpt. Sideways",
+  "Burnout Ben",
   "Bumpy Bumper",
+  "Cpt. Sideways",
   "Squeaky Brakes",
   "Greasy Gears",
+  "Ollie Oilspill",
+  "Crashy Carl",
 ];
+export const AI_LONG_NAME_POOL = [
+  "Chuck Chicane",
+  "Pete Stop",
+  "Turbo Tina",
+  "Loopy Lap",
+];
+export const AI_OPPONENT_NAME_POOL = [
+  ...new Set([
+    ...AI_PRECISE_NAME_POOL,
+    ...AI_BUMP_NAME_POOL,
+    ...AI_LONG_NAME_POOL,
+  ]),
+];
+export const AI_DRIVING_STYLE_POOL = ["precise", "long", "bump"];
 export const TOURNAMENT_POINTS = [10, 8, 6, 4, 3, 2];
 
 export function getGameModeItems() {

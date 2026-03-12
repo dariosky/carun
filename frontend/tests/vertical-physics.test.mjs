@@ -78,7 +78,10 @@ function setupDomStubs() {
 setupDomStubs();
 
 const {
+  AI_BUMP_NAME_POOL,
   AI_OPPONENT_NAME_POOL,
+  AI_LONG_NAME_POOL,
+  AI_PRECISE_NAME_POOL,
   getTrackPresetById,
   importTrackPresetData,
   physicsConfig,
@@ -92,6 +95,7 @@ const {
   aiLapDataList,
   aiPhysicsRuntime,
   aiPhysicsRuntimes,
+  assignAiRoster,
   assignRandomAiRoster,
   car,
   keys,
@@ -301,16 +305,57 @@ test("resetRace spawns a five-car AI field with matching heading and lap state",
 
 test("random ai roster uses unique names from the configured pool", () => {
   const roster = assignRandomAiRoster();
+  const preciseDrivers = roster.filter((entry) => entry.style === "precise");
+  const bumpDrivers = roster.filter((entry) => entry.style === "bump");
+  const longDrivers = roster.filter((entry) => entry.style === "long");
 
   assert.equal(roster.length, aiCars.length);
   assert.equal(new Set(roster.map((entry) => entry.name)).size, aiCars.length);
   assert.ok(
     roster.every((entry) => AI_OPPONENT_NAME_POOL.includes(entry.name)),
   );
+  assert.equal(preciseDrivers.length, 1);
+  assert.ok(bumpDrivers.length >= 2);
+  assert.equal(
+    longDrivers.length + bumpDrivers.length + preciseDrivers.length,
+    aiCars.length,
+  );
+  assert.equal(preciseDrivers[0].topSpeedMul, 1);
+  assert.ok(
+    preciseDrivers.every((entry) => AI_PRECISE_NAME_POOL.includes(entry.name)),
+  );
+  assert.ok(
+    bumpDrivers.every((entry) => AI_BUMP_NAME_POOL.includes(entry.name)),
+  );
+  assert.ok(
+    longDrivers.every((entry) => AI_LONG_NAME_POOL.includes(entry.name)),
+  );
+  assert.ok(
+    roster
+      .filter((entry) => entry.style !== "precise")
+      .every((entry) => entry.topSpeedMul >= 0.8 && entry.topSpeedMul <= 1),
+  );
   assert.deepEqual(
     aiCars.map((vehicle) => vehicle.label),
     roster.map((entry) => entry.name),
   );
+});
+
+test("ai roster profiles propagate lane-offset styles into race runtime", () => {
+  assignAiRoster([
+    { name: "LONG ONE", style: "long", topSpeedMul: 0.82, laneOffset: 22 },
+    { name: "PRECISE TWO", style: "precise", topSpeedMul: 1 },
+    { name: "BUMP THREE", style: "bump", topSpeedMul: 0.9 },
+    { name: "LONG FOUR", style: "long", topSpeedMul: 0.95, laneOffset: -18 },
+    { name: "PRECISE FIVE", style: "precise", topSpeedMul: 0.88 },
+  ]);
+  enableAiOpponents();
+  resetRace();
+
+  assert.equal(aiCars[0].label, "LONG ONE");
+  assert.equal(aiPhysicsRuntimes[0].targetLaneOffset, 22);
+  assert.equal(aiPhysicsRuntimes[1].targetLaneOffset, 0);
+  assert.equal(aiPhysicsRuntimes[3].targetLaneOffset, -18);
 });
 
 test("car-to-car collision separates overlapping racers and exchanges velocity", () => {
@@ -539,6 +584,7 @@ test("finish order stays locked once a racer completes the race", () => {
   resetRace();
   lapData.finished = true;
   lapData.finishTime = 92;
+  lapData.finalPosition = 1;
   state.finished = true;
   state.raceStandings.playerFinishOrder = 1;
   state.raceStandings.finishOrders.player = 1;
@@ -554,12 +600,71 @@ test("finish order stays locked once a racer completes the race", () => {
 
   aiLapData.finished = true;
   aiLapData.finishTime = 97;
+  aiLapData.finalPosition = 2;
   state.raceStandings.finishOrders["ai-1"] = 2;
 
   const standings = getRaceStandings();
   assert.equal(standings[0].id, "player");
   assert.ok(standings.some((entry) => entry.id === "ai-1"));
   assert.equal(getRacePosition("player"), 1);
+});
+
+test("finished racers keep their final position while others continue racing", () => {
+  enableAiOpponents();
+  resetRace();
+
+  lapData.finished = true;
+  lapData.finishTime = 90;
+  lapData.finalPosition = 2;
+  state.raceStandings.playerFinishOrder = 2;
+  state.raceStandings.finishOrders.player = 2;
+
+  aiLapDataList[1].finished = true;
+  aiLapDataList[1].finishTime = 84;
+  aiLapDataList[1].finalPosition = 1;
+  state.raceStandings.finishOrders["ai-2"] = 1;
+  state.raceStandings.nextFinishOrder = 3;
+
+  aiCars[0].x = 1000;
+  aiCars[0].y = 200;
+  aiCars[2].x = 1040;
+  aiCars[2].y = 220;
+  aiCars[3].x = 1080;
+  aiCars[3].y = 240;
+  aiCars[4].x = 1120;
+  aiCars[4].y = 260;
+
+  assert.equal(getRacePosition("ai-2"), 1);
+  assert.equal(getRacePosition("player"), 2);
+
+  aiCars[0].x = 400;
+  aiCars[0].y = 650;
+  aiCars[2].x = 1180;
+  aiCars[2].y = 80;
+  aiCars[3].x = 640;
+  aiCars[3].y = 120;
+  aiCars[4].x = 220;
+  aiCars[4].y = 620;
+
+  assert.equal(getRacePosition("ai-2"), 1);
+  assert.equal(getRacePosition("player"), 2);
+});
+
+test("race clock keeps running after the player finishes if ai racers are still active", () => {
+  enableAiOpponents();
+  resetRace();
+  state.startSequence.active = false;
+  state.finished = true;
+  lapData.finished = true;
+  lapData.finalPosition = 1;
+  state.raceStandings.playerFinishOrder = 1;
+  state.raceStandings.finishOrders.player = 1;
+  aiLapDataList[0].finished = false;
+  const before = state.raceTime;
+
+  updateRace(0.016);
+
+  assert.ok(state.raceTime > before);
 });
 
 test("race standings include the full five-ai field", () => {
