@@ -708,7 +708,11 @@ function selectedTrackPreset() {
 }
 
 function selectedTrackCanDelete() {
-  return canDeleteTrackPreset(selectedTrackPreset(), state.auth.userId);
+  return canDeleteTrackPreset(
+    selectedTrackPreset(),
+    state.auth.userId,
+    state.auth.isAdmin,
+  );
 }
 
 function selectedTrackCanPublish() {
@@ -1364,6 +1368,7 @@ async function saveEditorTrack(requestedName) {
   try {
     const imported = await saveTrackPresetToDb(trackIndex, {
       currentUserId: state.auth.userId,
+      currentUserIsAdmin: state.auth.isAdmin,
       name: requestedName,
     });
     if (!imported) {
@@ -2068,7 +2073,10 @@ function onKeyDown(e) {
             shareToken: updatedTrack.share_token || null,
             fromDb: true,
           },
-          { currentUserId: state.auth.userId },
+          {
+            currentUserId: state.auth.userId,
+            currentUserIsAdmin: state.auth.isAdmin,
+          },
         );
         if (!updatedPreset) return;
         showSnackbar(
@@ -2116,7 +2124,10 @@ function onKeyDown(e) {
             shareToken: updatedTrack.share_token || null,
             fromDb: true,
           },
-          { currentUserId: state.auth.userId },
+          {
+            currentUserId: state.auth.userId,
+            currentUserIsAdmin: state.auth.isAdmin,
+          },
         );
         if (!updatedPreset) return;
         showSnackbar("Track renamed", { seconds: 1.8, kind: "success" });
@@ -2145,11 +2156,17 @@ function onKeyDown(e) {
     state.trackSelectIndex < trackOptions.length
   ) {
     const preset = getTrackPreset(state.trackSelectIndex);
-    if (!preset || !canDeleteTrackPreset(preset, state.auth.userId)) {
-      showSnackbar("Only your unpublished tracks can be deleted", {
-        seconds: 1.8,
-        kind: "error",
-      });
+    if (
+      !preset ||
+      !canDeleteTrackPreset(preset, state.auth.userId, state.auth.isAdmin)
+    ) {
+      showSnackbar(
+        "Only unpublished tracks you own can be deleted, unless you are admin",
+        {
+          seconds: 1.8,
+          kind: "error",
+        },
+      );
       return;
     }
     openConfirmModal({

@@ -254,6 +254,32 @@ def test_published_tracks_cannot_be_deleted(client, session):
     assert response.json()["detail"] == "Published tracks cannot be deleted"
 
 
+def test_admin_can_delete_unpublished_track_owned_by_someone_else(client, session):
+    admin = create_user(session, "ADMIN", is_admin=True)
+    owner = create_user(session, "OWNER")
+    draft = create_track(session, "Draft", owner=owner, is_published=False)
+    draft_id = draft.id
+
+    login_as(client, admin)
+    response = client.delete(f"/api/tracks/{draft_id}")
+
+    assert response.status_code == 204
+    session.expire_all()
+    assert session.get(Track, draft_id) is None
+
+
+def test_non_owner_non_admin_cannot_delete_unpublished_track(client, session):
+    owner = create_user(session, "OWNER")
+    other = create_user(session, "OTHER")
+    draft = create_track(session, "Draft", owner=owner, is_published=False)
+
+    login_as(client, other)
+    response = client.delete(f"/api/tracks/{draft.id}")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Not allowed"
+
+
 def test_deleting_track_removes_related_race_data(client, session):
     owner = create_user(session, "OWNER")
     track = create_track(session, "Draft", owner=owner, is_published=False)

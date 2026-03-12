@@ -2531,6 +2531,7 @@ function drawTrackSelection() {
       ctx.fillStyle = "#8aa4b8";
       ctx.font = "14px Verdana";
       ctx.fillText("Press A to toggle", sx, sy);
+      sy += 24;
     } else {
       ctx.fillStyle = "#6af0a8";
       ctx.font = "bold 16px Verdana";
@@ -2855,9 +2856,21 @@ function drawModal() {
     buttonY + 33,
   );
 
-  ctx.fillStyle = state.modal.danger ? "#c32727" : "#2f7e45";
+  const confirmFill = state.modal.danger
+    ? yesSelected
+      ? "#c32727"
+      : "#2f7e45"
+    : "#2f7e45";
+  const confirmStroke = state.modal.danger
+    ? yesSelected
+      ? "#ffffff"
+      : "#9cd3aa"
+    : yesSelected
+      ? "#ffffff"
+      : "#9cd3aa";
+  ctx.fillStyle = confirmFill;
   ctx.fillRect(yesX, buttonY, confirmW, buttonH);
-  ctx.strokeStyle = yesSelected ? "#ffffff" : "#e6bcbc";
+  ctx.strokeStyle = confirmStroke;
   ctx.lineWidth = yesSelected ? 3 : 2;
   ctx.strokeRect(yesX, buttonY, confirmW, buttonH);
   ctx.fillStyle = "#ffffff";

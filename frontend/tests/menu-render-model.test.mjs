@@ -194,7 +194,7 @@ test("settings header model defines centered title", () => {
   assert.equal(header.xRatio, 0.5);
 });
 
-test("canDeleteTrackPreset only allows owned unpublished db tracks", () => {
+test("canDeleteTrackPreset allows admins to delete any unpublished db track", () => {
   const currentUserId = "user-1";
   assert.equal(
     canDeleteTrackPreset(
@@ -216,6 +216,14 @@ test("canDeleteTrackPreset only allows owned unpublished db tracks", () => {
       currentUserId,
     ),
     false,
+  );
+  assert.equal(
+    canDeleteTrackPreset(
+      { fromDb: true, ownerUserId: "user-2", isPublished: false },
+      currentUserId,
+      true,
+    ),
+    true,
   );
   assert.equal(
     canDeleteTrackPreset(
@@ -262,6 +270,13 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.selectedTrackCanPublish, true);
   assert.equal(model.selectedTrackCanRename, true);
   assert.equal(model.selectedTrackCanDelete, false);
+
+  const selector2Index = trackOptions.findIndex(
+    (track) => track.id === "selector-2",
+  );
+  state.trackSelectIndex = selector2Index;
+  const draftModel = getTrackSelectRenderModel();
+  assert.equal(draftModel.selectedTrackCanDelete, true);
 
   for (const id of addedIds)
     removeTrackPresetById(id, { removePersisted: false });

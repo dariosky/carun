@@ -95,7 +95,10 @@ try {
   // Ignore auth probe failures and continue in anonymous mode.
 }
 
-await loadVisibleTracksFromApi({ currentUserId: state.auth.userId });
+await loadVisibleTracksFromApi({
+  currentUserId: state.auth.userId,
+  currentUserIsAdmin: state.auth.isAdmin,
+});
 const currentUrl = new URL(window.location.href);
 const trackEditMatch = currentUrl.pathname.match(
   /^\/tracks\/edit\/([^/]+)\/?$/,
@@ -116,6 +119,7 @@ if (shareFromUrl) {
   try {
     await loadSharedTrackFromApi(shareFromUrl, {
       currentUserId: state.auth.userId,
+      currentUserIsAdmin: state.auth.isAdmin,
     });
   } catch {
     showSnackbar("Track not found", { seconds: 1.8, kind: "error" });
@@ -124,6 +128,7 @@ if (shareFromUrl) {
   try {
     await loadTrackPresetFromApi(requestedTrackId, {
       currentUserId: state.auth.userId,
+      currentUserIsAdmin: state.auth.isAdmin,
     });
   } catch {
     showSnackbar("Track not found", { seconds: 1.8, kind: "error" });

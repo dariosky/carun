@@ -260,7 +260,7 @@ def delete_track(
     track = session.get(Track, _parse_track_id(track_id))
     if not track:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
-    if track.owner_user_id != current_user.id:
+    if not current_user.is_admin and track.owner_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
     if track.is_published:
         raise HTTPException(

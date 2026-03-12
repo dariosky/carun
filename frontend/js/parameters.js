@@ -546,15 +546,28 @@ export function getTrackPresetById(id) {
   return TRACK_PRESETS.find((preset) => preset.id === id) || null;
 }
 
-export function canDeleteTrackPreset(preset, currentUserId) {
+export function canDeleteTrackPreset(
+  preset,
+  currentUserId,
+  currentUserIsAdmin = false,
+) {
   if (!preset || !preset.fromDb) return false;
-  if (!currentUserId || preset.ownerUserId !== currentUserId) return false;
+  if (!currentUserIsAdmin) {
+    if (!currentUserId || preset.ownerUserId !== currentUserId) return false;
+  }
   return !preset.isPublished;
 }
 
-function updateTrackDeleteCapabilities(currentUserId) {
+function updateTrackDeleteCapabilities(
+  currentUserId,
+  currentUserIsAdmin = false,
+) {
   for (const preset of TRACK_PRESETS) {
-    preset.canDelete = canDeleteTrackPreset(preset, currentUserId);
+    preset.canDelete = canDeleteTrackPreset(
+      preset,
+      currentUserId,
+      currentUserIsAdmin,
+    );
   }
   rebuildTrackOptions();
 }
@@ -562,7 +575,7 @@ function updateTrackDeleteCapabilities(currentUserId) {
 export function setTrackPresetMetadata(
   trackId,
   updates,
-  { currentUserId = null } = {},
+  { currentUserId = null, currentUserIsAdmin = false } = {},
 ) {
   const preset = getTrackPresetById(trackId);
   if (!preset) return null;
@@ -603,7 +616,11 @@ export function setTrackPresetMetadata(
   if (typeof updates.shareToken === "string" || updates.shareToken === null)
     preset.shareToken = updates.shareToken;
   if (typeof updates.fromDb === "boolean") preset.fromDb = updates.fromDb;
-  preset.canDelete = canDeleteTrackPreset(preset, currentUserId);
+  preset.canDelete = canDeleteTrackPreset(
+    preset,
+    currentUserId,
+    currentUserIsAdmin,
+  );
   rebuildTrackOptions();
   return clonePresetData(preset);
 }
@@ -1262,7 +1279,10 @@ function buildPresetFromApiTrack(raw) {
   };
 }
 
-export async function loadVisibleTracksFromApi({ currentUserId = null } = {}) {
+export async function loadVisibleTracksFromApi({
+  currentUserId = null,
+  currentUserIsAdmin = false,
+} = {}) {
   let tracks = [];
   try {
     tracks = await fetchTracks();
@@ -1282,13 +1302,13 @@ export async function loadVisibleTracksFromApi({ currentUserId = null } = {}) {
     if (!preset) continue;
     if (importTrackPresetData(preset, { persist: false })) loaded += 1;
   }
-  updateTrackDeleteCapabilities(currentUserId);
+  updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return { loaded };
 }
 
 export async function loadTrackPresetFromApi(
   trackId,
-  { currentUserId = null } = {},
+  { currentUserId = null, currentUserIsAdmin = false } = {},
 ) {
   const cleanId = normalizePresetId(trackId);
   if (!cleanId) return null;
@@ -1299,13 +1319,18 @@ export async function loadTrackPresetFromApi(
   const preset = buildPresetFromApiTrack(rawTrack);
   if (!preset) return null;
   const imported = importTrackPresetData(preset, { persist: false });
-  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  if (imported)
+    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
 export async function saveTrackPresetToDb(
   index,
-  { currentUserId = null, name: requestedName = "" } = {},
+  {
+    currentUserId = null,
+    currentUserIsAdmin = false,
+    name: requestedName = "",
+  } = {},
 ) {
   const presetData = exportTrackPresetData(index);
   const name =
@@ -1341,13 +1366,14 @@ export async function saveTrackPresetToDb(
     fromDb: true,
   };
   const imported = importTrackPresetData(mergedPreset, { persist: false });
-  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  if (imported)
+    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
 export async function loadSharedTrackFromApi(
   shareToken,
-  { currentUserId = null } = {},
+  { currentUserId = null, currentUserIsAdmin = false } = {},
 ) {
   const rawTrack = await fetchSharedTrack(shareToken);
   const preset = buildPresetFromApiTrack({
@@ -1359,7 +1385,8 @@ export async function loadSharedTrackFromApi(
   if (!preset) return null;
   preset.canDelete = false;
   const imported = importTrackPresetData(preset, { persist: false });
-  if (imported) updateTrackDeleteCapabilities(currentUserId);
+  if (imported)
+    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
