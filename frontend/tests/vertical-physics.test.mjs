@@ -78,14 +78,17 @@ function setupDomStubs() {
 setupDomStubs();
 
 const {
+  applyTrackPreset,
   AI_BUMP_NAME_POOL,
   AI_OPPONENT_NAME_POOL,
   AI_LONG_NAME_POOL,
   AI_PRECISE_NAME_POOL,
+  checkpoints,
   getTrackPresetById,
   importTrackPresetData,
   physicsConfig,
   removeTrackPresetById,
+  trackOptions,
   worldObjects,
 } = await import("../js/parameters.js");
 const {
@@ -216,6 +219,50 @@ test("legacy world objects gain default heights and wall defaults", () => {
   assert.equal(wall.length, 90);
 
   removeTrackPresetById(imported.id);
+});
+
+test("legacy checkpoint angles migrate to editable progress checkpoints", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const imported = importTrackPresetData({
+    id: "vertical-legacy-checkpoints",
+    name: "VERTICAL LEGACY CHECKPOINTS",
+    track: makeTrackData(),
+    checkpoints: [
+      { angle: 0 },
+      { angle: Math.PI * 0.5 },
+      { angle: Math.PI },
+      { angle: Math.PI * 1.5 },
+    ],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+
+  const preset = getTrackPresetById(imported.id);
+  assert.equal(preset.checkpoints.length, 3);
+  assert.ok(
+    preset.checkpoints.every(
+      (checkpoint) =>
+        Number.isFinite(checkpoint.progress) &&
+        !Object.hasOwn(checkpoint, "angle"),
+    ),
+  );
+
+  const trackIndex = trackOptions.findIndex(
+    (option) => option.id === imported.id,
+  );
+  applyTrackPreset(trackIndex);
+  assert.equal(checkpoints.length, 4);
+  assert.equal(checkpoints[0].isStart, true);
+  assert.ok(
+    checkpoints.slice(1).every((checkpoint) => checkpoint.isStart === false),
+  );
+
+  removeTrackPresetById(imported.id);
+  const restoreIndex = trackOptions.findIndex(
+    (option) => option.id === originalTrackId,
+  );
+  applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
 });
 
 test("height-aware collisions clear low obstacles and keep wall footprints solid", () => {

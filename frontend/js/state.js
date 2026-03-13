@@ -86,6 +86,7 @@ export const state = {
     cursorCanvasY: track.cy,
     cursorScreenY: track.cy,
     activeTool: "road",
+    roadMode: "segment",
     drawing: false,
     activeStroke: [],
     showCurbs: true,

@@ -36,7 +36,7 @@ import {
 } from "./state.js";
 import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
-import { initCurbSegments } from "./track.js";
+import { initCurbSegments, surfaceAt, trackProgressAtPoint } from "./track.js";
 import {
   logoutAuth,
   renameTrack,
@@ -69,6 +69,7 @@ const EDITOR_ZOOM_STEP = 0.1;
 const EDITOR_MIN_WORLD_SCALE = 0.5;
 const EDITOR_MAX_WORLD_SCALE = 1.75;
 const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
+const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
 
 function clampWorldScale(value) {
   return Math.max(
@@ -161,6 +162,16 @@ function syncLatestEditorTarget(preset) {
       };
       return;
     }
+    if (
+      entry.kind === "checkpoint" &&
+      preset.checkpoints?.[entry.checkpointIndex]
+    ) {
+      state.editor.latestEditTarget = {
+        kind: "checkpoint",
+        checkpointIndex: entry.checkpointIndex,
+      };
+      return;
+    }
   }
   state.editor.latestEditTarget = null;
 }
@@ -173,10 +184,58 @@ function toggleEditorTool(nextTool) {
   setEditorTool(state.editor.activeTool === nextTool ? "road" : nextTool);
 }
 
+function setEditorRoadMode(nextMode) {
+  state.editor.roadMode = nextMode === "checkpoint" ? "checkpoint" : "segment";
+}
+
 function triggerEditorSelectionFlash(kind, index) {
   state.editor.selectionFlash.kind = kind;
   state.editor.selectionFlash.index = Number.isInteger(index) ? index : -1;
   state.editor.selectionFlash.time = 0.48;
+}
+
+function normalizeCheckpointProgress(progress) {
+  return ((Number(progress) % 1) + 1) % 1;
+}
+
+function startProgressForTrack(trackDef) {
+  return normalizeCheckpointProgress(
+    (Number(trackDef?.startAngle) || 0) / (Math.PI * 2),
+  );
+}
+
+function checkpointOrderDelta(progress, startProgress) {
+  return normalizeCheckpointProgress(progress - startProgress);
+}
+
+function findCheckpointInsertIndex(checkpointsList, progress, trackDef) {
+  const startProgress = startProgressForTrack(trackDef);
+  const targetDelta = checkpointOrderDelta(progress, startProgress);
+  const insertIndex = checkpointsList.findIndex(
+    (checkpoint) =>
+      checkpointOrderDelta(checkpoint.progress, startProgress) > targetDelta,
+  );
+  return insertIndex >= 0 ? insertIndex : checkpointsList.length;
+}
+
+function checkpointNearStart(progress, trackDef) {
+  const startProgress = startProgressForTrack(trackDef);
+  return (
+    checkpointOrderDelta(progress, startProgress) <
+      EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
+    checkpointOrderDelta(startProgress, progress) <
+      EDITOR_CHECKPOINT_PROGRESS_TOLERANCE
+  );
+}
+
+function findCheckpointIndexNearProgress(checkpointsList, progress) {
+  return checkpointsList.findIndex(
+    (checkpoint) =>
+      checkpointOrderDelta(checkpoint.progress, progress) <
+        EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
+      checkpointOrderDelta(progress, checkpoint.progress) <
+        EDITOR_CHECKPOINT_PROGRESS_TOLERANCE,
+  );
 }
 
 export function getEditorTopBarLayout() {
@@ -234,22 +293,11 @@ export function getEditorTopBarLayout() {
 
 export function getEditorToolbarLayout() {
   const toolbar = state.editor.toolbar;
-  const panelHeight =
-    EDITOR_TOOLBAR_TITLE_HEIGHT +
-    EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
-    EDITOR_TOOLBAR_ROW_HEIGHT * 3 +
-    EDITOR_TOOLBAR_SECTION_HEIGHT * 2 +
-    14 +
-    EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT +
-    EDITOR_TOOLBAR_SECTION_HEIGHT * 3 +
-    14 +
-    EDITOR_TOOLBAR_SECTION_HEIGHT +
-    20;
   const panel = {
     x: toolbar.x,
     y: toolbar.y,
     width: toolbar.width || EDITOR_TOOLBAR_WIDTH,
-    height: panelHeight,
+    height: 0,
   };
   const titleBar = {
     x: panel.x,
@@ -286,11 +334,17 @@ export function getEditorToolbarLayout() {
   const stepperWidth = 94;
   const roadHeaderTop = objectActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
   const roadSelectTop = roadHeaderTop + EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT + 4;
-  const roadActionTop = roadSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const checkpointSelectTop = roadSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const roadActionTop = checkpointSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
   const roadActionY = roadActionTop + 2;
   const roadStepperWidth = 138;
   const roadSmoothTop = roadActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
   const zoomTop = roadSmoothTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
+  panel.height = zoomTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 20 - panel.y;
+  const selectorDeleteX = panel.x + panel.width - 12 - iconButtonWidth;
+  const selectorNextX = selectorDeleteX - 8 - 30;
+  const selectorValueX = panel.x + 52;
+  const selectorValueWidth = selectorNextX - 8 - selectorValueX;
   return {
     panel,
     titleBar,
@@ -376,20 +430,40 @@ export function getEditorToolbarLayout() {
       height: 24,
     },
     roadNext: {
-      x: panel.x + panel.width - 42,
+      x: selectorNextX,
       y: roadSelectTop + 2,
       width: 30,
       height: 24,
     },
     roadValue: {
-      x: panel.x + 52,
+      x: selectorValueX,
       y: roadSelectTop,
-      width: panel.width - 104,
+      width: selectorValueWidth,
       height: 28,
+      id: "roadModeSegment",
+    },
+    checkpointPrev: {
+      x: panel.x + 14,
+      y: checkpointSelectTop + 2,
+      width: 30,
+      height: 24,
+    },
+    checkpointNext: {
+      x: selectorNextX,
+      y: checkpointSelectTop + 2,
+      width: 30,
+      height: 24,
+    },
+    checkpointValue: {
+      x: selectorValueX,
+      y: checkpointSelectTop,
+      width: selectorValueWidth,
+      height: 28,
+      id: "roadModeCheckpoint",
     },
     roadDeleteButton: {
-      x: panel.x + 12,
-      y: roadActionY,
+      x: selectorDeleteX,
+      y: roadSelectTop + 2,
       width: iconButtonWidth,
       height: 24,
       id: "roadDelete",
@@ -413,6 +487,13 @@ export function getEditorToolbarLayout() {
       width: 28,
       height: 24,
       id: "roadSizeUp",
+    },
+    checkpointDeleteButton: {
+      x: selectorDeleteX,
+      y: checkpointSelectTop + 2,
+      width: iconButtonWidth,
+      height: 24,
+      id: "checkpointDelete",
     },
     roadSmoothLabel: {
       x: panel.x + 14,
@@ -470,8 +551,18 @@ function editorToolbarActionAt(x, y) {
     return { type: "action", id: "roadPrev" };
   if (pointInRect(x, y, layout.roadNext))
     return { type: "action", id: "roadNext" };
+  if (pointInRect(x, y, layout.roadValue))
+    return { type: "action", id: layout.roadValue.id };
+  if (pointInRect(x, y, layout.checkpointPrev))
+    return { type: "action", id: "checkpointPrev" };
+  if (pointInRect(x, y, layout.checkpointNext))
+    return { type: "action", id: "checkpointNext" };
+  if (pointInRect(x, y, layout.checkpointValue))
+    return { type: "action", id: layout.checkpointValue.id };
   if (pointInRect(x, y, layout.roadDeleteButton))
     return { type: "action", id: layout.roadDeleteButton.id };
+  if (pointInRect(x, y, layout.checkpointDeleteButton))
+    return { type: "action", id: layout.checkpointDeleteButton.id };
   if (pointInRect(x, y, layout.roadSizeDown))
     return { type: "action", id: layout.roadSizeDown.id };
   if (pointInRect(x, y, layout.roadSizeUp))
@@ -532,8 +623,18 @@ function editorToolbarActionLabel(actionId) {
       return "Previous Segment";
     case "roadNext":
       return "Next Segment";
+    case "roadModeSegment":
+      return "Road Mode";
+    case "roadModeCheckpoint":
+      return "Checkpoint Mode";
+    case "checkpointPrev":
+      return "Previous Checkpoint";
+    case "checkpointNext":
+      return "Next Checkpoint";
     case "roadDelete":
       return "Delete Segment";
+    case "checkpointDelete":
+      return "Delete Checkpoint";
     case "roadSizeDown":
       return "Width -";
     case "roadSizeUp":
@@ -1084,6 +1185,59 @@ function placeEditorObject(type) {
   }
 }
 
+function placeEditorCheckpoint() {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const x = state.editor.cursorX;
+  const y = state.editor.cursorY;
+  const surface = surfaceAt(x, y);
+  if (surface !== "asphalt" && surface !== "curb") return;
+  const progress = normalizeCheckpointProgress(
+    trackProgressAtPoint(x, y, track),
+  );
+  if (checkpointNearStart(progress, preset.track)) {
+    showSnackbar("Checkpoint too close to start line", {
+      seconds: 1.4,
+      kind: "error",
+    });
+    return;
+  }
+  if (!preset.checkpoints) preset.checkpoints = [];
+  if (!preset.editStack) preset.editStack = [];
+
+  const existingIndex = findCheckpointIndexNearProgress(
+    preset.checkpoints,
+    progress,
+  );
+  if (existingIndex >= 0) {
+    state.editor.latestEditTarget = {
+      kind: "checkpoint",
+      checkpointIndex: existingIndex,
+    };
+    triggerEditorSelectionFlash("checkpoint", existingIndex);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+
+  const insertIndex = findCheckpointInsertIndex(
+    preset.checkpoints,
+    progress,
+    preset.track,
+  );
+  preset.checkpoints.splice(insertIndex, 0, { progress });
+  shiftEditorStackForInsert(preset, "checkpoint", insertIndex);
+  preset.editStack.push({
+    kind: "checkpoint",
+    checkpointIndex: insertIndex,
+  });
+  state.editor.latestEditTarget = {
+    kind: "checkpoint",
+    checkpointIndex: insertIndex,
+  };
+  triggerEditorSelectionFlash("checkpoint", insertIndex);
+  applyTrackPreset(state.editor.trackIndex);
+}
+
 function cycleSelectionIndex(count, currentIndex, direction) {
   if (!count) return null;
   if (
@@ -1160,9 +1314,31 @@ function roadSelectionTarget(preset) {
   return null;
 }
 
+function checkpointSelectionTarget(preset) {
+  const target = state.editor.latestEditTarget;
+  if (
+    target?.kind === "checkpoint" &&
+    preset.checkpoints?.[target.checkpointIndex]
+  ) {
+    return target;
+  }
+  if (preset.checkpoints?.length) {
+    return {
+      kind: "checkpoint",
+      checkpointIndex: preset.checkpoints.length - 1,
+    };
+  }
+  return null;
+}
+
 function reindexEditorStack(preset, kind, removedIndex) {
   if (!Array.isArray(preset.editStack)) return;
-  const key = kind === "object" ? "objectIndex" : "strokeIndex";
+  const key =
+    kind === "object"
+      ? "objectIndex"
+      : kind === "stroke"
+        ? "strokeIndex"
+        : "checkpointIndex";
   preset.editStack = preset.editStack.flatMap((entry) => {
     if (entry.kind !== kind) return [entry];
     if (entry[key] === removedIndex) return [];
@@ -1173,7 +1349,12 @@ function reindexEditorStack(preset, kind, removedIndex) {
 
 function shiftEditorStackForInsert(preset, kind, insertedIndex) {
   if (!Array.isArray(preset.editStack)) return;
-  const key = kind === "object" ? "objectIndex" : "strokeIndex";
+  const key =
+    kind === "object"
+      ? "objectIndex"
+      : kind === "stroke"
+        ? "strokeIndex"
+        : "checkpointIndex";
   preset.editStack = preset.editStack.map((entry) => {
     if (entry.kind !== kind) return entry;
     if (entry[key] >= insertedIndex) return { ...entry, [key]: entry[key] + 1 };
@@ -1187,7 +1368,9 @@ function deleteSelectedEditorTarget(kind) {
   const target =
     kind === "object"
       ? objectSelectionTarget(preset)
-      : roadSelectionTarget(preset);
+      : kind === "checkpoint"
+        ? checkpointSelectionTarget(preset)
+        : roadSelectionTarget(preset);
   if (!target) return;
   if (target.kind === "object") {
     if (!preset.worldObjects?.[target.objectIndex]) return;
@@ -1199,6 +1382,31 @@ function deleteSelectedEditorTarget(kind) {
         objectIndex: Math.min(
           target.objectIndex,
           preset.worldObjects.length - 1,
+        ),
+      };
+    } else {
+      syncLatestEditorTarget(preset);
+    }
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+  if (target.kind === "checkpoint") {
+    if (!preset.checkpoints?.[target.checkpointIndex]) return;
+    if (preset.checkpoints.length <= 1) {
+      showSnackbar("At least 1 checkpoint is required", {
+        seconds: 1.4,
+        kind: "error",
+      });
+      return;
+    }
+    preset.checkpoints.splice(target.checkpointIndex, 1);
+    reindexEditorStack(preset, "checkpoint", target.checkpointIndex);
+    if (preset.checkpoints.length) {
+      state.editor.latestEditTarget = {
+        kind: "checkpoint",
+        checkpointIndex: Math.min(
+          target.checkpointIndex,
+          preset.checkpoints.length - 1,
         ),
       };
     } else {
@@ -1270,6 +1478,27 @@ function adjustSelectedRoadWidth(direction) {
   rebuildEditorTrackGeometry();
 }
 
+function selectEditorCheckpoint(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const count = preset.checkpoints?.length || 0;
+  if (!count) {
+    if (state.editor.latestEditTarget?.kind === "checkpoint")
+      state.editor.latestEditTarget = null;
+    return;
+  }
+  const currentIndex =
+    state.editor.latestEditTarget?.kind === "checkpoint"
+      ? state.editor.latestEditTarget.checkpointIndex
+      : null;
+  const nextIndex = cycleSelectionIndex(count, currentIndex, direction);
+  state.editor.latestEditTarget = {
+    kind: "checkpoint",
+    checkpointIndex: nextIndex,
+  };
+  triggerEditorSelectionFlash("checkpoint", nextIndex);
+}
+
 function rotateSelectedEditorObject(direction) {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
@@ -1332,9 +1561,14 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "toggleCurbs")
     state.editor.showCurbs = !state.editor.showCurbs;
   if (actionId === "back") returnToTrackSelect();
+  if (actionId === "roadModeSegment") setEditorRoadMode("segment");
+  if (actionId === "roadModeCheckpoint") setEditorRoadMode("checkpoint");
   if (actionId === "roadPrev") selectEditorRoad(-1);
   if (actionId === "roadNext") selectEditorRoad(1);
   if (actionId === "roadDelete") deleteSelectedEditorTarget("stroke");
+  if (actionId === "checkpointPrev") selectEditorCheckpoint(-1);
+  if (actionId === "checkpointNext") selectEditorCheckpoint(1);
+  if (actionId === "checkpointDelete") deleteSelectedEditorTarget("checkpoint");
   if (actionId === "roadSizeDown") adjustSelectedRoadWidth(-1);
   if (actionId === "roadSizeUp") adjustSelectedRoadWidth(1);
   if (actionId === "roadSmoothPrev") adjustEditorSmoothing(-1);
@@ -1502,6 +1736,7 @@ export function enterEditor(trackIndex) {
   syncMenuMusicForMode(state.mode);
   state.editor.trackIndex = trackIndex;
   state.editor.activeTool = "road";
+  state.editor.roadMode = "segment";
   state.editor.drawing = false;
   state.editor.activeStroke = [];
   state.editor.toolbar.dragging = false;
@@ -2054,6 +2289,8 @@ function onKeyDown(e) {
     if (e.repeat) return;
     if (state.editor.latestEditTarget?.kind === "stroke")
       deleteSelectedEditorTarget("stroke");
+    else if (state.editor.latestEditTarget?.kind === "checkpoint")
+      deleteSelectedEditorTarget("checkpoint");
     else deleteSelectedEditorTarget("object");
     return;
   }
@@ -2528,6 +2765,10 @@ export function initInputHandlers() {
     }
     if (state.editor.activeTool !== "road") {
       placeEditorObject(state.editor.activeTool);
+      return;
+    }
+    if (state.editor.roadMode === "checkpoint") {
+      placeEditorCheckpoint();
       return;
     }
     const preset = getTrackPreset(state.editor.trackIndex);

@@ -29,6 +29,7 @@ import {
 import { gameAudio } from "./game-audio.js";
 import { clamp, moveTowards } from "./utils.js";
 import {
+  checkpointFrame,
   findSpringTrigger,
   findNearestTrackNavNode,
   getTrackNavigationGraph,
@@ -36,7 +37,6 @@ import {
   resolveObjectCollisions,
   surfaceAt,
   trackProgressAtPoint,
-  trackFrameAtAngle,
   trackStartAngle,
 } from "./track.js";
 
@@ -136,24 +136,8 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - cx, py - cy);
 }
 
-function angularDistance(a, b) {
-  let d = Math.abs(a - b);
-  while (d > Math.PI * 2) d -= Math.PI * 2;
-  return Math.min(d, Math.PI * 2 - d);
-}
-
 function getStartCheckpointIndex() {
-  const startAngle = trackStartAngle(track);
-  let bestIdx = 0;
-  let bestDiff = Infinity;
-  checkpoints.forEach((cp, idx) => {
-    const diff = angularDistance(cp.angle, startAngle);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = idx;
-    }
-  });
-  return bestIdx;
+  return checkpoints.length ? 0 : -1;
 }
 
 function getStartProgressReference() {
@@ -1586,7 +1570,7 @@ function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
   const startCheckpointIndex = getStartCheckpointIndex();
   const targetIndex = targetLapData.nextCheckpointIndex % checkpoints.length;
   const cp = checkpoints[targetIndex];
-  const frame = trackFrameAtAngle(cp.angle, track);
+  const frame = checkpointFrame(cp, track);
   const checkpointSpan = frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER;
   const halfSpan = checkpointSpan * 0.5;
   const ax = frame.point.x - frame.normal.x * halfSpan;

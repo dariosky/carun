@@ -25,6 +25,10 @@ function normalizeAngle(angle) {
   return a;
 }
 
+function normalizeProgress(progress) {
+  return ((progress % 1) + 1) % 1;
+}
+
 function getCenterlineLoop(trackDef = track) {
   if (
     !Array.isArray(trackDef.centerlineLoop) ||
@@ -380,7 +384,7 @@ export function trackProgressAtPoint(x, y, trackDef = track) {
   return nearestDistanceAndProgressToLoop(x, y, loop).progress;
 }
 
-export function trackFrameAtAngle(angle, trackDef = track) {
+export function trackFrameAtProgress(progress, trackDef = track) {
   const loop = getCenterlineLoop(trackDef);
   if (!loop) {
     const roadWidth = Math.max(24, trackDef.centerlineHalfWidth || 60) * 2;
@@ -391,12 +395,33 @@ export function trackFrameAtAngle(angle, trackDef = track) {
       roadWidth,
     };
   }
-  const progress = normalizeAngle(angle) / (Math.PI * 2);
-  const point = pointOnLoopProgress(loop, progress);
-  const tangent = tangentOnLoopProgress(loop, progress);
+  const wrapped = normalizeProgress(progress);
+  const point = pointOnLoopProgress(loop, wrapped);
+  const tangent = tangentOnLoopProgress(loop, wrapped);
   const normal = { x: -tangent.y, y: tangent.x };
-  const roadWidth = sampleCenterlineHalfWidth(progress, trackDef) * 2;
-  return { point, tangent, normal, roadWidth };
+  const roadWidth = sampleCenterlineHalfWidth(wrapped, trackDef) * 2;
+  return { point, tangent, normal, roadWidth, progress: wrapped };
+}
+
+export function trackFrameAtAngle(angle, trackDef = track) {
+  return trackFrameAtProgress(normalizeAngle(angle) / (Math.PI * 2), trackDef);
+}
+
+export function checkpointProgress(checkpoint, trackDef = track) {
+  if (Number.isFinite(checkpoint?.progress)) {
+    return normalizeProgress(checkpoint.progress);
+  }
+  if (Number.isFinite(checkpoint?.angle)) {
+    return normalizeAngle(checkpoint.angle) / (Math.PI * 2);
+  }
+  return normalizeAngle(trackStartAngle(trackDef)) / (Math.PI * 2);
+}
+
+export function checkpointFrame(checkpoint, trackDef = track) {
+  return trackFrameAtProgress(
+    checkpointProgress(checkpoint, trackDef),
+    trackDef,
+  );
 }
 
 export function sampleCenterlineHalfWidth(progress, trackDef = track) {
@@ -502,7 +527,7 @@ function trackNavSignature(trackDef = track, objects = worldObjects) {
     ? trackDef.centerlineWidthProfile
     : [];
   const checkpointSig = checkpoints
-    .map((checkpoint) => Number(checkpoint?.angle || 0).toFixed(4))
+    .map((checkpoint) => checkpointProgress(checkpoint, trackDef).toFixed(4))
     .join(",");
   const objectSig = (objects || [])
     .map((obj) => {
@@ -674,7 +699,7 @@ function obstaclePenaltyAlongSegment(ax, ay, bx, by, objects = worldObjects) {
 function buildCheckpointGoalNodeIds(nodes, trackDef = track) {
   const aiCfg = physicsConfig.ai;
   return checkpoints.map((checkpoint) => {
-    const frame = trackFrameAtAngle(checkpoint.angle, trackDef);
+    const frame = checkpointFrame(checkpoint, trackDef);
     const halfSpan =
       frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER * 0.5 +
       aiCfg.checkpointGoalLateralMargin;
@@ -1098,9 +1123,9 @@ export function getTrackNavigationGraph(
   }
 
   const checkpointNodeIds = checkpoints.map((checkpoint) => {
-    const checkpointProgress = normalizeAngle(checkpoint.angle) / (Math.PI * 2);
+    const checkpointProgressValue = checkpointProgress(checkpoint, trackDef);
     const centerSlice =
-      Math.round(checkpointProgress * progressCount) % progressCount;
+      Math.round(checkpointProgressValue * progressCount) % progressCount;
     const nodeIds = [];
     for (let offset = -1; offset <= 1; offset++) {
       const sliceIndex = (centerSlice + offset + progressCount) % progressCount;

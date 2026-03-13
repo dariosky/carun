@@ -282,6 +282,92 @@ function cloneTrackData(trackData) {
   };
 }
 
+function normalizeCheckpointProgress(progress) {
+  const value = Number(progress);
+  if (!Number.isFinite(value)) return 0;
+  return ((value % 1) + 1) % 1;
+}
+
+function checkpointProgressFromAngle(angle) {
+  const turns = Number(angle) / (Math.PI * 2);
+  return normalizeCheckpointProgress(turns);
+}
+
+function checkpointDeltaFromStart(progress, startProgress) {
+  return normalizeCheckpointProgress(progress - startProgress);
+}
+
+function normalizeCheckpointEntry(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (Number.isFinite(raw.progress)) {
+    return { progress: normalizeCheckpointProgress(raw.progress) };
+  }
+  if (Number.isFinite(raw.angle)) {
+    return { progress: checkpointProgressFromAngle(raw.angle) };
+  }
+  return null;
+}
+
+function dedupeCheckpointEntries(entries, tolerance = 0.0035) {
+  const out = [];
+  for (const entry of entries) {
+    const duplicate = out.some(
+      (existing) =>
+        Math.abs(checkpointDeltaFromStart(entry.progress, existing.progress)) <
+          tolerance ||
+        Math.abs(checkpointDeltaFromStart(existing.progress, entry.progress)) <
+          tolerance,
+    );
+    if (!duplicate) out.push(entry);
+  }
+  return out;
+}
+
+function normalizeCheckpointList(rawCheckpoints, trackData = {}) {
+  if (!Array.isArray(rawCheckpoints) || !rawCheckpoints.length) return [];
+  const startProgress = checkpointProgressFromAngle(trackData.startAngle || 0);
+  const hasCanonicalProgress = rawCheckpoints.some((cp) =>
+    Number.isFinite(cp?.progress),
+  );
+  let entries = rawCheckpoints.map(normalizeCheckpointEntry).filter(Boolean);
+  if (!entries.length) return [];
+
+  if (!hasCanonicalProgress) {
+    let closestIndex = 0;
+    let closestDelta = Infinity;
+    for (let i = 0; i < entries.length; i++) {
+      const delta = Math.min(
+        checkpointDeltaFromStart(entries[i].progress, startProgress),
+        checkpointDeltaFromStart(startProgress, entries[i].progress),
+      );
+      if (delta < closestDelta) {
+        closestDelta = delta;
+        closestIndex = i;
+      }
+    }
+    entries = entries.filter((_, index) => index !== closestIndex);
+  }
+
+  entries = dedupeCheckpointEntries(entries);
+  entries.sort(
+    (a, b) =>
+      checkpointDeltaFromStart(a.progress, startProgress) -
+      checkpointDeltaFromStart(b.progress, startProgress),
+  );
+  return entries.map((entry) => ({ progress: entry.progress }));
+}
+
+function buildRuntimeCheckpointList(trackData = {}, rawCheckpoints = []) {
+  const startProgress = checkpointProgressFromAngle(trackData.startAngle || 0);
+  const intermediates = normalizeCheckpointList(rawCheckpoints, trackData).map(
+    (checkpoint) => ({
+      progress: checkpoint.progress,
+      isStart: false,
+    }),
+  );
+  return [{ progress: startProgress, isStart: true }, ...intermediates];
+}
+
 export function normalizeCenterlineSmoothingMode(raw) {
   return CENTERLINE_SMOOTHING_MODES.includes(raw)
     ? raw
@@ -289,6 +375,7 @@ export function normalizeCenterlineSmoothingMode(raw) {
 }
 
 function clonePresetData(preset) {
+  const trackData = cloneTrackData(preset.track);
   return {
     id: preset.id,
     name: preset.name,
@@ -314,8 +401,8 @@ function clonePresetData(preset) {
       typeof preset.shareToken === "string" ? preset.shareToken : null,
     canDelete: Boolean(preset.canDelete),
     fromDb: Boolean(preset.fromDb),
-    track: cloneTrackData(preset.track),
-    checkpoints: (preset.checkpoints || []).map((cp) => ({ ...cp })),
+    track: trackData,
+    checkpoints: normalizeCheckpointList(preset.checkpoints || [], trackData),
     worldObjects: (preset.worldObjects || []).map(cloneWorldObject),
     centerlineStrokes: (preset.centerlineStrokes || []).map((stroke) =>
       stroke.map((p) =>
@@ -422,9 +509,7 @@ function normalizeTrackPresetData(raw) {
     canDelete: Boolean(raw.canDelete ?? raw.can_delete ?? false),
     fromDb: Boolean(raw.fromDb ?? raw.from_db ?? false),
     track: safeTrack,
-    checkpoints: Array.isArray(raw.checkpoints)
-      ? raw.checkpoints.map((cp) => ({ angle: Number(cp.angle) || 0 }))
-      : [],
+    checkpoints: normalizeCheckpointList(raw.checkpoints, safeTrack),
     worldObjects: Array.isArray(raw.worldObjects)
       ? raw.worldObjects.map(cloneWorldObject)
       : [],
@@ -441,6 +526,15 @@ function normalizeTrackPresetData(raw) {
       ? raw.editStack.map((e) => ({ ...e }))
       : [],
   };
+}
+
+function normalizeAllTrackPresetCheckpoints() {
+  for (const preset of TRACK_PRESETS) {
+    preset.checkpoints = normalizeCheckpointList(
+      preset.checkpoints,
+      preset.track,
+    );
+  }
 }
 
 function readTrackEditsStorage() {
@@ -470,7 +564,10 @@ function applyPersistedTrackEdits() {
     if (saved.track && typeof saved.track === "object")
       preset.track = cloneTrackData(saved.track);
     if (Array.isArray(saved.checkpoints))
-      preset.checkpoints = saved.checkpoints.map((cp) => ({ ...cp }));
+      preset.checkpoints = normalizeCheckpointList(
+        saved.checkpoints,
+        preset.track,
+      );
     if (Array.isArray(saved.worldObjects))
       preset.worldObjects = saved.worldObjects.map(cloneWorldObject);
     if (Array.isArray(saved.centerlineStrokes)) {
@@ -491,7 +588,9 @@ function applyPersistedTrackEdits() {
   }
 }
 
+normalizeAllTrackPresetCheckpoints();
 applyPersistedTrackEdits();
+normalizeAllTrackPresetCheckpoints();
 
 const activePreset = TRACK_PRESETS[0];
 
@@ -563,7 +662,10 @@ export const track = {
     : null,
 };
 
-export const checkpoints = activePreset.checkpoints.map((cp) => ({ ...cp }));
+export const checkpoints = buildRuntimeCheckpointList(
+  activePreset.track,
+  activePreset.checkpoints,
+);
 
 export const CHECKPOINT_WIDTH_MULTIPLIER = 2;
 
@@ -673,7 +775,9 @@ export function applyTrackPreset(index) {
   });
 
   checkpoints.length = 0;
-  checkpoints.push(...preset.checkpoints.map((cp) => ({ ...cp })));
+  checkpoints.push(
+    ...buildRuntimeCheckpointList(preset.track, preset.checkpoints),
+  );
 
   worldObjects.length = 0;
   worldObjects.push(...preset.worldObjects.map(cloneWorldObject));

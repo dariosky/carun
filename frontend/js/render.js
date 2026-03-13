@@ -47,6 +47,7 @@ import {
 import { getRacePosition, getRaceStandings } from "./physics.js";
 import { formatTime } from "./utils.js";
 import {
+  checkpointFrame,
   blobRadius,
   drawPath,
   drawStripedCurb,
@@ -587,8 +588,8 @@ function drawVertexAsterisks(
 function drawCheckpointFlags() {
   const CHECKPOINT_PIN_WIDTH_MULTIPLIER = 1.2;
   for (const cp of checkpoints) {
-    const a = cp.angle;
-    const frame = trackFrameAtAngle(a, track);
+    if (cp.isStart) continue;
+    const frame = checkpointFrame(cp, track);
     const center = frame.point;
     const normal = frame.normal;
     const tangent = frame.tangent;
@@ -1706,12 +1707,25 @@ function selectedObjectLabel(preset) {
 
 function selectedRoadLabel(preset) {
   const strokes = preset.centerlineStrokes || [];
-  if (!strokes.length) return "--";
+  if (!strokes.length) return "Road --";
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "stroke" || !strokes[target.strokeIndex]) {
-    return `${strokes.length}/${strokes.length}`;
+    return `Road ${strokes.length}/${strokes.length}`;
   }
-  return `${target.strokeIndex + 1}/${strokes.length}`;
+  return `Road ${target.strokeIndex + 1}/${strokes.length}`;
+}
+
+function selectedCheckpointLabel(preset) {
+  const checkpointsList = preset.checkpoints || [];
+  if (!checkpointsList.length) return "CheckPoint --";
+  const target = state.editor.latestEditTarget;
+  if (
+    target?.kind !== "checkpoint" ||
+    !checkpointsList[target.checkpointIndex]
+  ) {
+    return `CheckPoint ${checkpointsList.length}/${checkpointsList.length}`;
+  }
+  return `CheckPoint ${target.checkpointIndex + 1}/${checkpointsList.length}`;
 }
 
 function selectedRoadWidthLabel(preset) {
@@ -1745,6 +1759,7 @@ function drawEditorToolbar() {
   const objectValue = selectedObjectValueLabel(preset);
   const objectLabel = selectedObjectLabel(preset);
   const roadLabel = selectedRoadLabel(preset);
+  const checkpointLabel = selectedCheckpointLabel(preset);
   const roadWidth = selectedRoadWidthLabel(preset);
   const smoothingText = centerlineSmoothingLabel(
     preset.track.centerlineSmoothingMode,
@@ -1752,7 +1767,9 @@ function drawEditorToolbar() {
   const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
   const activeToolLabel =
     state.editor.activeTool === "road"
-      ? "ROAD"
+      ? state.editor.roadMode === "checkpoint"
+        ? "CHECKPOINT"
+        : "ROAD"
       : state.editor.activeTool === "pond"
         ? "WATER"
         : state.editor.activeTool.toUpperCase();
@@ -1863,13 +1880,31 @@ function drawEditorToolbar() {
   ctx.fillText("ROAD", layout.roadHeader.x, layout.roadHeader.y + 15);
 
   drawToolbarButton(layout.roadPrev, "‹");
+  drawToolbarButton(layout.roadValue, "", {
+    active: state.editor.roadMode !== "checkpoint",
+  });
   drawToolbarButton(layout.roadNext, "›");
   ctx.fillStyle = "#d7ebf7";
+  ctx.font = "bold 11px Verdana";
   ctx.textAlign = "center";
   ctx.fillText(
     roadLabel,
     layout.roadValue.x + layout.roadValue.width * 0.5,
     layout.roadValue.y + 18,
+  );
+
+  drawToolbarButton(layout.checkpointPrev, "‹");
+  drawToolbarButton(layout.checkpointValue, "", {
+    active: state.editor.roadMode === "checkpoint",
+  });
+  drawToolbarButton(layout.checkpointNext, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.font = "bold 11px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    checkpointLabel,
+    layout.checkpointValue.x + layout.checkpointValue.width * 0.5,
+    layout.checkpointValue.y + 18,
   );
 
   drawToolbarButton(layout.roadDeleteButton, "", { active: false });
@@ -1890,6 +1925,16 @@ function drawEditorToolbar() {
     layout.roadSizeValue.y + 17,
   );
   drawToolbarButton(layout.roadSizeUp, "+");
+
+  drawToolbarButton(layout.checkpointDeleteButton, "", { active: false });
+  ctx.fillStyle = "#dff7ff";
+  ctx.font = "bold 18px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    "🗑",
+    layout.checkpointDeleteButton.x + layout.checkpointDeleteButton.width * 0.5,
+    layout.checkpointDeleteButton.y + 19,
+  );
 
   ctx.fillStyle = "#f0f8ff";
   ctx.textAlign = "left";
@@ -2656,6 +2701,7 @@ function drawStroke(stroke, color, lineWidth) {
 function drawEditorOverlay() {
   const preset = getTrackPreset(state.editor.trackIndex);
   const strokes = preset.centerlineStrokes || [];
+  const checkpointsList = preset.checkpoints || [];
   const connectedLoop = getConnectedCenterlinePoints(strokes);
   const smoothedLoop = Array.isArray(preset.track?.centerlineLoop)
     ? preset.track.centerlineLoop
@@ -2672,6 +2718,10 @@ function drawEditorOverlay() {
   const selectedStrokeIndex =
     state.editor.latestEditTarget?.kind === "stroke"
       ? state.editor.latestEditTarget.strokeIndex
+      : -1;
+  const selectedCheckpointIndex =
+    state.editor.latestEditTarget?.kind === "checkpoint"
+      ? state.editor.latestEditTarget.checkpointIndex
       : -1;
   for (const [index, stroke] of strokes.entries()) {
     const baseColor =
@@ -2690,12 +2740,47 @@ function drawEditorOverlay() {
       4,
     );
   }
+  for (const [index, checkpoint] of checkpointsList.entries()) {
+    const frame = checkpointFrame(checkpoint, preset.track);
+    const halfSpan = frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER * 0.5;
+    const ax = frame.point.x - frame.normal.x * halfSpan;
+    const ay = frame.point.y - frame.normal.y * halfSpan;
+    const bx = frame.point.x + frame.normal.x * halfSpan;
+    const by = frame.point.y + frame.normal.y * halfSpan;
+    const shouldFlash =
+      selectedCheckpointIndex === index &&
+      flash.kind === "checkpoint" &&
+      flash.index === index &&
+      flash.time > 0 &&
+      Math.floor(flash.time / 0.08) % 2 === 0;
+    const selected = selectedCheckpointIndex === index;
+    ctx.save();
+    ctx.strokeStyle = shouldFlash
+      ? "rgba(255, 225, 103, 0.98)"
+      : selected
+        ? "rgba(255, 240, 140, 0.98)"
+        : "rgba(143, 223, 255, 0.92)";
+    ctx.lineWidth = selected ? 5 : 3;
+    ctx.setLineDash(selected ? [] : [9, 6]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.fillStyle = selected ? "#fff0a8" : "#d7ebf7";
+    ctx.font = "bold 12px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText(`${index + 1}`, frame.point.x, frame.point.y - 8);
+    ctx.restore();
+  }
   drawStroke(state.editor.activeStroke, "rgba(255, 255, 255, 0.95)", 3);
 
   const cx = state.editor.cursorX;
   const cy = state.editor.cursorY;
   ctx.save();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.strokeStyle =
+    state.editor.roadMode === "checkpoint"
+      ? "rgba(255, 225, 103, 0.96)"
+      : "rgba(255, 255, 255, 0.92)";
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
