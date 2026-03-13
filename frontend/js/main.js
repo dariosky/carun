@@ -22,6 +22,10 @@ import { fetchAuthMe } from "./api.js";
 import { initAudio, syncMenuMusicForMode } from "./audio.js";
 import { gameAudio } from "./game-audio.js";
 import { updateParticles, updateScreenParticles } from "./particles.js";
+import {
+  loadTournamentRoomFromPath,
+  tickTournamentRoom,
+} from "./tournament-room.js";
 
 function decodePathSegment(value) {
   if (typeof value !== "string" || !value) return "";
@@ -105,9 +109,16 @@ const trackEditMatch = currentUrl.pathname.match(
 );
 const editTrackIdFromPath = decodePathSegment(trackEditMatch?.[1] || "");
 const raceTrackMatch = currentUrl.pathname.match(/^\/tracks\/([^/]+)\/?$/);
+const tournamentRoomMatch = currentUrl.pathname.match(
+  /^\/tournament\/([^/]+)\/?$/,
+);
 const raceTrackIdFromPath =
   !editTrackIdFromPath && raceTrackMatch?.[1]
     ? decodePathSegment(raceTrackMatch[1])
+    : "";
+const tournamentRoomIdFromPath =
+  !editTrackIdFromPath && !raceTrackIdFromPath && tournamentRoomMatch?.[1]
+    ? decodePathSegment(tournamentRoomMatch[1])
     : "";
 const trackSelectFromPath =
   currentUrl.pathname === "/tracks" || currentUrl.pathname === "/tracks/";
@@ -150,6 +161,15 @@ if (trackOptions.length > 0) {
 }
 if (editTrackIdFromPath) {
   enterEditor(state.selectedTrackIndex);
+} else if (tournamentRoomIdFromPath) {
+  try {
+    await loadTournamentRoomFromPath(tournamentRoomIdFromPath);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Tournament room not found";
+    showSnackbar(message, { seconds: 2.2, kind: "error" });
+    state.mode = "trackSelect";
+  }
 } else if (raceTrackIdFromPath) {
   applyTrackPreset(state.selectedTrackIndex);
   setCurbSegments(initCurbSegments());
@@ -192,6 +212,7 @@ startGameLoop({
       updateParticles(dt);
       updateRace(dt);
     }
+    tickTournamentRoom(dt);
   },
   render,
 });

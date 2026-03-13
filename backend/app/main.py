@@ -6,8 +6,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from .api import auth_router, leaderboard_router, tracks_router
+from .api import auth_router, leaderboard_router, tournaments_router, tracks_router
 from .config import get_settings
+from .tournament_rooms import TournamentRoomStore
 
 settings = get_settings()
 
@@ -28,6 +29,8 @@ class CacheControlledStaticFiles(StaticFiles):
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
+    app.state.tournament_room_store = TournamentRoomStore()
+    app.state.tournament_room_sockets = {}
 
     app.add_middleware(
         SessionMiddleware,
@@ -48,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(tracks_router)
     app.include_router(leaderboard_router)
+    app.include_router(tournaments_router)
 
     @app.get("/api/health")
     def health():
@@ -119,6 +123,10 @@ def create_app() -> FastAPI:
 
         @app.api_route("/tracks/{track_id}", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend_track_race(track_id: str):
+            return index_response()
+
+        @app.api_route("/tournament/{room_id}", methods=["GET", "HEAD"], include_in_schema=False)
+        def frontend_tournament_room(room_id: str):
             return index_response()
 
         @app.api_route("/privacy", methods=["GET", "HEAD"], include_in_schema=False)

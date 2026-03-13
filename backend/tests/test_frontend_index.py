@@ -43,6 +43,15 @@ def test_head_track_race_returns_index_headers(client):
     assert response.headers["content-type"].startswith("text/html")
 
 
+def test_head_tournament_room_returns_index_headers(client):
+    response = client.head("/tournament/test-room")
+
+    assert response.status_code == 200
+    assert response.text == ""
+    assert response.headers["cache-control"] == "no-cache, must-revalidate"
+    assert response.headers["content-type"].startswith("text/html")
+
+
 def test_head_privacy_returns_html_headers(client):
     response = client.head("/privacy")
 

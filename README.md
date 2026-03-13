@@ -85,13 +85,13 @@ Useful flags:
 - `--skip-restart`
 - `--env-file /path/to/.env.prod`
 
-The deploy script uploads `.env.prod` to `${APP_DIR}/.env`, then runs remote `git pull`, `uv sync`, Alembic migrations via `uv run`, restarts service, and checks health URL.
+The deployment script uploads `.env.prod` to `${APP_DIR}/.env`, then runs remote `git pull`, `uv sync`, Alembic migrations via `uv run`, restarts service, and checks health URL.
 
 ## TODO
 
 - ~~Improve the editor so building and tweaking tracks is faster and less clunky.~~
+~~- Add AI players to make solo races feel more alive and competitive.~~
+~~- Add multiplayer support for head-to-head racing.~~
 - Add some 3D elements, especially bridges, while keeping the overall map mostly top-down.
 - Keep refining the physics so the car feels sharper, more readable, and more fun to drive.
-- Add oil, snow, and sand surfaces with distinct grip and handling behavior.≤
-- Add AI players to make solo races feel more alive and competitive.
-- Add multiplayer support for head-to-head racing.
+- Add oil, snow, and sand surfaces with distinct grip and handling behavior.

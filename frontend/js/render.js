@@ -45,6 +45,7 @@ import {
   getTournamentStandingsData,
 } from "./menus.js";
 import { getRacePosition, getRaceStandings } from "./physics.js";
+import { tournamentRoomActive } from "./tournament-room.js";
 import { formatTime } from "./utils.js";
 import {
   checkpointFrame,
@@ -2028,6 +2029,59 @@ function drawFinishOverlay() {
 function drawPauseOverlay() {
   if (!state.paused || state.mode !== "racing") return;
 
+  if (tournamentRoomActive()) {
+    const panelW = 560;
+    const panelH = 286;
+    const x = WIDTH * 0.5 - panelW * 0.5;
+    const y = HEIGHT * 0.5 - panelH * 0.5;
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    ctx.fillStyle = "rgba(8, 14, 24, 0.94)";
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = "#c4a13c";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = "#ffd25e";
+    ctx.font = "bold 52px Verdana";
+    ctx.fillText("PAUSED", x + 178, y + 74);
+
+    ctx.fillStyle = "#f0f4fb";
+    ctx.font = "bold 24px Verdana";
+    const pausedBy =
+      typeof state.tournamentRoom.pausedBy === "string" &&
+      state.tournamentRoom.pausedBy
+        ? `${state.tournamentRoom.pausedBy.toUpperCase()} PAUSED THE RACE`
+        : "RACE PAUSED FOR EVERYONE";
+    const pausedByWidth = ctx.measureText(pausedBy).width;
+    ctx.fillText(pausedBy, x + (panelW - pausedByWidth) * 0.5, y + 122);
+
+    const pauseItems = ["RESUME RACE", "END RACE"];
+    ctx.font = "bold 26px Verdana";
+    for (let i = 0; i < pauseItems.length; i++) {
+      const rowY = y + 164 + i * 46;
+      if (i === state.pauseMenuIndex) {
+        ctx.fillStyle = i === 0 ? "#3d7ec7" : "#ec4f4f";
+        ctx.fillRect(x + 156, rowY - 28, 248, 34);
+        ctx.fillStyle = "#ffffff";
+      } else {
+        ctx.fillStyle = "#b9cde3";
+      }
+      const labelWidth = ctx.measureText(pauseItems[i]).width;
+      ctx.fillText(pauseItems[i], x + (panelW - labelWidth) * 0.5, rowY);
+    }
+
+    ctx.fillStyle = "#f0f4fb";
+    ctx.font = "18px Verdana";
+    const helpText =
+      "W/S OR UP/DOWN: SELECT  ENTER: CONFIRM  P OR ESC: TOGGLE PAUSE";
+    const helpWidth = ctx.measureText(helpText).width;
+    ctx.fillText(helpText, x + (panelW - helpWidth) * 0.5, y + 248);
+    return;
+  }
+
   const panelW = 540;
   const panelH = 310;
   const x = WIDTH * 0.5 - panelW * 0.5;
@@ -2188,6 +2242,103 @@ function drawTournamentStandings() {
   const hint = moreRaces ? "ENTER for next race" : "ENTER for final results";
   const hintWidth = ctx.measureText(hint).width;
   ctx.fillText(hint, WIDTH * 0.5 - hintWidth * 0.5, HEIGHT - 50);
+}
+
+function drawTournamentLobby() {
+  drawBreadcrumbBar();
+  ctx.fillStyle = "#122433";
+  ctx.fillRect(0, BREADCRUMB_BAR_HEIGHT, WIDTH, HEIGHT - BREADCRUMB_BAR_HEIGHT);
+  drawPixelNoise();
+
+  const room = state.tournamentRoom;
+  const titleY = BREADCRUMB_BAR_HEIGHT + 60;
+  ctx.fillStyle = "#ffe167";
+  ctx.font = "bold 46px Verdana";
+  ctx.fillText("TOURNAMENT LOBBY", 54, titleY);
+
+  ctx.fillStyle = "#d7e6f3";
+  ctx.font = "18px Verdana";
+  ctx.fillText(
+    `STATUS ${String(room.status || "idle").toUpperCase()}`,
+    56,
+    titleY + 30,
+  );
+
+  const cardX = 56;
+  const cardY = titleY + 50;
+  const cardW = WIDTH - 112;
+  const rowH = 50;
+  const rowGap = 8;
+  const slots = Array.isArray(room.slots) ? room.slots : [];
+
+  slots.forEach((slot, index) => {
+    const y = cardY + index * (rowH + rowGap);
+    const selected = state.tournamentLobbyIndex === index;
+    ctx.fillStyle = selected
+      ? "rgba(61, 126, 199, 0.42)"
+      : "rgba(10, 18, 28, 0.46)";
+    ctx.fillRect(cardX, y, cardW, rowH);
+    ctx.strokeStyle = selected ? "#ffffff" : "rgba(149, 181, 204, 0.65)";
+    ctx.lineWidth = selected ? 3 : 2;
+    ctx.strokeRect(cardX, y, cardW, rowH);
+
+    const accent =
+      slot.kind === "human"
+        ? slot.is_host
+          ? "#ffe167"
+          : "#7ee2ff"
+        : "#9cc8a3";
+    ctx.fillStyle = accent;
+    ctx.font = "bold 12px Verdana";
+    ctx.fillText(slot.kind === "human" ? "HUMAN" : "AI", cardX + 18, y + 18);
+
+    ctx.fillStyle = "#f4fbff";
+    ctx.font = "bold 20px Verdana";
+    ctx.fillText(slot.display_name || "PLAYER", cardX + 18, y + 39);
+
+    ctx.fillStyle = "#b9ccdc";
+    ctx.font = "15px Verdana";
+    const detail =
+      slot.kind === "human"
+        ? slot.connected === false
+          ? "Disconnected"
+          : slot.is_host
+            ? "Host"
+            : "Joined"
+        : `${String(slot.style || "precise").toUpperCase()}  SPD x${Number(
+            slot.top_speed_mul || 1,
+          ).toFixed(2)}`;
+    const detailWidth = ctx.measureText(detail).width;
+    ctx.fillText(detail, cardX + cardW - detailWidth - 20, y + 32);
+  });
+
+  const buttonY = HEIGHT - 94;
+  const shareSelected = state.tournamentLobbyIndex === slots.length;
+  const startSelected =
+    room.isHost && state.tournamentLobbyIndex === slots.length + 1;
+
+  const shareX = 56;
+  const shareW = 190;
+  ctx.fillStyle = shareSelected ? "#3d7ec7" : "#21394d";
+  ctx.fillRect(shareX, buttonY, shareW, 48);
+  ctx.strokeStyle = shareSelected ? "#ffffff" : "#8aa8bf";
+  ctx.lineWidth = shareSelected ? 3 : 2;
+  ctx.strokeRect(shareX, buttonY, shareW, 48);
+  ctx.fillStyle = "#f4fbff";
+  ctx.font = "bold 22px Verdana";
+  ctx.fillText("SHARE URL", shareX + 22, buttonY + 31);
+
+  if (room.isHost) {
+    const startX = shareX + shareW + 18;
+    const startW = 340;
+    ctx.fillStyle = startSelected ? "#2f7e45" : "#244737";
+    ctx.fillRect(startX, buttonY, startW, 48);
+    ctx.strokeStyle = startSelected ? "#ffffff" : "#9cd3aa";
+    ctx.lineWidth = startSelected ? 3 : 2;
+    ctx.strokeRect(startX, buttonY, startW, 48);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("START TOURNAMENT", startX + 32, buttonY + 31);
+  }
 }
 
 function drawTournamentFinal() {
@@ -3043,6 +3194,7 @@ export function render() {
   else if (state.mode === "trackSelect") drawTrackSelection();
   else if (state.mode === "editor") drawEditor();
   else if (state.mode === "settings") drawSettings();
+  else if (state.mode === "tournamentLobby") drawTournamentLobby();
   else if (state.mode === "tournamentStandings") drawTournamentStandings();
   else if (state.mode === "tournamentFinal") drawTournamentFinal();
   else {

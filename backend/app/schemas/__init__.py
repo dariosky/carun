@@ -7,6 +7,15 @@ from .leaderboard import (
     RaceSubmitRequest,
     RaceSubmitResponse,
 )
+from .tournaments import (
+    TournamentAiSlotPayload,
+    TournamentCreateRequest,
+    TournamentJoinRequest,
+    TournamentRoomResponse,
+    TournamentRoomSlotResponse,
+    TournamentSessionResponse,
+    TournamentTrackPayload,
+)
 from .tracks import (
     TrackCreateRequest,
     TrackDetailResponse,
@@ -33,4 +42,11 @@ __all__ = [
     "TrackResponse",
     "TrackShareResponse",
     "TrackUpdateRequest",
+    "TournamentAiSlotPayload",
+    "TournamentCreateRequest",
+    "TournamentJoinRequest",
+    "TournamentRoomResponse",
+    "TournamentRoomSlotResponse",
+    "TournamentSessionResponse",
+    "TournamentTrackPayload",
 ]

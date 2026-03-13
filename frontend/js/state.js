@@ -28,6 +28,7 @@ export const state = {
   selectedTrackIndex: 0,
   settingsIndex: 0,
   gameModeIndex: 0,
+  tournamentLobbyIndex: 0,
   gameMode: "single",
   tournament: {
     selectedTrackIndices: new Set(),
@@ -35,6 +36,26 @@ export const state = {
     currentRaceIndex: 0,
     scores: {},
     raceResults: [],
+  },
+  tournamentRoom: {
+    active: false,
+    roomId: null,
+    participantId: null,
+    localSlotId: null,
+    isHost: false,
+    phase: "lobby",
+    paused: false,
+    pausedBy: null,
+    status: "idle",
+    tracks: [],
+    slots: [],
+    lastPlayerStateAt: 0,
+    lastAiStateAt: 0,
+    pendingSkidMarks: [],
+    scores: {},
+    raceResults: [],
+    currentRaceIndex: 0,
+    remoteStates: {},
   },
   playerName: loadPlayerName(),
   auth: {
@@ -337,6 +358,17 @@ export function assignAiRoster(profiles = []) {
       style,
       topSpeedMul,
       laneOffset,
+      kind: profiles[index]?.kind === "remoteHuman" ? "remoteHuman" : "ai",
+      participantId:
+        typeof profiles[index]?.participantId === "string"
+          ? profiles[index].participantId
+          : null,
+      slotId:
+        typeof profiles[index]?.slotId === "string"
+          ? profiles[index].slotId
+          : null,
+      connected: profiles[index]?.connected === false ? false : true,
+      externalControl: Boolean(profiles[index]?.externalControl),
     };
   });
   syncAiRosterToCars();

@@ -114,8 +114,21 @@ function getAiProfileByIndex(index) {
       style: "precise",
       topSpeedMul: 1,
       laneOffset: 0,
+      kind: "ai",
+      participantId: null,
+      slotId: null,
+      connected: true,
+      externalControl: false,
     }
   );
+}
+
+function rivalUsesExternalControl(index) {
+  return Boolean(getAiProfileByIndex(index).externalControl);
+}
+
+function rivalIsRemoteHuman(index) {
+  return getAiProfileByIndex(index).kind === "remoteHuman";
 }
 
 function smoothInputValue(current, target, dt) {
@@ -169,6 +182,39 @@ function resetLapProgress(targetLapData, startCheckpointIndex) {
   if ("finished" in targetLapData) targetLapData.finished = false;
   if ("finishTime" in targetLapData) targetLapData.finishTime = 0;
   if ("finalPosition" in targetLapData) targetLapData.finalPosition = 0;
+}
+
+function applyLapSnapshot(targetLapData, payload = {}) {
+  targetLapData.lap = Number.isFinite(payload.lap)
+    ? Math.max(1, Math.round(payload.lap))
+    : targetLapData.lap;
+  targetLapData.maxLaps = Number.isFinite(payload.maxLaps)
+    ? Math.max(1, Math.round(payload.maxLaps))
+    : targetLapData.maxLaps;
+  targetLapData.lapTimes = Array.isArray(payload.lapTimes)
+    ? payload.lapTimes
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+    : targetLapData.lapTimes;
+  targetLapData.passed = Array.isArray(payload.passed)
+    ? new Set(
+        payload.passed
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value >= 0),
+      )
+    : targetLapData.passed;
+  targetLapData.nextCheckpointIndex = Number.isInteger(
+    payload.nextCheckpointIndex,
+  )
+    ? Math.max(0, payload.nextCheckpointIndex)
+    : targetLapData.nextCheckpointIndex;
+  targetLapData.finished = Boolean(payload.finished);
+  targetLapData.finishTime = Number.isFinite(payload.finishTime)
+    ? Number(payload.finishTime)
+    : 0;
+  targetLapData.finalPosition = Number.isInteger(payload.finalPosition)
+    ? Math.max(0, payload.finalPosition)
+    : 0;
 }
 
 function aiOpponentsEnabled() {
@@ -1760,14 +1806,18 @@ function recordSkids(
   const width = isGrass || isWater ? 2.7 : 2.2;
 
   for (let i = 0; i < points.length; i++) {
-    skidMarks.push({
+    const mark = {
       x1: lastPoints[i].x,
       y1: lastPoints[i].y,
       x2: points[i].x,
       y2: points[i].y,
       color,
       width,
-    });
+    };
+    skidMarks.push(mark);
+    if (state.tournamentRoom.active) {
+      state.tournamentRoom.pendingSkidMarks.push({ ...mark });
+    }
   }
 }
 
@@ -1789,14 +1839,18 @@ function emitLandingMarks(surfaceName, impact) {
   const wheelPoints = wheelWorldPoints();
 
   for (const point of wheelPoints) {
-    skidMarks.push({
+    const mark = {
       x1: point.x - forwardX * markLength,
       y1: point.y - forwardY * markLength,
       x2: point.x,
       y2: point.y,
       color,
       width,
-    });
+    };
+    skidMarks.push(mark);
+    if (state.tournamentRoom.active) {
+      state.tournamentRoom.pendingSkidMarks.push({ ...mark });
+    }
   }
 }
 
@@ -2061,7 +2115,9 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.particleEmitters.smokeCooldown = 0;
     aiPhysicsRuntime.particleEmitters.splashCooldown = 0;
     aiPhysicsRuntime.particleEmitters.dustCooldown = 0;
-    primeAiRaceStartPlan();
+    if (!profile.externalControl && profile.kind === "ai") {
+      primeAiRaceStartPlan();
+    }
   });
 }
 
@@ -2134,6 +2190,7 @@ export function resetRace() {
     resetAiOpponentForRace(index, spawnPoint, car.angle, startCheckpointIndex);
   });
   skidMarks.length = 0;
+  state.tournamentRoom.pendingSkidMarks.length = 0;
   resetParticles();
   state.finishCelebration.bestLap = false;
   state.finishCelebration.bestRace = false;
@@ -2170,10 +2227,12 @@ function resolveRaceFieldCollisions() {
     ...aiCars.map((vehicle, index) => ({
       vehicle,
       runtime: aiPhysicsRuntimes[index],
+      externalControl: rivalUsesExternalControl(index),
     })),
   ];
   for (let i = 0; i < field.length - 1; i++) {
     for (let j = i + 1; j < field.length; j++) {
+      if (field[i].externalControl || field[j].externalControl) continue;
       if (!resolveCarToCarCollision(field[i].vehicle, field[j].vehicle)) {
         continue;
       }
@@ -2194,7 +2253,8 @@ function updateAiField(dt) {
     resetRivalAudioState();
     return;
   }
-  forEachAiOpponent(() => {
+  forEachAiOpponent((_, __, ___, index) => {
+    if (rivalUsesExternalControl(index)) return;
     updateAiControl(dt);
     updateAiVehicle(dt);
   });
@@ -2203,12 +2263,93 @@ function updateAiField(dt) {
 
 function updateAiCheckpointProgress() {
   if (!aiOpponentsEnabled()) return;
-  forEachAiOpponent(() => {
+  forEachAiOpponent((_, __, ___, index) => {
+    if (rivalUsesExternalControl(index)) return;
     checkCheckpointProgress(aiCar, aiLapData, {
       blink: false,
       racerKey: aiCar.id,
     });
   });
+}
+
+export function applyExternalRivalState(index, payload = {}) {
+  if (!Number.isInteger(index) || index < 0 || index >= aiCars.length) return;
+  withAiOpponent(index, () => {
+    aiCar.x = Number.isFinite(payload.x) ? Number(payload.x) : aiCar.x;
+    aiCar.y = Number.isFinite(payload.y) ? Number(payload.y) : aiCar.y;
+    aiCar.vx = Number.isFinite(payload.vx) ? Number(payload.vx) : aiCar.vx;
+    aiCar.vy = Number.isFinite(payload.vy) ? Number(payload.vy) : aiCar.vy;
+    aiCar.angle = Number.isFinite(payload.angle)
+      ? Number(payload.angle)
+      : aiCar.angle;
+    aiCar.speed = Number.isFinite(payload.speed)
+      ? Number(payload.speed)
+      : aiCar.speed;
+    aiCar.z = Number.isFinite(payload.z) ? Number(payload.z) : aiCar.z;
+    aiCar.vz = Number.isFinite(payload.vz) ? Number(payload.vz) : aiCar.vz;
+    aiCar.airborne = Boolean(payload.airborne);
+    aiCar.airTime = Number.isFinite(payload.airTime)
+      ? Number(payload.airTime)
+      : 0;
+    aiCar.visualScale = Number.isFinite(payload.visualScale)
+      ? Number(payload.visualScale)
+      : 1;
+    aiPhysicsRuntime.input = {
+      ...aiPhysicsRuntime.input,
+      ...(payload.input && typeof payload.input === "object"
+        ? payload.input
+        : {}),
+    };
+    applyLapSnapshot(aiLapData, payload);
+    if (aiLapData.finished) {
+      const finalPosition = Number.isInteger(payload.finalPosition)
+        ? Math.max(0, payload.finalPosition)
+        : 0;
+      if (finalPosition > 0) {
+        aiLapData.finalPosition = finalPosition;
+        state.raceStandings.finishOrders[aiCar.id] = finalPosition;
+        state.raceStandings.nextFinishOrder = Math.max(
+          state.raceStandings.nextFinishOrder,
+          finalPosition + 1,
+        );
+      }
+    }
+  });
+}
+
+export function getRivalPhysicsSnapshot(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= aiCars.length)
+    return null;
+  return withAiOpponent(index, () => ({
+    x: aiCar.x,
+    y: aiCar.y,
+    vx: aiCar.vx,
+    vy: aiCar.vy,
+    angle: aiCar.angle,
+    speed: aiCar.speed,
+    z: aiCar.z,
+    vz: aiCar.vz,
+    airborne: aiCar.airborne,
+    airTime: aiCar.airTime,
+    visualScale: aiCar.visualScale,
+    lap: aiLapData.lap,
+    maxLaps: aiLapData.maxLaps,
+    lapTimes: [...aiLapData.lapTimes],
+    passed: [...aiLapData.passed],
+    nextCheckpointIndex: aiLapData.nextCheckpointIndex,
+    finished: aiLapData.finished,
+    finishTime: aiLapData.finishTime,
+    finalPosition: aiLapData.finalPosition,
+    input: { ...aiPhysicsRuntime.input },
+  }));
+}
+
+export function getExternalHumanRivalCount() {
+  return state.aiRoster.reduce((count, _entry, index) => {
+    if (!rivalIsRemoteHuman(index) || !rivalUsesExternalControl(index))
+      return count;
+    return aiLapDataList[index].finished ? count : count + 1;
+  }, 0);
 }
 
 export function updateRace(dt) {

@@ -108,6 +108,8 @@ const {
   state,
 } = await import("../js/state.js");
 const {
+  applyExternalRivalState,
+  getExternalHumanRivalCount,
   getRacePosition,
   getRaceStandings,
   planTrackNavPath,
@@ -403,6 +405,55 @@ test("ai roster profiles propagate lane-offset styles into race runtime", () => 
   assert.equal(aiPhysicsRuntimes[0].targetLaneOffset, 22);
   assert.equal(aiPhysicsRuntimes[1].targetLaneOffset, 0);
   assert.equal(aiPhysicsRuntimes[3].targetLaneOffset, -18);
+});
+
+test("external human rivals accept replicated lap state and stay counted until finished", () => {
+  assignAiRoster([
+    {
+      name: "Remote One",
+      style: "precise",
+      topSpeedMul: 1,
+      kind: "remoteHuman",
+      externalControl: true,
+      slotId: "slot-2",
+      participantId: "guest-1",
+    },
+    { name: "AI Two", style: "long", topSpeedMul: 0.9, laneOffset: 18 },
+    { name: "AI Three", style: "bump", topSpeedMul: 0.9 },
+    { name: "AI Four", style: "precise", topSpeedMul: 1 },
+    { name: "AI Five", style: "long", topSpeedMul: 0.88, laneOffset: -18 },
+  ]);
+  enableAiOpponents();
+  resetRace();
+
+  assert.equal(getExternalHumanRivalCount(), 1);
+
+  applyExternalRivalState(0, {
+    x: 480,
+    y: 250,
+    vx: 30,
+    vy: 12,
+    angle: 0.5,
+    speed: 32,
+    lap: 3,
+    maxLaps: 3,
+    lapTimes: [12.3, 11.7],
+    passed: [0, 1, 2],
+    nextCheckpointIndex: 0,
+    finished: true,
+    finishTime: 36.8,
+    finalPosition: 2,
+  });
+
+  assert.equal(aiCars[0].x, 480);
+  assert.equal(aiCars[0].y, 250);
+  assert.equal(aiLapDataList[0].lap, 3);
+  assert.equal(aiLapDataList[0].finished, true);
+  assert.equal(state.raceStandings.finishOrders["ai-1"], 2);
+  assert.equal(getExternalHumanRivalCount(), 0);
+
+  assignRandomAiRoster();
+  resetRace();
 });
 
 test("car-to-car collision separates overlapping racers and exchanges velocity", () => {

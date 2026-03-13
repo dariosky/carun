@@ -50,6 +50,20 @@ import {
   unlockMenuMusic,
 } from "./audio.js";
 import { emitFinishConfetti } from "./particles.js";
+import {
+  allTournamentHumansFinished,
+  canAdvanceHostedTournamentStandings,
+  canStartHostedRoomRace,
+  copyTournamentRoomUrl,
+  createHostedTournamentRoom,
+  leaveTournamentRoom,
+  onTournamentStandingsAdvanced,
+  startHostedRoomRace,
+  syncTournamentRoomSnapshot,
+  tournamentRoomActive,
+  endTournamentRoom,
+  toggleTournamentRoomPause,
+} from "./tournament-room.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const EDITOR_OBJECT_PLACE_TOOLS = [
@@ -764,6 +778,9 @@ export function getBreadcrumbs() {
       ? ["CARUN", "RACE", "TOURNAMENT"]
       : ["CARUN", "RACE", "SINGLE RACE"];
   }
+  if (state.mode === "tournamentLobby") {
+    return ["CARUN", "RACE", "TOURNAMENT", "LOBBY"];
+  }
   if (state.mode === "tournamentStandings") {
     return ["CARUN", "RACE", "TOURNAMENT", "STANDINGS"];
   }
@@ -939,6 +956,30 @@ function clearTrackInUrl(trackId) {
   const expectedPath = `/tracks/${encodeURIComponent(trackId)}`;
   if (currentPath !== expectedPath) return;
   replaceAppUrl({ pathname: "/tracks" });
+}
+
+function tournamentLobbyActionAt(screenX, screenY) {
+  const buttonY = canvas.height - 94;
+  const buttonH = 48;
+  const shareX = 56;
+  const shareW = 190;
+  const inShare =
+    screenX >= shareX &&
+    screenX <= shareX + shareW &&
+    screenY >= buttonY &&
+    screenY <= buttonY + buttonH;
+  if (inShare) return "share";
+  if (state.tournamentRoom.isHost) {
+    const startX = shareX + shareW + 18;
+    const startW = 340;
+    const inStart =
+      screenX >= startX &&
+      screenX <= startX + startW &&
+      screenY >= buttonY &&
+      screenY <= buttonY + buttonH;
+    if (inStart) return "start";
+  }
+  return null;
 }
 
 function openConfirmModal({
@@ -1771,19 +1812,12 @@ function enterTrackSelect() {
 function startTournament() {
   const indices = Array.from(state.tournament.selectedTrackIndices);
   if (indices.length === 0) return;
-  // Shuffle
-  for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [indices[i], indices[j]] = [indices[j], indices[i]];
-  }
-  state.tournament.trackOrder = indices;
-  state.tournament.currentRaceIndex = 0;
-  state.tournament.scores = {};
-  state.tournament.raceResults = [];
-  // Force AI on for tournament
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
-  assignRandomAiRoster();
-  startTournamentRace(0);
+  Promise.resolve(createHostedTournamentRoom()).catch((error) => {
+    const message =
+      error instanceof Error ? error.message : "Tournament room create failed";
+    showSnackbar(message, { seconds: 2.2, kind: "error" });
+  });
 }
 
 function startTournamentRace(raceIndex) {
@@ -1800,6 +1834,7 @@ function startTournamentRace(raceIndex) {
 }
 
 function finishTournamentRace() {
+  if (tournamentRoomActive() && !state.tournamentRoom.isHost) return;
   const standings = getRaceStandings();
   const playerName = state.playerName || "PLAYER";
   const nameMap = { player: playerName };
@@ -1819,15 +1854,26 @@ function finishTournamentRace() {
   syncMenuMusicForMode(state.mode);
   state.paused = false;
   state.pauseMenuIndex = 0;
+  if (tournamentRoomActive()) {
+    syncTournamentRoomSnapshot("standings");
+  }
 }
 
 function advanceFromTournamentStandings() {
+  if (tournamentRoomActive() && !canAdvanceHostedTournamentStandings()) return;
   if (state.tournament.currentRaceIndex < state.tournament.trackOrder.length) {
-    startTournamentRace(state.tournament.currentRaceIndex);
+    if (tournamentRoomActive()) {
+      onTournamentStandingsAdvanced();
+    } else {
+      startTournamentRace(state.tournament.currentRaceIndex);
+    }
   } else {
     state.mode = "tournamentFinal";
     syncMenuMusicForMode(state.mode);
     emitScreenConfettiFromMenus();
+    if (tournamentRoomActive()) {
+      syncTournamentRoomSnapshot("final");
+    }
   }
 }
 
@@ -2029,12 +2075,26 @@ function activateSelection() {
     return;
   }
 
+  if (state.mode === "tournamentLobby") {
+    const shareIndex = state.tournamentRoom.slots.length;
+    const startIndex = state.tournamentRoom.isHost ? shareIndex + 1 : -1;
+    if (state.tournamentLobbyIndex === shareIndex) {
+      void copyTournamentRoomUrl();
+      return;
+    }
+    if (state.tournamentLobbyIndex === startIndex && canStartHostedRoomRace()) {
+      startHostedRoomRace();
+    }
+    return;
+  }
+
   if (state.mode === "tournamentStandings") {
     advanceFromTournamentStandings();
     return;
   }
 
   if (state.mode === "tournamentFinal") {
+    if (tournamentRoomActive()) leaveTournamentRoom({ resetUrl: false });
     state.mode = "menu";
     syncMenuMusicForMode(state.mode);
     state.menuIndex = 0;
@@ -2048,7 +2108,7 @@ function activateSelection() {
       returnFromRace();
     } else if (state.gameMode === "tournament") {
       // Only allow finishing tournament race when all human players have finished
-      if (state.raceStandings.playerFinishOrder > 0) {
+      if (allTournamentHumansFinished()) {
         finishTournamentRace();
       }
     } else {
@@ -2201,7 +2261,7 @@ function onKeyDown(e) {
     if (state.finished && key === "escape") {
       if (state.raceReturn.mode === "editor") returnFromRace();
       else if (state.gameMode === "tournament") {
-        if (state.raceStandings.playerFinishOrder > 0) finishTournamentRace();
+        if (allTournamentHumansFinished()) finishTournamentRace();
       } else returnToTrackSelect();
       clearRaceInputs();
       return;
@@ -2211,6 +2271,14 @@ function onKeyDown(e) {
       if (key === "c") {
         emitFinishConfetti({ bestLap: true, bestRace: true });
       }
+    }
+
+    if (tournamentRoomActive() && (key === "p" || key === "escape")) {
+      if (!e.repeat) {
+        toggleTournamentRoomPause();
+      }
+      clearRaceInputs();
+      return;
     }
 
     if (key === "p" || key === "escape") {
@@ -2225,6 +2293,20 @@ function onKeyDown(e) {
     }
 
     if (state.paused) {
+      if (tournamentRoomActive()) {
+        if (key === "arrowup" || key === "w") {
+          state.pauseMenuIndex = (state.pauseMenuIndex + 2 - 1) % 2;
+        }
+        if (key === "arrowdown" || key === "s") {
+          state.pauseMenuIndex = (state.pauseMenuIndex + 1) % 2;
+        }
+        if (key === "enter") {
+          if (state.pauseMenuIndex === 0) toggleTournamentRoomPause();
+          else endTournamentRoom();
+        }
+        clearRaceInputs();
+        return;
+      }
       if (key === "arrowup" || key === "w") {
         state.pauseMenuIndex = (state.pauseMenuIndex + 2 - 1) % 2;
       }
@@ -2246,6 +2328,12 @@ function onKeyDown(e) {
 
   if (state.mode === "trackSelect" && key === "escape") {
     state.mode = "gameModeSelect";
+    syncMenuMusicForMode(state.mode);
+    return;
+  }
+  if (state.mode === "tournamentLobby" && key === "escape") {
+    leaveTournamentRoom();
+    state.mode = "trackSelect";
     syncMenuMusicForMode(state.mode);
     return;
   }
@@ -2548,6 +2636,16 @@ function onKeyDown(e) {
         }
       }
     }
+    if (state.mode === "tournamentLobby") {
+      const maxIndex =
+        state.tournamentRoom.slots.length +
+        (state.tournamentRoom.isHost ? 1 : 0);
+      state.tournamentLobbyIndex = Math.max(0, state.tournamentLobbyIndex - 1);
+      state.tournamentLobbyIndex = Math.min(
+        state.tournamentLobbyIndex,
+        maxIndex,
+      );
+    }
     keys.up = true;
   }
   if (key === "arrowdown") {
@@ -2588,6 +2686,15 @@ function onKeyDown(e) {
         }
       }
     }
+    if (state.mode === "tournamentLobby") {
+      const maxIndex =
+        state.tournamentRoom.slots.length +
+        (state.tournamentRoom.isHost ? 1 : 0);
+      state.tournamentLobbyIndex = Math.min(
+        maxIndex,
+        state.tournamentLobbyIndex + 1,
+      );
+    }
     keys.down = true;
   }
   if (
@@ -2602,6 +2709,17 @@ function onKeyDown(e) {
       syncTrackSelectWindow();
     }
   }
+  if (key === "arrowleft" && state.mode === "tournamentLobby") {
+    const shareIndex = state.tournamentRoom.slots.length;
+    const startIndex = shareIndex + 1;
+    if (
+      state.tournamentRoom.isHost &&
+      state.tournamentLobbyIndex >= shareIndex
+    ) {
+      state.tournamentLobbyIndex =
+        state.tournamentLobbyIndex === startIndex ? shareIndex : startIndex;
+    }
+  }
   if (
     key === "arrowright" &&
     state.mode === "trackSelect" &&
@@ -2612,6 +2730,17 @@ function onKeyDown(e) {
     if (newIdx < trackOptions.length) {
       state.trackSelectIndex = newIdx;
       syncTrackSelectWindow();
+    }
+  }
+  if (key === "arrowright" && state.mode === "tournamentLobby") {
+    const shareIndex = state.tournamentRoom.slots.length;
+    const startIndex = shareIndex + 1;
+    if (
+      state.tournamentRoom.isHost &&
+      state.tournamentLobbyIndex >= shareIndex
+    ) {
+      state.tournamentLobbyIndex =
+        state.tournamentLobbyIndex === startIndex ? shareIndex : startIndex;
     }
   }
   if (
@@ -2736,6 +2865,22 @@ export function initInputHandlers() {
   });
   window.addEventListener("mousedown", (event) => {
     void unlockMenuMusic();
+    if (state.mode === "tournamentLobby" && event.button === 0) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (event.clientX - rect.left) * scaleX;
+      const y = (event.clientY - rect.top) * scaleY;
+      const action = tournamentLobbyActionAt(x, y);
+      if (action === "share") {
+        void copyTournamentRoomUrl();
+        return;
+      }
+      if (action === "start" && canStartHostedRoomRace()) {
+        startHostedRoomRace();
+        return;
+      }
+    }
     if (state.mode !== "editor" || event.button !== 0) return;
     updateEditorCursorFromEvent(event);
     const toolbarHit = editorToolbarActionAt(
