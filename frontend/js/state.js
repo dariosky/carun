@@ -6,6 +6,7 @@ import {
   AI_OPPONENT_NAME_POOL,
   AI_PRECISE_NAME_POOL,
   loadPlayerName,
+  physicsConfig,
   track,
 } from "./parameters.js";
 import { nextTaglineSet } from "./taglines.js";
@@ -338,17 +339,44 @@ function syncAiRosterToCars() {
   });
 }
 
-export function assignAiRoster(profiles = []) {
-  state.aiRoster = Array.from({ length: AI_OPPONENT_COUNT }, (_, index) => {
-    const name = String(profiles[index]?.name || "").trim();
-    const style = AI_DRIVING_STYLE_POOL.includes(profiles[index]?.style)
-      ? profiles[index].style
+function getConfiguredAiOpponentCount() {
+  const configured = Number(physicsConfig.flags.AI_OPPONENT_COUNT);
+  if (!Number.isFinite(configured)) return 0;
+  return Math.max(0, Math.min(AI_OPPONENT_COUNT, Math.round(configured)));
+}
+
+export function getActiveAiOpponentCount() {
+  return Math.max(0, Math.min(aiCars.length, state.aiRoster.length));
+}
+
+export function getActiveAiCars() {
+  return aiCars.slice(0, getActiveAiOpponentCount());
+}
+
+export function getActiveAiLapDataList() {
+  return aiLapDataList.slice(0, getActiveAiOpponentCount());
+}
+
+export function getActiveAiPhysicsRuntimes() {
+  return aiPhysicsRuntimes.slice(0, getActiveAiOpponentCount());
+}
+
+export function assignAiRoster(profiles = null) {
+  const rosterProfiles = Array.isArray(profiles) ? profiles : [];
+  const rosterSize = Array.isArray(profiles)
+    ? Math.max(0, Math.min(AI_OPPONENT_COUNT, rosterProfiles.length))
+    : getConfiguredAiOpponentCount();
+  state.aiRoster = Array.from({ length: rosterSize }, (_, index) => {
+    const profile = rosterProfiles[index];
+    const name = String(profile?.name || "").trim();
+    const style = AI_DRIVING_STYLE_POOL.includes(profile?.style)
+      ? profile.style
       : "precise";
-    const topSpeedMul = Number.isFinite(profiles[index]?.topSpeedMul)
-      ? Math.max(0.8, Math.min(1, Number(profiles[index].topSpeedMul)))
+    const topSpeedMul = Number.isFinite(profile?.topSpeedMul)
+      ? Math.max(0.8, Math.min(1, Number(profile.topSpeedMul)))
       : 1;
-    const laneOffset = Number.isFinite(profiles[index]?.laneOffset)
-      ? Number(profiles[index].laneOffset)
+    const laneOffset = Number.isFinite(profile?.laneOffset)
+      ? Number(profile.laneOffset)
       : style === "long"
         ? 18
         : 0;
@@ -358,17 +386,14 @@ export function assignAiRoster(profiles = []) {
       style,
       topSpeedMul,
       laneOffset,
-      kind: profiles[index]?.kind === "remoteHuman" ? "remoteHuman" : "ai",
+      kind: profile?.kind === "remoteHuman" ? "remoteHuman" : "ai",
       participantId:
-        typeof profiles[index]?.participantId === "string"
-          ? profiles[index].participantId
+        typeof profile?.participantId === "string"
+          ? profile.participantId
           : null,
-      slotId:
-        typeof profiles[index]?.slotId === "string"
-          ? profiles[index].slotId
-          : null,
-      connected: profiles[index]?.connected === false ? false : true,
-      externalControl: Boolean(profiles[index]?.externalControl),
+      slotId: typeof profile?.slotId === "string" ? profile.slotId : null,
+      connected: profile?.connected === false ? false : true,
+      externalControl: Boolean(profile?.externalControl),
     };
   });
   syncAiRosterToCars();
@@ -376,9 +401,12 @@ export function assignAiRoster(profiles = []) {
 }
 
 export function assignRandomAiRoster() {
+  const targetCount = getConfiguredAiOpponentCount();
+  if (targetCount <= 0) return assignAiRoster([]);
   const usedNames = new Set();
-  const bumpCount = Math.random() < 0.5 ? 2 : 3;
-  const longCount = AI_OPPONENT_COUNT - 1 - bumpCount;
+  const maxBumpCount = Math.max(0, targetCount - 1);
+  const bumpCount = Math.min(maxBumpCount, Math.random() < 0.5 ? 2 : 3);
+  const longCount = Math.max(0, targetCount - 1 - bumpCount);
   const preciseNames = pickUniqueNames(AI_PRECISE_NAME_POOL, 1, usedNames);
   const bumpNames = pickUniqueNames(AI_BUMP_NAME_POOL, bumpCount, usedNames);
   const longNames = pickUniqueNames(AI_LONG_NAME_POOL, longCount, usedNames);

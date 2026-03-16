@@ -19,6 +19,7 @@ const PLAYER_NAME_STORAGE_KEY = "carun.playerName";
 const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
 const AI_OPPONENTS_STORAGE_KEY = "carun.aiOpponentsEnabled";
+const AI_OPPONENT_COUNT_STORAGE_KEY = "carun.aiOpponentCount";
 const OBJECT_DEFAULTS = {
   tree: { height: 1.5, r: 24, angle: 0 },
   barrel: { height: 1, r: 12, angle: 0 },
@@ -110,6 +111,40 @@ export function saveAiOpponentsEnabled(enabled) {
   }
 }
 
+export const MIN_AI_OPPONENT_COUNT = 1;
+export const MAX_AI_OPPONENT_COUNT = 5;
+export const DEFAULT_AI_OPPONENT_COUNT = 3;
+
+export function sanitizeAiOpponentCount(raw) {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return DEFAULT_AI_OPPONENT_COUNT;
+  return Math.max(
+    MIN_AI_OPPONENT_COUNT,
+    Math.min(MAX_AI_OPPONENT_COUNT, Math.round(numeric)),
+  );
+}
+
+export function loadAiOpponentCount(defaultValue = DEFAULT_AI_OPPONENT_COUNT) {
+  try {
+    const raw = localStorage.getItem(AI_OPPONENT_COUNT_STORAGE_KEY);
+    if (raw !== null) return sanitizeAiOpponentCount(raw);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return sanitizeAiOpponentCount(defaultValue);
+}
+
+export function saveAiOpponentCount(count) {
+  try {
+    localStorage.setItem(
+      AI_OPPONENT_COUNT_STORAGE_KEY,
+      String(sanitizeAiOpponentCount(count)),
+    );
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
 export function getMenuItems(authenticated) {
   return authenticated
     ? ["RACE", "SETTINGS"]
@@ -120,7 +155,7 @@ export function getLoginProviderItems() {
   return ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"];
 }
 
-export const AI_OPPONENT_COUNT = 5;
+export const AI_OPPONENT_COUNT = MAX_AI_OPPONENT_COUNT;
 export const AI_PRECISE_NAME_POOL = [
   "Nitro Nick",
   "Drift King",
@@ -161,8 +196,15 @@ export function getGameModeItems() {
 
 export function getSettingsItems(authenticated) {
   return authenticated
-    ? ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "LOGOUT", "BACK"]
-    : ["PLAYER NAME", "MENU MUSIC", "DEBUG MODE", "BACK"];
+    ? [
+        "PLAYER NAME",
+        "MENU MUSIC",
+        "AI OPPONENTS",
+        "DEBUG MODE",
+        "LOGOUT",
+        "BACK",
+      ]
+    : ["PLAYER NAME", "MENU MUSIC", "AI OPPONENTS", "DEBUG MODE", "BACK"];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
@@ -1695,6 +1737,7 @@ export const physicsConfig = {
     SPEED_SENSITIVE_STEERING: true,
     SURFACE_BLENDING: true,
     AI_OPPONENTS_ENABLED: loadAiOpponentsEnabled(false),
+    AI_OPPONENT_COUNT: loadAiOpponentCount(DEFAULT_AI_OPPONENT_COUNT),
     DEBUG_MODE: loadDebugMode(false),
     ARCADE_COLLISION_PUSH: true,
   },

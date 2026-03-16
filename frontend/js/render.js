@@ -7,24 +7,28 @@ import {
   CURB_MAX_WIDTH,
   CURB_MIN_WIDTH,
   CURB_STRIPE_LENGTH,
+  DEFAULT_AI_OPPONENT_COUNT,
   checkpoints,
   getConnectedCenterlinePoints,
   getTrackPreset,
+  MAX_AI_OPPONENT_COUNT,
+  MIN_AI_OPPONENT_COUNT,
   physicsConfig,
   track,
   trackOptions,
   worldObjects,
 } from "./parameters.js";
 import {
-  aiCars,
-  aiLapDataList,
-  aiPhysicsRuntimes,
   appLogo,
   appLogoReady,
   car,
   curbSegments,
   facebookLogo,
   facebookLogoReady,
+  getActiveAiCars,
+  getActiveAiLapDataList,
+  getActiveAiOpponentCount,
+  getActiveAiPhysicsRuntimes,
   kartSprite,
   kartSpriteReady,
   lapData,
@@ -1194,6 +1198,7 @@ function drawVehicle(
 }
 
 function drawCar() {
+  const activeAiCars = getActiveAiCars();
   const vehicles = [
     {
       vehicle: car,
@@ -1203,7 +1208,7 @@ function drawCar() {
     },
   ];
   if (aiOpponentsEnabled()) {
-    aiCars.forEach((vehicle, index) => {
+    activeAiCars.forEach((vehicle, index) => {
       vehicles.push({
         vehicle,
         accent: AI_ACCENTS[index % AI_ACCENTS.length],
@@ -1220,6 +1225,7 @@ function drawCar() {
 
 function drawDebugVectors() {
   if (!physicsConfig.flags.DEBUG_MODE || state.mode !== "racing") return;
+  const activeAiCount = getActiveAiOpponentCount();
 
   const forwardX = Math.cos(car.angle);
   const forwardY = Math.sin(car.angle);
@@ -1257,7 +1263,7 @@ function drawDebugVectors() {
   ctx.stroke();
 
   if (aiOpponentsEnabled()) {
-    aiPhysicsRuntimes.forEach((runtime, index) => {
+    getActiveAiPhysicsRuntimes().forEach((runtime, index) => {
       const accent = AI_ACCENTS[index % AI_ACCENTS.length];
       if (runtime.debugPathPoints.length > 1) {
         ctx.strokeStyle = `${accent}cc`;
@@ -1317,7 +1323,7 @@ function drawDebugVectors() {
     firstLineY + lineStep * 3,
   );
   ctx.fillText(
-    aiOpponentsEnabled() ? `AI: ${aiCars.length} ACTIVE` : "AI: OFF",
+    aiOpponentsEnabled() ? `AI: ${activeAiCount} ACTIVE` : "AI: OFF",
     lineX,
     firstLineY + lineStep * 4,
   );
@@ -1472,6 +1478,9 @@ function drawStartSequenceOverlay() {
 }
 
 function drawTitleBar() {
+  const activeAiCars = getActiveAiCars();
+  const activeAiLapDataList = getActiveAiLapDataList();
+  const activeAiCount = activeAiCars.length;
   const gradient = ctx.createLinearGradient(0, 0, 0, TOP_BAR_HEIGHT);
   gradient.addColorStop(0, "#1f3342");
   gradient.addColorStop(1, "#142431");
@@ -1501,7 +1510,7 @@ function drawTitleBar() {
   const panelGap = 8;
   const aiTileWidth = 112;
   const aiAreaWidth = aiOpponentsEnabled()
-    ? aiCars.length * aiTileWidth + (aiCars.length - 1) * panelGap
+    ? activeAiCount * aiTileWidth + Math.max(0, activeAiCount - 1) * panelGap
     : 0;
   const rightPad = 18;
 
@@ -1540,7 +1549,7 @@ function drawTitleBar() {
   ctx.fillStyle = "#d8e8f7";
   ctx.font = "bold 11px Verdana";
   ctx.fillText(
-    `P${getRaceOrder()}/${aiOpponentsEnabled() ? aiCars.length + 1 : 1}  L${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`,
+    `P${getRaceOrder()}/${aiOpponentsEnabled() ? activeAiCount + 1 : 1}  L${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`,
     x + 12,
     42,
   );
@@ -1575,10 +1584,12 @@ function drawTitleBar() {
     );
     let aiX = WIDTH - rightPad - aiAreaWidth;
     aiStandings.forEach((entry) => {
-      const index = aiCars.findIndex((vehicle) => vehicle.id === entry.id);
+      const index = activeAiCars.findIndex(
+        (vehicle) => vehicle.id === entry.id,
+      );
       if (index < 0) return;
-      const vehicle = aiCars[index];
-      const aiLapData = aiLapDataList[index];
+      const vehicle = activeAiCars[index];
+      const aiLapData = activeAiLapDataList[index];
       const bestLap = getBestLapTime(aiLapData.lapTimes);
       const accent = AI_ACCENTS[index % AI_ACCENTS.length];
       drawHudPanel(aiX, top, aiTileWidth, panelHeight, `${accent}66`);
@@ -2787,7 +2798,19 @@ function drawTrackSelection() {
     if (!model.isTournament) {
       ctx.fillStyle = "#c3d9ec";
       ctx.font = "bold 16px Verdana";
-      const aiLabel = `AI Opponents: ${aiOpponentsEnabled() ? "ON" : "OFF"}`;
+      const configuredAiCount = Math.max(
+        MIN_AI_OPPONENT_COUNT,
+        Math.min(
+          MAX_AI_OPPONENT_COUNT,
+          Math.round(
+            Number(physicsConfig.flags.AI_OPPONENT_COUNT) ||
+              DEFAULT_AI_OPPONENT_COUNT,
+          ),
+        ),
+      );
+      const aiLabel = aiOpponentsEnabled()
+        ? `AI Opponents: ON (${configuredAiCount})`
+        : `AI Opponents: OFF (${configuredAiCount})`;
       ctx.fillText(aiLabel, sx, sy);
       sy += 20;
       ctx.fillStyle = "#8aa4b8";

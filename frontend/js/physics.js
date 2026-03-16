@@ -20,6 +20,9 @@ import {
   aiCars,
   aiLapDataList,
   aiPhysicsRuntimes,
+  getActiveAiCars,
+  getActiveAiLapDataList,
+  getActiveAiOpponentCount,
   keys,
   lapData,
   physicsRuntime,
@@ -69,14 +72,14 @@ function withAiOpponent(index, callback) {
 }
 
 function forEachAiOpponent(callback) {
-  for (let index = 0; index < aiCars.length; index++) {
+  for (let index = 0; index < getActiveAiOpponentCount(); index++) {
     withAiOpponent(index, callback);
   }
 }
 
 function getAiOpponentIndexById(racerKey) {
   if (racerKey === "ai") return 0;
-  return aiCars.findIndex((vehicle) => vehicle.id === racerKey);
+  return getActiveAiCars().findIndex((vehicle) => vehicle.id === racerKey);
 }
 
 function getAiStateById(racerKey) {
@@ -291,7 +294,7 @@ function compareRaceSnapshots(a, b) {
 export function getRaceStandings() {
   const standings = [getRacerSnapshot("player")];
   if (aiOpponentsEnabled()) {
-    aiCars.forEach((vehicle) => {
+    getActiveAiCars().forEach((vehicle) => {
       const snapshot = getRacerSnapshot(vehicle.id);
       if (snapshot) standings.push(snapshot);
     });
@@ -314,7 +317,7 @@ export function getRacePosition(racerKey = "player") {
 
 function anyAiStillRacing() {
   if (!aiOpponentsEnabled()) return false;
-  return aiLapDataList.some((entry) => !entry.finished);
+  return getActiveAiLapDataList().some((entry) => !entry.finished);
 }
 
 function raceClockShouldAdvance() {
@@ -918,7 +921,7 @@ function computeAiTargetSpeed(graph) {
 
 function getNearestBlockingRival(forwardX, forwardY) {
   let bestDistance = Infinity;
-  for (const rival of [car, ...aiCars]) {
+  for (const rival of [car, ...getActiveAiCars()]) {
     if (rival === aiCar) continue;
     const dx = rival.x - aiCar.x;
     const dy = rival.y - aiCar.y;
@@ -932,7 +935,7 @@ function getNearestBlockingRival(forwardX, forwardY) {
 
 function getNearestRivalMetrics(forwardX, forwardY, rightX, rightY) {
   let best = null;
-  for (const rival of [car, ...aiCars]) {
+  for (const rival of [car, ...getActiveAiCars()]) {
     if (rival === aiCar) continue;
     const dx = rival.x - aiCar.x;
     const dy = rival.y - aiCar.y;
@@ -2146,7 +2149,7 @@ export function resetRace() {
   state.raceStandings.nextFinishOrder = 1;
   state.raceStandings.playerFinishOrder = 0;
   state.raceStandings.finishOrders = { player: 0 };
-  aiCars.forEach((vehicle) => {
+  getActiveAiCars().forEach((vehicle) => {
     state.raceStandings.finishOrders[vehicle.id] = 0;
   });
   const startCheckpointIndex = getStartCheckpointIndex();
@@ -2186,7 +2189,7 @@ export function resetRace() {
   physicsRuntime.particleEmitters.smokeCooldown = 0;
   physicsRuntime.particleEmitters.splashCooldown = 0;
   physicsRuntime.particleEmitters.dustCooldown = 0;
-  aiCars.forEach((_, index) => {
+  forEachAiOpponent((_, __, ___, index) => {
     resetAiOpponentForRace(index, spawnPoint, car.angle, startCheckpointIndex);
   });
   skidMarks.length = 0;
@@ -2224,7 +2227,7 @@ function resetRivalAudioState() {
 function resolveRaceFieldCollisions() {
   const field = [
     { vehicle: car, runtime: physicsRuntime },
-    ...aiCars.map((vehicle, index) => ({
+    ...getActiveAiCars().map((vehicle, index) => ({
       vehicle,
       runtime: aiPhysicsRuntimes[index],
       externalControl: rivalUsesExternalControl(index),
@@ -2273,7 +2276,13 @@ function updateAiCheckpointProgress() {
 }
 
 export function applyExternalRivalState(index, payload = {}) {
-  if (!Number.isInteger(index) || index < 0 || index >= aiCars.length) return;
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= getActiveAiOpponentCount()
+  ) {
+    return;
+  }
   withAiOpponent(index, () => {
     aiCar.x = Number.isFinite(payload.x) ? Number(payload.x) : aiCar.x;
     aiCar.y = Number.isFinite(payload.y) ? Number(payload.y) : aiCar.y;
@@ -2318,8 +2327,13 @@ export function applyExternalRivalState(index, payload = {}) {
 }
 
 export function getRivalPhysicsSnapshot(index) {
-  if (!Number.isInteger(index) || index < 0 || index >= aiCars.length)
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= getActiveAiOpponentCount()
+  ) {
     return null;
+  }
   return withAiOpponent(index, () => ({
     x: aiCar.x,
     y: aiCar.y,

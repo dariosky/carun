@@ -134,6 +134,8 @@ function getObjectByType(objects, type) {
 
 function enableAiOpponents() {
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  physicsConfig.flags.AI_OPPONENT_COUNT = aiCars.length;
+  if (state.aiRoster.length !== aiCars.length) assignAiRoster();
 }
 
 function disableAiOpponents() {
@@ -353,6 +355,7 @@ test("resetRace spawns a five-car AI field with matching heading and lap state",
 });
 
 test("random ai roster uses unique names from the configured pool", () => {
+  physicsConfig.flags.AI_OPPONENT_COUNT = aiCars.length;
   const roster = assignRandomAiRoster();
   const preciseDrivers = roster.filter((entry) => entry.style === "precise");
   const bumpDrivers = roster.filter((entry) => entry.style === "bump");

@@ -11,14 +11,18 @@ import {
   getTrackPreset,
   getSettingsItems,
   importTrackPresetData,
+  MAX_AI_OPPONENT_COUNT,
+  MIN_AI_OPPONENT_COUNT,
   removeTrackPresetById,
   regenerateTrackFromCenterlineStrokes,
+  saveAiOpponentCount,
   saveAiOpponentsEnabled,
   saveTrackPresetToDb,
   saveMenuMusicEnabled,
   setTrackPresetMetadata,
   physicsConfig,
   sanitizePlayerName,
+  sanitizeAiOpponentCount,
   saveDebugMode,
   saveTrackPreset,
   savePlayerName,
@@ -28,8 +32,8 @@ import {
   TOURNAMENT_POINTS,
 } from "./parameters.js";
 import {
-  aiCars,
   assignRandomAiRoster,
+  getActiveAiCars,
   keys,
   setCurbSegments,
   state,
@@ -722,6 +726,14 @@ export function getSettingsRenderLayout(measureTextWidth) {
     }
     if (item === "MENU MUSIC") {
       return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
+    }
+    if (item === "AI OPPONENTS") {
+      const count = sanitizeAiOpponentCount(
+        physicsConfig.flags.AI_OPPONENT_COUNT,
+      );
+      const aiOffSuffix =
+        physicsConfig.flags.AI_OPPONENTS_ENABLED === false ? " (AI OFF)" : "";
+      return `${item}: ${count}${aiOffSuffix}`;
     }
     if (item === "DEBUG MODE") {
       return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
@@ -1726,6 +1738,26 @@ function toggleAiOpponents() {
   saveAiOpponentsEnabled(physicsConfig.flags.AI_OPPONENTS_ENABLED);
 }
 
+function setAiOpponentCount(nextCount) {
+  physicsConfig.flags.AI_OPPONENT_COUNT = sanitizeAiOpponentCount(nextCount);
+  saveAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT);
+}
+
+function stepAiOpponentCount(delta) {
+  setAiOpponentCount(
+    sanitizeAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT) + delta,
+  );
+}
+
+function cycleAiOpponentCount() {
+  const current = sanitizeAiOpponentCount(
+    physicsConfig.flags.AI_OPPONENT_COUNT,
+  );
+  setAiOpponentCount(
+    current >= MAX_AI_OPPONENT_COUNT ? MIN_AI_OPPONENT_COUNT : current + 1,
+  );
+}
+
 function createEmptyTrackAndEdit() {
   const id = `track-${Date.now()}`;
   const newTrack = {
@@ -1838,7 +1870,7 @@ function finishTournamentRace() {
   const standings = getRaceStandings();
   const playerName = state.playerName || "PLAYER";
   const nameMap = { player: playerName };
-  aiCars.forEach((vehicle) => {
+  getActiveAiCars().forEach((vehicle) => {
     nameMap[vehicle.id] = vehicle.label;
   });
   const result = {};
@@ -2036,6 +2068,10 @@ function activateSelection() {
     }
     if (selectedSetting === "MENU MUSIC") {
       toggleMenuMusic();
+      return;
+    }
+    if (selectedSetting === "AI OPPONENTS") {
+      cycleAiOpponentCount();
       return;
     }
     if (selectedSetting === "DEBUG MODE") {
@@ -2775,7 +2811,11 @@ function onKeyDown(e) {
     state.mode === "settings"
   ) {
     const selected = currentSettingsItems()[state.settingsIndex];
-    if (selected === "DEBUG MODE") toggleDebugMode();
+    if (selected === "AI OPPONENTS") {
+      stepAiOpponentCount(key === "arrowleft" ? -1 : 1);
+    } else if (selected === "DEBUG MODE") {
+      toggleDebugMode();
+    }
   }
   if (key === "enter") activateSelection();
 

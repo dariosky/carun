@@ -169,12 +169,15 @@ test("settings render layout uses longest rendered row label", () => {
   state.auth.authenticated = true;
   state.playerName = "SUPERLONGNAME";
   state.editingName = false;
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  physicsConfig.flags.AI_OPPONENT_COUNT = 3;
   physicsConfig.flags.DEBUG_MODE = true;
 
   const layout = getSettingsRenderLayout((text) => text.length * 10);
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
     "MENU MUSIC",
+    "AI OPPONENTS",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",
@@ -185,6 +188,22 @@ test("settings render layout uses longest rendered row label", () => {
   const longestRow = "PLAYER NAME: SUPERLONGNAME";
   const expected = Math.max(560, longestRow.length * 10 + 92);
   assert.equal(layout.highlightWidth, expected);
+});
+
+test("settings render layout shows AI count even when AI are disabled", () => {
+  state.auth.authenticated = false;
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+  physicsConfig.flags.AI_OPPONENT_COUNT = 4;
+
+  const layout = getSettingsRenderLayout((text) => text.length * 10);
+  assert.deepEqual(layout.settingsItems, [
+    "PLAYER NAME",
+    "MENU MUSIC",
+    "AI OPPONENTS",
+    "DEBUG MODE",
+    "BACK",
+  ]);
+  assert.equal(layout.rowLabels[2], "AI OPPONENTS: 4 (AI OFF)");
 });
 
 test("settings header model defines centered title", () => {
