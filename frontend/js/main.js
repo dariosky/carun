@@ -2,6 +2,7 @@ import { startGameLoop } from "./game-loop.js";
 import {
   enterEditor,
   initInputHandlers,
+  pauseActiveRace,
   syncTrackSelectWindow,
 } from "./menus.js";
 import {
@@ -195,6 +196,9 @@ if (!editTrackIdFromPath && !raceTrackIdFromPath) {
 initAudio();
 gameAudio.resumeOnUserGesture();
 initInputHandlers();
+window.addEventListener("blur", () => {
+  pauseActiveRace();
+});
 render();
 syncMenuMusicForMode(state.mode);
 

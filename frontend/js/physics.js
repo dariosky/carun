@@ -340,15 +340,77 @@ function progressDeltaForward(from, to) {
   return wrapProgress(to - from);
 }
 
-function estimateNavHeuristic(node, goalNodeIds, graph) {
+// Approximate equilibrium speed ratio on a surface relative to asphalt.
+// At steady-state the car's speed is proportional to engineMul / longDragMul.
+function surfaceSpeedRatio(surfaceName) {
+  const surface =
+    physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
+  return surface.engineMul / Math.max(surface.longDragMul, 0.01);
+}
+
+// Estimate how long (in seconds) it takes to traverse the edge from→to,
+// considering curvature-limited speed and surface slowdown.
+function computeEdgeTimeCost(fromNode, toNode) {
+  const dx = toNode.x - fromNode.x;
+  const dy = toNode.y - fromNode.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1e-5) return 0;
+  const maxSpeed = physicsConfig.ai.targetSpeedMax;
+  // Average curvature-limited speed along the edge
+  const curvatureSpeed =
+    ((fromNode.baseTargetSpeed || maxSpeed) +
+      (toNode.baseTargetSpeed || maxSpeed)) *
+    0.5;
+  // Surface speed limit — if the departure node is a spring the car will fly
+  const fromRatio = fromNode.nearSpring
+    ? 1
+    : surfaceSpeedRatio(fromNode.surface || "asphalt");
+  const toRatio = surfaceSpeedRatio(toNode.surface || "asphalt");
+  const avgSurfaceRatio = (fromRatio + toRatio) * 0.5;
+  const surfaceSpeed = maxSpeed * avgSurfaceRatio;
+  // Effective speed is the lower of the curvature and surface limits
+  const effectiveSpeed = Math.max(Math.min(curvatureSpeed, surfaceSpeed), 1);
+  return distance / effectiveSpeed;
+}
+
+function estimateNavHeuristic(node, goalNodeIds, _graph) {
   if (!goalNodeIds.length) return 0;
+  let bestDist = Infinity;
+  for (const goalNodeId of goalNodeIds) {
+    const goalNode = _graph.nodes[goalNodeId];
+    if (!goalNode) continue;
+    const dist = Math.hypot(goalNode.x - node.x, goalNode.y - node.y);
+    if (dist < bestDist) bestDist = dist;
+  }
+  if (bestDist === Infinity) return 0;
+  // Admissible: straight-line at the fastest possible speed
+  return bestDist / Math.max(physicsConfig.ai.targetSpeedMax, 1);
+}
+
+function estimateRemainingGoalProgress(node, goalNodeIds, graph) {
+  if (!node || !goalNodeIds.length || !Number.isFinite(node.progress)) {
+    return 0;
+  }
   let best = Infinity;
   for (const goalNodeId of goalNodeIds) {
     const goalNode = graph.nodes[goalNodeId];
-    if (!goalNode) continue;
-    best = Math.min(best, Math.hypot(goalNode.x - node.x, goalNode.y - node.y));
+    if (!goalNode || !Number.isFinite(goalNode.progress)) continue;
+    best = Math.min(
+      best,
+      progressDeltaForward(node.progress, goalNode.progress),
+    );
   }
   return best === Infinity ? 0 : best;
+}
+
+function estimateNavLapLength(graph) {
+  const averageSegmentLength = Math.max(graph.averageSegmentLength || 0, 1);
+  const segmentCount = Math.max(
+    graph.progressCount || 0,
+    graph.nodes.length || 0,
+    1,
+  );
+  return averageSegmentLength * segmentCount;
 }
 
 export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
@@ -362,6 +424,18 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
   }
   const aiCfg = physicsConfig.ai;
   const goalSet = new Set(goalNodeIds);
+
+  // Pre-compute goal progress range for checkpoint-skip rejection.
+  let hasGoalProgress = false;
+  const goalProgressValues = [];
+  for (const goalNodeId of goalNodeIds) {
+    const goalNode = graph.nodes[goalNodeId];
+    if (goalNode && Number.isFinite(goalNode.progress)) {
+      goalProgressValues.push(goalNode.progress);
+      hasGoalProgress = true;
+    }
+  }
+
   const gScore = new Float64Array(graph.nodes.length);
   const fScore = new Float64Array(graph.nodes.length);
   const cameFrom = new Int32Array(graph.nodes.length);
@@ -398,17 +472,62 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
     }
 
     closed[currentId] = 1;
+    const currentNode = graph.nodes[currentId];
     for (const edge of graph.edges[currentId]) {
       const neighborId = edge.to;
       if (closed[neighborId]) continue;
       const neighbor = graph.nodes[neighborId];
-      const playerDistance = Math.hypot(neighbor.x - car.x, neighbor.y - car.y);
+
+      // --- Checkpoint-skip rejection ---
+      // A junction that jumps over the goal checkpoint in progress space is
+      // rejected — the AI must actually reach the checkpoint, not skip it.
+      if (
+        hasGoalProgress &&
+        edge.kind === "junction" &&
+        Number.isFinite(currentNode.progress) &&
+        Number.isFinite(neighbor.progress)
+      ) {
+        const fwd = wrapProgress(neighbor.progress - currentNode.progress);
+        if (fwd > 0.04 && fwd < 0.96) {
+          let skipsCheckpoint = false;
+          for (const gp of goalProgressValues) {
+            const goalFwd = wrapProgress(gp - currentNode.progress);
+            if (goalFwd > 0.01 && goalFwd < fwd - 0.01) {
+              skipsCheckpoint = true;
+              break;
+            }
+          }
+          if (skipsCheckpoint) continue;
+        }
+      }
+
+      // --- Time-based edge cost ---
+      const timeCost = computeEdgeTimeCost(currentNode, neighbor);
+
+      // Backward edges incur a reversal penalty: the car must brake, turn
+      // around, and re-accelerate.  Still much cheaper than a full lap.
+      const reversalPenalty = edge.kind === "backward" ? 0.35 : 0;
+
+      // Obstacle proximity penalty (safety concern, in time-equivalent units)
+      const obstaclePenalty =
+        ((currentNode.obstaclePenalty || 0) + (neighbor.obstaclePenalty || 0)) *
+        0.001;
+
+      // Dynamic player avoidance (mild — don't distort the optimal path)
+      const playerDist = Math.hypot(neighbor.x - car.x, neighbor.y - car.y);
       const dynamicPenalty =
-        playerDistance >= aiCfg.playerAvoidanceRadius
+        playerDist >= aiCfg.playerAvoidanceRadius
           ? 0
-          : aiCfg.playerNodePenalty *
-            (1 - playerDistance / Math.max(aiCfg.playerAvoidanceRadius, 1));
-      const tentative = gScore[currentId] + edge.cost + dynamicPenalty;
+          : (aiCfg.playerNodePenalty || 0) *
+            0.003 *
+            (1 - playerDist / Math.max(aiCfg.playerAvoidanceRadius, 1));
+
+      const tentative =
+        gScore[currentId] +
+        timeCost +
+        reversalPenalty +
+        obstaclePenalty +
+        dynamicPenalty;
       if (tentative >= gScore[neighborId]) continue;
       cameFrom[neighborId] = currentId;
       gScore[neighborId] = tentative;
@@ -527,6 +646,7 @@ function appendCheckpointContinuation(graph, nodeIds, count) {
     let bestScore = Infinity;
     for (const edge of graph.edges[currentNodeId] || []) {
       if (visited.has(edge.to)) continue;
+      if (edge.kind === "backward") continue;
       const nextNode = graph.nodes[edge.to];
       if (!nextNode) continue;
       const turnPenalty =
@@ -557,6 +677,14 @@ function buildAiPath(graph, force = false) {
     aiPhysicsRuntime.lastValidNodeId >= 0
       ? graph.nodes[aiPhysicsRuntime.lastValidNodeId]
       : null;
+
+  const nextCheckpointIndex =
+    aiLapData.nextCheckpointIndex % checkpoints.length;
+  const checkpointGoalNodeIds =
+    graph.checkpointGoalNodeIds?.[nextCheckpointIndex] || [];
+  const checkpointFallbackNodeIds =
+    graph.checkpointNodeIds?.[nextCheckpointIndex] || [];
+
   const currentNode =
     findNearestTrackNavNode(aiCar.x, aiCar.y, {
       progressHint: aiPhysicsRuntime.progress,
@@ -570,12 +698,6 @@ function buildAiPath(graph, force = false) {
     aiPhysicsRuntime.progress,
   );
   aiPhysicsRuntime.routeNodeIndex = currentRouteIndex;
-  const nextCheckpointIndex =
-    aiLapData.nextCheckpointIndex % checkpoints.length;
-  const checkpointGoalNodeIds =
-    graph.checkpointGoalNodeIds?.[nextCheckpointIndex] || [];
-  const checkpointFallbackNodeIds =
-    graph.checkpointNodeIds?.[nextCheckpointIndex] || [];
   let plannedNodeIds = planTrackNavPath(
     graph,
     currentNode.id,
@@ -633,6 +755,7 @@ function buildAiPath(graph, force = false) {
       return { x: node.x, y: node.y };
     });
   }
+  aiPhysicsRuntime.planCheckpointIndex = nextCheckpointIndex;
   aiPhysicsRuntime.replanCooldown = aiCfg.replanInterval;
 }
 
@@ -773,11 +896,21 @@ function projectPointToSegment(px, py, ax, ay, bx, by) {
 }
 
 function aiSightlineBlocked(ax, ay, bx, by, samples) {
+  const isFlying = vehicleIsFlying(aiCar);
+  let penaltySurfaceCount = 0;
+  const penaltySurfaceThreshold = Math.max(1, Math.floor(samples * 0.25));
   for (let step = 1; step <= samples; step++) {
     const t = step / samples;
     const x = ax + (bx - ax) * t;
     const y = ay + (by - ay) * t;
-    if (resolveObjectCollisions(x, y, 0).hit) return true;
+    if (!isFlying && resolveObjectCollisions(x, y, 0).hit) return true;
+    if (!isFlying) {
+      const surface = surfaceAt(x, y);
+      if (surface === "grass" || surface === "water") {
+        penaltySurfaceCount += 1;
+        if (penaltySurfaceCount >= penaltySurfaceThreshold) return true;
+      }
+    }
   }
   return false;
 }
@@ -821,10 +954,19 @@ function buildAiTargetPreview(graph) {
   let previewX = anchorX;
   let previewY = anchorY;
   let previewNode = currentNode;
+  let penaltySurfaceDistance = 0;
+  const maxPenaltySurfaceDistance =
+    aiCfg.maxPreviewPenaltySurfaceDistance || 30;
+  let lastCleanX = anchorX;
+  let lastCleanY = anchorY;
+  let lastCleanNode = currentNode;
+  let lastCleanSegmentIndex = segmentIndex;
+  let penaltyCapped = false;
 
   while (
     segmentIndex < aiPhysicsRuntime.plannedNodeIds.length - 1 &&
-    remainingDistance > 0
+    remainingDistance > 0 &&
+    !penaltyCapped
   ) {
     const fromNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
     const toNode =
@@ -841,6 +983,33 @@ function buildAiTargetPreview(graph) {
       segmentIndex += 1;
       continue;
     }
+
+    // Sample mid-segment surface to accumulate penalty distance.
+    // Skip penalty accumulation if leaving from a spring node or car is flying.
+    const midX = fromX + segDx * 0.5;
+    const midY = fromY + segDy * 0.5;
+    const midSurface = surfaceAt(midX, midY);
+    const isPenalty = midSurface === "grass" || midSurface === "water";
+    const springBypass = fromNode.nearSpring || vehicleIsFlying(aiCar);
+    const segTravel = Math.min(remainingDistance, segLen);
+    if (isPenalty && !springBypass) {
+      penaltySurfaceDistance += segTravel;
+      if (penaltySurfaceDistance > maxPenaltySurfaceDistance) {
+        // Clamp to last clean point
+        previewX = lastCleanX;
+        previewY = lastCleanY;
+        previewNode = lastCleanNode;
+        segmentIndex = lastCleanSegmentIndex;
+        penaltyCapped = true;
+        break;
+      }
+    } else {
+      lastCleanX = toNode.x;
+      lastCleanY = toNode.y;
+      lastCleanNode = toNode;
+      lastCleanSegmentIndex = segmentIndex + 1;
+    }
+
     if (remainingDistance <= segLen) {
       const t = remainingDistance / segLen;
       previewX = fromX + segDx * t;
@@ -950,36 +1119,86 @@ function computeAiTargetSpeed(graph) {
   const aiCfg = physicsConfig.ai;
   const brakeDecel = physicsConfig.car.brakeDecel;
   let targetSpeed = aiCfg.targetSpeedMax;
+  const cursor = aiPhysicsRuntime.pathCursor;
   const endIndex = Math.min(
     aiPhysicsRuntime.plannedNodeIds.length - 1,
-    aiPhysicsRuntime.pathCursor + aiCfg.targetSpeedLookAhead,
+    cursor + aiCfg.targetSpeedLookAhead,
   );
-  // Accumulate real pixel distance along the planned path for physics-based
-  // braking: v_allowed = sqrt(v_node² + 2 * brakeDecel * distance).
+
+  // Walk the planned path, computing actual turning angle at each node and
+  // deriving speed limits from the path geometry — not from the centerline
+  // curvature stored on each node.  On a straight planned path this gives
+  // full speed even if the centerline is curved underneath.
   let cumulativeDistance = 0;
-  let prevNode =
-    graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
-  for (let i = aiPhysicsRuntime.pathCursor; i <= endIndex; i++) {
+  let prevNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[cursor]];
+  let prevDirX = Math.cos(aiCar.angle);
+  let prevDirY = Math.sin(aiCar.angle);
+  if (cursor > 0) {
+    const behindNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[cursor - 1]];
+    if (behindNode && prevNode) {
+      const dx = prevNode.x - behindNode.x;
+      const dy = prevNode.y - behindNode.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 1e-4) {
+        prevDirX = dx / len;
+        prevDirY = dy / len;
+      }
+    }
+  }
+
+  for (let i = cursor; i <= endIndex; i++) {
     const node = graph.nodes[aiPhysicsRuntime.plannedNodeIds[i]];
     if (!node) continue;
-    if (i > aiPhysicsRuntime.pathCursor && prevNode) {
-      cumulativeDistance += Math.hypot(
-        node.x - prevNode.x,
-        node.y - prevNode.y,
-      );
+
+    if (i > cursor && prevNode) {
+      const segDx = node.x - prevNode.x;
+      const segDy = node.y - prevNode.y;
+      const segLen = Math.hypot(segDx, segDy);
+      cumulativeDistance += segLen;
+
+      if (segLen > 1e-4) {
+        const dirX = segDx / segLen;
+        const dirY = segDy / segLen;
+        // Turning angle between consecutive segments
+        const dot = prevDirX * dirX + prevDirY * dirY;
+        const pathCurvature = Math.max(0, 1 - clamp(dot, -1, 1));
+        // Also blend in a fraction of the node's centerline curvature
+        // so the AI still respects tight centerline corners when the
+        // planned path can't smooth them out.
+        const effectiveCurvature = Math.max(
+          pathCurvature,
+          (node.curvature || 0) * 0.5,
+        );
+        const excessCurvature = Math.max(
+          0,
+          effectiveCurvature - aiCfg.fullThrottleCurvature,
+        );
+        const nodeSpeedLimit = clamp(
+          aiCfg.targetSpeedMax -
+            excessCurvature * aiCfg.curvatureSpeedScale +
+            aiCfg.curvatureSpeedBias,
+          aiCfg.cornerSpeedMin,
+          aiCfg.targetSpeedMax,
+        );
+
+        // Physics-based braking: how fast can we be NOW and still slow
+        // to nodeSpeedLimit by the time we reach this node?
+        const allowedSpeed =
+          cumulativeDistance <= 1
+            ? nodeSpeedLimit
+            : Math.sqrt(
+                nodeSpeedLimit * nodeSpeedLimit +
+                  2 * brakeDecel * aiCfg.brakingEfficiency * cumulativeDistance,
+              );
+        targetSpeed = Math.min(targetSpeed, allowedSpeed);
+
+        prevDirX = dirX;
+        prevDirY = dirY;
+      }
     }
     prevNode = node;
-    // At the cursor node itself (distance 0) use node speed directly.
-    // Further ahead, allow higher entry speed based on kinematic braking.
-    const allowedSpeed =
-      cumulativeDistance <= 1
-        ? node.targetSpeed
-        : Math.sqrt(
-            node.targetSpeed * node.targetSpeed +
-              2 * brakeDecel * aiCfg.brakingEfficiency * cumulativeDistance,
-          );
-    targetSpeed = Math.min(targetSpeed, allowedSpeed);
   }
+
   const profile = getActiveAiProfile();
   aiPhysicsRuntime.desiredSpeed = clamp(
     targetSpeed * aiCfg.targetSpeedBias * (profile.topSpeedMul || 1),
@@ -1032,12 +1251,26 @@ function getNearestRivalMetrics(forwardX, forwardY, rightX, rightY) {
 function updateAiRaceControl(dt, graph) {
   const aiCfg = physicsConfig.ai;
   const profile = getActiveAiProfile();
+
+  // Force immediate replan when the checkpoint advances — don't follow
+  // the old plan's continuation nodes deeper into a loop we've already done.
+  const currentCheckpointTarget =
+    aiLapData.nextCheckpointIndex % checkpoints.length;
+  const checkpointChanged =
+    aiPhysicsRuntime.planCheckpointIndex !== undefined &&
+    aiPhysicsRuntime.planCheckpointIndex !== currentCheckpointTarget;
+
   if (
+    checkpointChanged ||
     !aiPhysicsRuntime.plannedNodeIds.length ||
     aiPhysicsRuntime.replanCooldown <= 0
   ) {
-    buildAiPath(graph, !aiPhysicsRuntime.plannedNodeIds.length);
+    buildAiPath(
+      graph,
+      checkpointChanged || !aiPhysicsRuntime.plannedNodeIds.length,
+    );
   }
+
   const targetNode = updateAiPathCursor(graph);
   if (!targetNode) {
     aiPhysicsRuntime.mode = "recover";
@@ -1287,25 +1520,30 @@ function updateAiProgressHealth(dt, collision) {
   aiPhysicsRuntime.progress = nextProgress;
 
   const currentSurface = surfaceAt(aiCar.x, aiCar.y);
+  const isOffRoad = currentSurface === "grass" || currentSurface === "water";
+  const isFlying = vehicleIsFlying(aiCar);
+
   if (
     aiCar.speed < aiCfg.stuckSpeedThreshold &&
-    progressGain < aiCfg.stuckProgressThreshold
+    progressGain < aiCfg.stuckProgressThreshold &&
+    !isFlying
   ) {
     aiPhysicsRuntime.lowProgressTimer += dt;
+    // Off-road stalling compounds the stuck timer faster
+    if (isOffRoad) {
+      aiPhysicsRuntime.lowProgressTimer += dt * 0.5;
+    }
   } else {
     aiPhysicsRuntime.lowProgressTimer = Math.max(
       0,
       aiPhysicsRuntime.lowProgressTimer - dt * 1.5,
     );
   }
-  if (currentSurface === "grass" || currentSurface === "water") {
+  // Track off-road time only when far from the planned path (truly lost,
+  // not an intentional shortcut the planner chose).
+  if (isOffRoad && !isFlying) {
     const distanceToPlan = distanceToAiPlannedPath(graph);
-    const intentionalGrassShortcut =
-      currentSurface === "grass" &&
-      distanceToPlan <= aiCfg.grassRecoveryPathDistance &&
-      (progressGain >= aiCfg.stuckProgressThreshold ||
-        aiCar.speed >= aiCfg.grassRecoverySpeedThreshold);
-    if (currentSurface === "water" || !intentionalGrassShortcut) {
+    if (distanceToPlan > aiCfg.grassRecoveryPathDistance) {
       aiPhysicsRuntime.offRoadTimer += dt;
     } else {
       aiPhysicsRuntime.offRoadTimer = Math.max(
@@ -1314,7 +1552,10 @@ function updateAiProgressHealth(dt, collision) {
       );
     }
   } else {
-    aiPhysicsRuntime.offRoadTimer = 0;
+    aiPhysicsRuntime.offRoadTimer = Math.max(
+      0,
+      aiPhysicsRuntime.offRoadTimer - dt * 3,
+    );
   }
 
   if (collision?.hit) {
@@ -1332,8 +1573,8 @@ function updateAiProgressHealth(dt, collision) {
   }
 
   const recovered =
-    (currentSurface === "asphalt" || currentSurface === "curb") &&
-    progressGain >= aiCfg.stuckProgressThreshold * 2;
+    progressGain >= aiCfg.stuckProgressThreshold * 2 &&
+    aiCar.speed >= aiCfg.stuckSpeedThreshold;
   if (aiPhysicsRuntime.mode === "recover" && recovered) {
     aiPhysicsRuntime.mode = "race";
     aiPhysicsRuntime.recoveryMode = "none";
@@ -1345,11 +1586,25 @@ function updateAiProgressHealth(dt, collision) {
     return;
   }
 
+  // When the car is stuck but NOT wall-blocked, force a replan instead of
+  // entering the reverse-forward recovery cycle.  The planner will find
+  // the best path out (which may go across more grass).
   if (
     aiPhysicsRuntime.mode === "race" &&
-    (aiPhysicsRuntime.lowProgressTimer >= aiCfg.stuckTime ||
-      aiPhysicsRuntime.offRoadTimer >= aiCfg.offRoadStuckTime ||
-      aiPhysicsRuntime.repeatedCollisionTimer >= aiCfg.repeatedCollisionTime)
+    aiPhysicsRuntime.lowProgressTimer >= aiCfg.stuckTime &&
+    aiPhysicsRuntime.repeatedCollisionTimer < aiCfg.repeatedCollisionTime
+  ) {
+    aiPhysicsRuntime.lowProgressTimer = 0;
+    aiPhysicsRuntime.replanCooldown = 0;
+    buildAiPath(getTrackNavigationGraph(track), true);
+    return;
+  }
+
+  // Only the reverse-forward recovery triggers when repeatedly hitting a
+  // wall — this is a genuinely stuck state that replanning can't fix.
+  if (
+    aiPhysicsRuntime.mode === "race" &&
+    aiPhysicsRuntime.repeatedCollisionTimer >= aiCfg.repeatedCollisionTime
   ) {
     aiPhysicsRuntime.mode = "recover";
     aiPhysicsRuntime.recoveryMode = "reverseTurn";
@@ -1363,7 +1618,101 @@ function updateAiVehicle(dt) {
   const assistCfg = physicsConfig.assists;
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
+  const airCfg = physicsConfig.air;
   const surfaceName = surfaceAt(aiCar.x, aiCar.y);
+
+  // --- Spring trigger (same as player) ---
+  const spring = findSpringTrigger(aiCar.x, aiCar.y);
+  if (spring && !vehicleIsFlying(aiCar)) {
+    launchAiFromSpring();
+  }
+
+  // --- Airborne branch: simplified physics while flying ---
+  if (vehicleIsFlying(aiCar)) {
+    const headingX = Math.cos(aiCar.angle);
+    const headingY = Math.sin(aiCar.angle);
+    const headingForwardSpeed = aiCar.vx * headingX + aiCar.vy * headingY;
+    let forwardSpeed = headingForwardSpeed;
+
+    forwardSpeed +=
+      carCfg.engineAccel *
+      airCfg.throttleAccelMul *
+      aiPhysicsRuntime.input.throttle *
+      dt;
+    forwardSpeed -=
+      carCfg.brakeDecel *
+      airCfg.brakeDecelMul *
+      aiPhysicsRuntime.input.brake *
+      dt;
+    forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
+
+    aiCar.vx = headingX * forwardSpeed;
+    aiCar.vy = headingY * forwardSpeed;
+    const collision = resolveObjectCollisions(
+      aiCar.x + aiCar.vx * dt,
+      aiCar.y + aiCar.vy * dt,
+      aiCar.z || 0,
+    );
+    aiCar.x = collision.x;
+    aiCar.y = collision.y;
+    if (collision.hit) {
+      const inwardSpeed =
+        aiCar.vx * collision.normalX + aiCar.vy * collision.normalY;
+      if (inwardSpeed < 0) {
+        aiCar.vx -= inwardSpeed * collision.normalX;
+        aiCar.vy -= inwardSpeed * collision.normalY;
+      }
+    }
+
+    aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
+    aiCar.vz = (aiCar.vz || 0) - airCfg.gravity * dt;
+    aiCar.z = (aiCar.z || 0) + aiCar.vz * dt;
+    aiCar.airTime = (aiCar.airTime || 0) + dt;
+    aiCar.visualScale = Math.min(
+      1.32,
+      1 + Math.max(aiCar.z, 0) * airCfg.visualScalePerMeter,
+    );
+
+    // Landing
+    if (aiCar.z <= 0) {
+      aiCar.z = 0;
+      const landingImpact = clamp(Math.abs(aiCar.vz) / 8, 0, 1);
+      if (
+        aiCar.vz < -airCfg.minBounceVz &&
+        aiPhysicsRuntime.landingBouncePending
+      ) {
+        aiCar.vz = Math.abs(aiCar.vz) * airCfg.bounceRestitution;
+        aiCar.airborne = true;
+        aiCar.airTime += 0.01;
+        aiPhysicsRuntime.landingBouncePending = false;
+        aiPhysicsRuntime.wheelLastPoints = null;
+      } else {
+        aiCar.vz = 0;
+        aiCar.airborne = false;
+        aiCar.airTime = 0;
+        aiCar.visualScale = 1;
+        aiPhysicsRuntime.landingBouncePending = false;
+        aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
+        aiPhysicsRuntime.wheelLastPoints = null;
+        if (surfaceName === "grass") aiPhysicsRuntime.collisionGripTimer = 0.04;
+      }
+      if (landingImpact > 0.08) {
+        emitLandingMarks(surfaceName, landingImpact, aiCar);
+      }
+    }
+
+    const aiHeadingForwardSpeed = aiCar.vx * headingX + aiCar.vy * headingY;
+    const prevForward = aiPhysicsRuntime.prevForwardSpeed;
+    const longAccel =
+      prevForward === null || dt <= 0
+        ? 0
+        : (aiHeadingForwardSpeed - prevForward) / dt;
+    aiPhysicsRuntime.prevForwardSpeed = aiHeadingForwardSpeed;
+    updateAiProgressHealth(dt, collision);
+    return;
+  }
+
+  // --- Grounded physics (existing code) ---
   const targetSurface =
     physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
   const blendAlpha = flags.SURFACE_BLENDING
@@ -1557,7 +1906,7 @@ function updateAiVehicle(dt) {
   const collision = resolveObjectCollisions(
     aiCar.x + aiCar.vx * dt + pivotShiftX,
     aiCar.y + aiCar.vy * dt + pivotShiftY,
-    0,
+    aiCar.z || 0,
   );
   aiCar.x = collision.x;
   aiCar.y = collision.y;
@@ -1895,7 +2244,7 @@ function recordSkids(
   }
 }
 
-function emitLandingMarks(surfaceName, impact) {
+function emitLandingMarks(surfaceName, impact, vehicle = car) {
   const isGrass = surfaceName === "grass";
   const isWater = surfaceName === "water";
   const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
@@ -1907,10 +2256,10 @@ function emitLandingMarks(surfaceName, impact) {
       ? "rgba(245, 250, 255, 0.42)"
       : "rgba(20, 20, 20, 0.37)";
   const width = isGrass || isWater ? 2.7 : 2.2;
-  const forwardX = Math.cos(car.angle);
-  const forwardY = Math.sin(car.angle);
+  const forwardX = Math.cos(vehicle.angle);
+  const forwardY = Math.sin(vehicle.angle);
   const markLength = 4 + clamp(impact, 0, 1) * 7;
-  const wheelPoints = wheelWorldPoints();
+  const wheelPoints = wheelWorldPoints(vehicle);
 
   for (const point of wheelPoints) {
     const mark = {
@@ -2013,6 +2362,24 @@ function launchFromSpring() {
   physicsRuntime.landingBouncePending = true;
   physicsRuntime.lastGroundedSpeed = car.speed;
   physicsRuntime.wheelLastPoints = null;
+}
+
+function launchAiFromSpring() {
+  const airCfg = physicsConfig.air;
+  const speedRatio = clamp(
+    aiCar.speed / Math.max(physicsConfig.car.maxSpeed, 1),
+    0,
+    1,
+  );
+  const apexHeight = Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
+  aiCar.airborne = true;
+  aiCar.airTime = 0;
+  aiCar.z = Math.max(aiCar.z || 0, 0.02);
+  aiCar.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
+  aiCar.visualScale = 1 + aiCar.z * airCfg.visualScalePerMeter;
+  aiPhysicsRuntime.landingBouncePending = true;
+  aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
+  aiPhysicsRuntime.wheelLastPoints = null;
 }
 
 function resolveLanding(surfaceName) {

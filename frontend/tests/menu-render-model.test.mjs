@@ -69,7 +69,7 @@ function setupDomStubs() {
 
 setupDomStubs();
 
-const { state } = await import("../js/state.js");
+const { keys, state } = await import("../js/state.js");
 const {
   canDeleteTrackPreset,
   getTrackPreset,
@@ -84,6 +84,7 @@ const {
 const {
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
+  pauseActiveRace,
   getSettingsRenderLayout,
   getSettingsHeaderRenderModel,
   getTrackSelectRenderModel,
@@ -216,6 +217,25 @@ test("settings header model defines centered title", () => {
   assert.equal(header.text, "SETTINGS");
   assert.equal(header.textAlign, "center");
   assert.equal(header.xRatio, 0.5);
+});
+
+test("pauseActiveRace pauses a local race and clears held inputs", () => {
+  state.mode = "racing";
+  state.paused = false;
+  state.pauseMenuIndex = 1;
+  state.tournamentRoom.active = false;
+  keys.accel = true;
+  keys.left = true;
+  keys.handbrake = true;
+
+  const paused = pauseActiveRace();
+
+  assert.equal(paused, true);
+  assert.equal(state.paused, true);
+  assert.equal(state.pauseMenuIndex, 0);
+  assert.equal(keys.accel, false);
+  assert.equal(keys.left, false);
+  assert.equal(keys.handbrake, false);
 });
 
 test("canDeleteTrackPreset allows admins to delete any unpublished db track", () => {

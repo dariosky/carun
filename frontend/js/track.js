@@ -617,11 +617,33 @@ function clearNavSegment(
     const t = step / samples;
     const x = ax + (bx - ax) * t;
     const y = ay + (by - ay) * t;
-    const surface = surfaceAtForTrack(x, y, trackDef, objects);
-    if (surface === "water") return false;
     if (resolveObjectCollisions(x, y, 0, objects).hit) return false;
   }
   return true;
+}
+
+function navSurfacePenaltyAlongSegment(
+  ax,
+  ay,
+  bx,
+  by,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  const samples = 6;
+  let totalPenalty = 0;
+  for (let step = 0; step <= samples; step++) {
+    const t = step / samples;
+    const x = ax + (bx - ax) * t;
+    const y = ay + (by - ay) * t;
+    totalPenalty += nodeSurfacePenalty(
+      surfaceAtForTrack(x, y, trackDef, objects),
+    );
+  }
+  return (
+    (totalPenalty / (samples + 1)) *
+    physicsConfig.ai.edgeSegmentSurfacePenaltyWeight
+  );
 }
 
 function distanceToSolidObject(x, y, obj) {
@@ -778,6 +800,7 @@ function chooseBestLapEdge(node, graph) {
   let bestEdge = null;
   let bestScore = Infinity;
   for (const edge of graph.edges[node.id]) {
+    if (edge.kind === "backward") continue;
     const nextNode = graph.nodes[edge.to];
     if (!nextNode) continue;
     let futureCost = 0;
@@ -974,11 +997,11 @@ export function getTrackNavigationGraph(
       const x = frame.point.x + frame.normal.x * laneOffset;
       const y = frame.point.y + frame.normal.y * laneOffset;
       const surface = surfaceAtForTrack(x, y, trackDef, objects);
-      if (surface === "water") continue;
       if (resolveObjectCollisions(x, y, 0, objects).hit) continue;
       const obstacleInfo = obstaclePenaltyAtPoint(x, y, objects);
       if (obstacleInfo.blocked) continue;
       const baseTargetSpeed = computeBaseTargetSpeed(curvature);
+      const nearSpring = !!findSpringTrigger(x, y, objects);
       const nodeId = nodes.length;
       nodes.push({
         id: nodeId,
@@ -1000,12 +1023,14 @@ export function getTrackNavigationGraph(
         obstacleClearance: obstacleInfo.clearance,
         baseTargetSpeed,
         targetSpeed: baseTargetSpeed,
+        nearSpring,
       });
       nodesBySlice[sliceIndex][laneIndex] = nodeId;
     }
   }
 
   const edges = Array.from({ length: nodes.length }, () => []);
+  // Forward edges: connect each node to the next 1–2 slices.
   for (const node of nodes) {
     for (const step of [1, 2]) {
       const nextSliceIndex = (node.sliceIndex + step) % progressCount;
@@ -1041,21 +1066,87 @@ export function getTrackNavigationGraph(
         const laneChangePenalty =
           Math.abs(nextNode.laneIndex - node.laneIndex) *
           aiCfg.laneChangePenalty;
+        // When the departure node sits on a spring, the car will fly — reduce
+        // surface and obstacle penalties significantly since the car won't be
+        // touching the ground.
+        const springDiscount = node.nearSpring ? 0.2 : 1;
         const surfacePenalty =
-          nodeSurfacePenalty(node.surface) +
-          nodeSurfacePenalty(nextNode.surface);
+          (nodeSurfacePenalty(node.surface) +
+            nodeSurfacePenalty(nextNode.surface) +
+            navSurfacePenaltyAlongSegment(
+              node.x,
+              node.y,
+              nextNode.x,
+              nextNode.y,
+              trackDef,
+              objects,
+            )) *
+          springDiscount;
         const curvaturePenalty = nextNode.curvature * 42;
         const cost =
           distance +
           laneChangePenalty +
           surfacePenalty +
           curvaturePenalty +
-          (node.obstaclePenalty + nextNode.obstaclePenalty) * 0.35 +
-          segmentObstacleInfo.penalty * 0.8 +
+          (node.obstaclePenalty + nextNode.obstaclePenalty) *
+            0.35 *
+            springDiscount +
+          segmentObstacleInfo.penalty * 0.8 * springDiscount +
           (step - 1) * 4;
         addNavEdge(edges, node, nextNode, cost, step, "progress");
       }
     }
+  }
+
+  // Backward edges: connect each node to the previous slice (same lane only).
+  // These let the AI reverse direction when it overshoots a checkpoint or
+  // needs to exit a loop it has already visited.  Tagged "backward" so the
+  // route builder and continuation greedy walks can skip them.
+  for (const node of nodes) {
+    const prevSliceIndex =
+      (node.sliceIndex - 1 + progressCount) % progressCount;
+    const prevNodeId = nodesBySlice[prevSliceIndex][node.laneIndex];
+    if (prevNodeId < 0) continue;
+    const prevNode = nodes[prevNodeId];
+    if (
+      !clearNavSegment(
+        node.x,
+        node.y,
+        prevNode.x,
+        prevNode.y,
+        trackDef,
+        objects,
+      )
+    ) {
+      continue;
+    }
+    const segInfo = obstaclePenaltyAlongSegment(
+      node.x,
+      node.y,
+      prevNode.x,
+      prevNode.y,
+      objects,
+    );
+    if (segInfo.blocked) continue;
+    const distance = Math.hypot(prevNode.x - node.x, prevNode.y - node.y);
+    const surfPenalty =
+      nodeSurfacePenalty(node.surface) +
+      nodeSurfacePenalty(prevNode.surface) +
+      navSurfacePenaltyAlongSegment(
+        node.x,
+        node.y,
+        prevNode.x,
+        prevNode.y,
+        trackDef,
+        objects,
+      );
+    const cost =
+      distance +
+      surfPenalty +
+      prevNode.curvature * 42 +
+      (node.obstaclePenalty + prevNode.obstaclePenalty) * 0.35 +
+      segInfo.penalty * 0.8;
+    addNavEdge(edges, node, prevNode, cost, -1, "backward");
   }
 
   for (const node of nodes) {
@@ -1100,15 +1191,27 @@ export function getTrackNavigationGraph(
         objects,
       );
       if (segmentObstacleInfo.blocked) continue;
+      const junctionSpringDiscount = node.nearSpring ? 0.2 : 1;
       const surfacePenalty =
-        nodeSurfacePenalty(node.surface) +
-        nodeSurfacePenalty(candidate.surface);
+        (nodeSurfacePenalty(node.surface) +
+          nodeSurfacePenalty(candidate.surface) +
+          navSurfacePenaltyAlongSegment(
+            node.x,
+            node.y,
+            candidate.x,
+            candidate.y,
+            trackDef,
+            objects,
+          )) *
+        junctionSpringDiscount;
       const cost =
         distance +
         surfacePenalty +
         candidate.curvature * 24 +
-        (node.obstaclePenalty + candidate.obstaclePenalty) * 0.2 +
-        segmentObstacleInfo.penalty * 0.85 +
+        (node.obstaclePenalty + candidate.obstaclePenalty) *
+          0.2 *
+          junctionSpringDiscount +
+        segmentObstacleInfo.penalty * 0.85 * junctionSpringDiscount +
         aiCfg.navIntersectionPenalty;
       shortcutEdges.push({
         toNode: candidate,

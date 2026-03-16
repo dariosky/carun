@@ -189,6 +189,23 @@ function makeIntersectionTrackData() {
   };
 }
 
+function getPathSurfaceExposure(graph, pathNodeIds, samplesPerSegment = 10) {
+  const counts = { grass: 0, water: 0 };
+  for (let index = 0; index < pathNodeIds.length - 1; index++) {
+    const fromNode = graph.nodes[pathNodeIds[index]];
+    const toNode = graph.nodes[pathNodeIds[index + 1]];
+    if (!fromNode || !toNode) continue;
+    for (let step = 0; step <= samplesPerSegment; step++) {
+      const t = step / samplesPerSegment;
+      const x = fromNode.x + (toNode.x - fromNode.x) * t;
+      const y = fromNode.y + (toNode.y - fromNode.y) * t;
+      const surface = surfaceAt(x, y);
+      if (surface === "grass" || surface === "water") counts[surface] += 1;
+    }
+  }
+  return counts;
+}
+
 test("legacy world objects gain default heights and wall defaults", () => {
   const imported = importTrackPresetData({
     id: "vertical-legacy",
@@ -617,7 +634,7 @@ test("ai replanning keeps the next unpassed checkpoint as the destination", () =
   assert.ok(goalIndex < aiPhysicsRuntime.plannedNodeIds.length - 1);
 });
 
-test("planTrackNavPath prefers the shortest branch even when loop progress is tempting", () => {
+test("planTrackNavPath prefers the branch that advances to the next checkpoint", () => {
   const graph = {
     nodes: [
       { id: 0, x: 0, y: 0, progress: 0.08 },
@@ -641,7 +658,238 @@ test("planTrackNavPath prefers the shortest branch even when loop progress is te
     averageSegmentLength: 12,
   };
 
-  assert.deepEqual(planTrackNavPath(graph, 0, [3]), [0, 4, 5, 3]);
+  assert.deepEqual(planTrackNavPath(graph, 0, [3]), [0, 1, 2, 3]);
+});
+
+test("inner-loop checkpoint: AI enters loop, reaches checkpoint, and exits", () => {
+  // Graph topology: a main line (0→1→2→3→4→5) with a side loop
+  // branching at node 2 (junction to 6→7→8→back to 4).
+  // The checkpoint (goal) is at node 7, inside the loop.
+  // The optimal path enters the loop at 2, goes 6→7 (checkpoint), then
+  // continues 7→8→4 to rejoin the main line.
+  // It should NOT follow the entire main line 2→3→4→5 and skip the loop.
+  //
+  //  Main:     0 ──→ 1 ──→ 2 ──→ 3 ──→ 4 ──→ 5
+  //                        ↓              ↑
+  //  Loop:                 6 ──→ 7* ──→ 8 ┘
+  //
+  const speed = physicsConfig.ai.targetSpeedMax;
+  const node = (id, x, y, progress) => ({
+    id,
+    x,
+    y,
+    progress,
+    baseTargetSpeed: speed,
+    surface: "asphalt",
+    obstaclePenalty: 0,
+    nearSpring: false,
+  });
+  const graph = {
+    nodes: [
+      node(0, 0, 0, 0.0),
+      node(1, 40, 0, 0.1),
+      node(2, 80, 0, 0.2), // branch point
+      node(3, 120, 0, 0.3),
+      node(4, 160, 0, 0.4), // rejoin point
+      node(5, 200, 0, 0.5),
+      node(6, 80, 40, 0.22), // loop entry
+      node(7, 120, 40, 0.28), // CHECKPOINT (goal)
+      node(8, 160, 40, 0.35), // loop exit
+    ],
+    edges: [
+      /* 0 */ [{ to: 1, cost: 40, step: 1, kind: "progress" }],
+      /* 1 */ [{ to: 2, cost: 40, step: 1, kind: "progress" }],
+      /* 2 */ [
+        { to: 3, cost: 40, step: 1, kind: "progress" },
+        { to: 6, cost: 40, step: 2, kind: "junction" },
+      ],
+      /* 3 */ [{ to: 4, cost: 40, step: 1, kind: "progress" }],
+      /* 4 */ [{ to: 5, cost: 40, step: 1, kind: "progress" }],
+      /* 5 */ [],
+      /* 6 */ [{ to: 7, cost: 40, step: 1, kind: "progress" }],
+      /* 7 */ [{ to: 8, cost: 40, step: 1, kind: "progress" }],
+      /* 8 */ [{ to: 4, cost: 40, step: 1, kind: "junction" }],
+    ],
+    averageSegmentLength: 40,
+  };
+
+  // Goal is node 7 (the checkpoint inside the loop)
+  const path = planTrackNavPath(graph, 0, [7]);
+
+  assert.ok(path.length > 0, "path should be found");
+  // Must go through the loop: 0→1→2→6→7
+  assert.ok(path.includes(6), "path must enter the loop (node 6)");
+  assert.ok(path.includes(7), "path must reach the checkpoint (node 7)");
+  // Must NOT include node 3 (the main-line node past the branch)
+  assert.ok(
+    !path.includes(3),
+    "path should not follow the main line past the branch",
+  );
+  assert.ok(!path.includes(5), "path should not continue to end of main line");
+  assert.deepEqual(path, [0, 1, 2, 6, 7]);
+});
+
+test("time-based planner takes grass shortcut only when faster", () => {
+  // Two paths from 0 to 2:
+  //   Direct: 0 → 1(grass, 20px) → 2   — short but through grass
+  //   Long:   0 → 3(asphalt, 80px) → 4(asphalt, 80px) → 2   — long but fast
+  //
+  // Grass equilibrium speed ≈ 0.153 × maxSpeed.
+  // Direct time: 20 / (0.153 × 350) ≈ 0.37s
+  // Long time: 160 / 350 ≈ 0.46s
+  // → Grass shortcut is faster, planner should take it.
+  const speed = physicsConfig.ai.targetSpeedMax;
+  const node = (id, x, y, surface) => ({
+    id,
+    x,
+    y,
+    progress: id * 0.1,
+    baseTargetSpeed: speed,
+    surface,
+    obstaclePenalty: 0,
+    nearSpring: false,
+  });
+  const graph = {
+    nodes: [
+      node(0, 0, 0, "asphalt"),
+      node(1, 10, 0, "grass"), // grass node
+      node(2, 20, 0, "asphalt"),
+      node(3, 0, 80, "asphalt"), // long way
+      node(4, 20, 80, "asphalt"),
+    ],
+    edges: [
+      /* 0 */ [
+        { to: 1, cost: 10, step: 1, kind: "progress" },
+        { to: 3, cost: 80, step: 1, kind: "progress" },
+      ],
+      /* 1 */ [{ to: 2, cost: 10, step: 1, kind: "progress" }],
+      /* 2 */ [],
+      /* 3 */ [{ to: 4, cost: 80, step: 1, kind: "progress" }],
+      /* 4 */ [{ to: 2, cost: 80, step: 1, kind: "junction" }],
+    ],
+    averageSegmentLength: 20,
+  };
+
+  const path = planTrackNavPath(graph, 0, [2]);
+  // The 20px grass shortcut is faster → planner takes the direct route
+  assert.deepEqual(
+    path,
+    [0, 1, 2],
+    "should take the short grass path when faster",
+  );
+});
+
+test("time-based planner avoids grass when asphalt route is faster", () => {
+  // Two paths from 0 to 2:
+  //   Direct: 0 → 1(grass, 200px) → 2   — long through grass
+  //   Detour: 0 → 3(asphalt, 60px) → 4(asphalt, 60px) → 2   — moderate on asphalt
+  //
+  // Grass time: 200 / (0.153 × 350) ≈ 3.73s
+  // Asphalt time: 120 / 350 ≈ 0.34s
+  // → Asphalt is massively faster.
+  const speed = physicsConfig.ai.targetSpeedMax;
+  const node = (id, x, y, surface) => ({
+    id,
+    x,
+    y,
+    progress: id * 0.1,
+    baseTargetSpeed: speed,
+    surface,
+    obstaclePenalty: 0,
+    nearSpring: false,
+  });
+  const graph = {
+    nodes: [
+      node(0, 0, 0, "asphalt"),
+      node(1, 100, 0, "grass"),
+      node(2, 200, 0, "asphalt"),
+      node(3, 30, 60, "asphalt"),
+      node(4, 170, 60, "asphalt"),
+    ],
+    edges: [
+      /* 0 */ [
+        { to: 1, cost: 100, step: 1, kind: "progress" },
+        { to: 3, cost: 60, step: 1, kind: "progress" },
+      ],
+      /* 1 */ [{ to: 2, cost: 100, step: 1, kind: "progress" }],
+      /* 2 */ [],
+      /* 3 */ [{ to: 4, cost: 60, step: 1, kind: "progress" }],
+      /* 4 */ [{ to: 2, cost: 60, step: 1, kind: "junction" }],
+    ],
+    averageSegmentLength: 60,
+  };
+
+  const path = planTrackNavPath(graph, 0, [2]);
+  // Asphalt detour is faster → planner avoids the grass
+  assert.deepEqual(
+    path,
+    [0, 3, 4, 2],
+    "should avoid long grass when asphalt is faster",
+  );
+});
+
+test("AI reverses out of a completed loop instead of repeating it", () => {
+  // After hitting a checkpoint inside a loop, the AI is past it and needs
+  // to reach the next checkpoint on the main section.  Backward edges let
+  // the AI reverse to the junction instead of going all the way around.
+  //
+  //  Main:     0 ──→ 1 ──→ 2 ──→ 3(goal)
+  //                  ↑      ↓
+  //  Loop:           5 ←── 4    (AI is here at node 4, past the old checkpoint)
+  //
+  // Forward-only: 4→5 is not connected to 1 (no shortcut), so the AI
+  // would need edges 4→…→loop…→1→2→3.
+  // With backward edges: 4→(backward)→2→3.
+  const speed = physicsConfig.ai.targetSpeedMax;
+  const node = (id, x, y, progress) => ({
+    id,
+    x,
+    y,
+    progress,
+    baseTargetSpeed: speed,
+    surface: "asphalt",
+    obstaclePenalty: 0,
+    nearSpring: false,
+  });
+  const graph = {
+    nodes: [
+      node(0, 0, 0, 0.0),
+      node(1, 40, 0, 0.1), // junction point
+      node(2, 80, 0, 0.2), // junction point (loop exit / backward target)
+      node(3, 120, 0, 0.3), // GOAL (next checkpoint)
+      node(4, 80, 40, 0.25), // inside loop, past old checkpoint — AI starts here
+      node(5, 40, 40, 0.15), // loop node
+    ],
+    edges: [
+      /* 0 */ [{ to: 1, cost: 40, step: 1, kind: "progress" }],
+      /* 1 */ [
+        { to: 2, cost: 40, step: 1, kind: "progress" },
+        { to: 5, cost: 40, step: 2, kind: "junction" },
+      ],
+      /* 2 */ [
+        { to: 3, cost: 40, step: 1, kind: "progress" },
+        { to: 4, cost: 40, step: 2, kind: "junction" },
+      ],
+      /* 3 */ [],
+      /* 4 */ [
+        { to: 5, cost: 40, step: 1, kind: "progress" },
+        { to: 2, cost: 40, step: -1, kind: "backward" }, // backward to junction
+      ],
+      /* 5 */ [{ to: 1, cost: 40, step: 2, kind: "junction" }],
+    ],
+    averageSegmentLength: 40,
+  };
+
+  const path = planTrackNavPath(graph, 4, [3]);
+
+  assert.ok(path.length > 0, "path should be found");
+  // With backward edge: 4 → 2 (backward) → 3.  Only 3 nodes.
+  // Without backward: 4 → 5 → 1 → 2 → 3.  5 nodes + more time.
+  assert.deepEqual(
+    path,
+    [4, 2, 3],
+    "should reverse to junction then go forward",
+  );
 });
 
 test("track navigation graph adds junction links for intersecting layouts", () => {
@@ -657,6 +905,99 @@ test("track navigation graph adds junction links for intersecting layouts", () =
       (edge) => edge.step >= physicsConfig.ai.navIntersectionMinSliceGap,
     ),
   );
+});
+
+test("checkpoint path planning avoids off-road shortcuts when a dry route exists", () => {
+  enableAiOpponents();
+  resetRace();
+  const graph = getTrackNavigationGraph();
+  const goalNodeIds = graph.checkpointGoalNodeIds[0];
+  let worstExposure = null;
+
+  for (const node of graph.nodes) {
+    if (node.surface !== "asphalt" && node.surface !== "curb") continue;
+    if (!(graph.edges[node.id] || []).length) continue;
+    const path = planTrackNavPath(graph, node.id, goalNodeIds);
+    if (path.length <= 10) continue;
+    const exposure = getPathSurfaceExposure(graph, path);
+    const totalExposure = exposure.grass + exposure.water;
+    if (!worstExposure || totalExposure > worstExposure.totalExposure) {
+      worstExposure = { nodeId: node.id, exposure, totalExposure, path };
+    }
+  }
+
+  assert.ok(worstExposure);
+  // Time-based planner may route through small water/grass sections when the
+  // shortcut is genuinely faster.  Ensure exposure stays moderate — large
+  // detours through penalty surfaces should never be chosen.
+  assert.ok(
+    worstExposure.exposure.water <= 16,
+    `water exposure ${worstExposure.exposure.water} exceeds 16`,
+  );
+  assert.ok(
+    worstExposure.totalExposure <= 44,
+    `total off-road exposure ${worstExposure.totalExposure} exceeds 44`,
+  );
+});
+
+test("track navigation graph keeps water nodes available as expensive shortcuts", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const trackData = makeTrackData();
+  const waterFrame = trackFrameAtAngle(Math.PI * 0.5, trackData);
+  const imported = importTrackPresetData({
+    id: "vertical-water-shortcut",
+    name: "VERTICAL WATER SHORTCUT",
+    track: trackData,
+    checkpoints: [
+      { angle: 0 },
+      { angle: Math.PI * 0.5 },
+      { angle: Math.PI },
+      { angle: Math.PI * 1.5 },
+    ],
+    worldObjects: [
+      {
+        type: "pond",
+        x: waterFrame.point.x,
+        y: waterFrame.point.y,
+        rx: 56,
+        ry: 48,
+        angle: 0,
+        seed: 0.2,
+      },
+    ],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+
+  try {
+    const trackIndex = trackOptions.findIndex(
+      (option) => option.id === imported.id,
+    );
+    state.selectedTrackIndex = trackIndex;
+    applyTrackPreset(trackIndex);
+    const graph = getTrackNavigationGraph();
+    const waterNodeCount = graph.nodes.filter(
+      (node) => node.surface === "water",
+    ).length;
+    const connectedWaterNodeCount = graph.nodes.filter(
+      (node) =>
+        node.surface === "water" &&
+        ((graph.edges[node.id] || []).length > 0 ||
+          graph.edges.some((edges) =>
+            edges.some((edge) => edge.to === node.id),
+          )),
+    ).length;
+
+    assert.ok(waterNodeCount > 0);
+    assert.ok(connectedWaterNodeCount > 0);
+  } finally {
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex(
+      (option) => option.id === originalTrackId,
+    );
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
+  }
 });
 
 test("best lap route keeps clearance from placed road obstacles", () => {

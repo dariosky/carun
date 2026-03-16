@@ -1094,6 +1094,25 @@ function returnToTrackSelect() {
   state.pauseMenuIndex = 0;
 }
 
+export function pauseActiveRace() {
+  if (state.mode !== "racing") return false;
+
+  if (tournamentRoomActive()) {
+    if (!state.tournamentRoom.paused) {
+      toggleTournamentRoomPause();
+    }
+    clearRaceInputs();
+    return true;
+  }
+
+  if (!state.paused) {
+    state.paused = true;
+    state.pauseMenuIndex = 0;
+  }
+  clearRaceInputs();
+  return true;
+}
+
 function setRaceReturnTarget(mode, editorTrackIndex = null) {
   state.raceReturn.mode = mode;
   state.raceReturn.editorTrackIndex =
@@ -2342,7 +2361,11 @@ function onKeyDown(e) {
 
     if (tournamentRoomActive() && (key === "p" || key === "escape")) {
       if (!e.repeat) {
-        toggleTournamentRoomPause();
+        if (state.tournamentRoom.paused) {
+          toggleTournamentRoomPause();
+        } else {
+          pauseActiveRace();
+        }
       }
       clearRaceInputs();
       return;
@@ -2350,8 +2373,7 @@ function onKeyDown(e) {
 
     if (key === "p" || key === "escape") {
       if (!state.paused) {
-        state.paused = true;
-        state.pauseMenuIndex = 0;
+        pauseActiveRace();
       } else if (key === "p") {
         state.paused = false;
       }
