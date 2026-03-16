@@ -1,5 +1,6 @@
 import {
   CHECKPOINT_WIDTH_MULTIPLIER,
+  applyTrackPreset,
   physicsConfig,
   checkpoints,
   getTrackPresetById,
@@ -138,6 +139,17 @@ function smoothInputValue(current, target, dt) {
   const smoothing = physicsConfig.car.inputSmoothing;
   const response = clamp((1 - smoothing) * dt * 60, 0, 1);
   return current + (target - current) * response;
+}
+
+function vehicleIsFlying(vehicle = car) {
+  return Boolean(vehicle?.airborne) || Number(vehicle?.z) > 0.001;
+}
+
+function getVehicleSurfaceAt(
+  vehicle = car,
+  groundSurfaceName = surfaceAt(vehicle.x, vehicle.y),
+) {
+  return vehicleIsFlying(vehicle) ? "flying" : groundSurfaceName;
 }
 
 function distanceToSegment(px, py, ax, ay, bx, by) {
@@ -412,6 +424,50 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
   return [];
 }
 
+function findReachableTrackNavPlan(
+  graph,
+  {
+    x,
+    y,
+    progressHint = null,
+    maxDistance = Infinity,
+    goalNodeIds = [],
+    fallbackGoalNodeIds = [],
+  },
+) {
+  const candidates = [];
+  for (const node of graph.nodes) {
+    const distance = Math.hypot(node.x - x, node.y - y);
+    if (distance > maxDistance) continue;
+    if (!(graph.edges[node.id] || []).length) continue;
+    let score = distance;
+    if (progressHint !== null) {
+      const progressDelta = progressDeltaForward(progressHint, node.progress);
+      score += Math.min(progressDelta, 1 - progressDelta) * 90;
+    }
+    candidates.push({ node, score });
+  }
+  candidates.sort((a, b) => a.score - b.score);
+
+  for (const candidate of candidates.slice(0, 24)) {
+    let plannedNodeIds = goalNodeIds.length
+      ? planTrackNavPath(graph, candidate.node.id, goalNodeIds)
+      : [];
+    if (!plannedNodeIds.length && fallbackGoalNodeIds.length) {
+      plannedNodeIds = planTrackNavPath(
+        graph,
+        candidate.node.id,
+        fallbackGoalNodeIds,
+      );
+    }
+    if (plannedNodeIds.length) {
+      return { node: candidate.node, plannedNodeIds };
+    }
+  }
+
+  return null;
+}
+
 function getRouteNodeIdAt(graph, routeIndex) {
   if (!graph.bestLapRouteNodeIds.length) return -1;
   const normalizedIndex =
@@ -531,6 +587,20 @@ function buildAiPath(graph, force = false) {
       currentNode.id,
       checkpointFallbackNodeIds,
     );
+  }
+  if (!plannedNodeIds.length) {
+    const fallbackPlan = findReachableTrackNavPlan(graph, {
+      x: aiCar.x,
+      y: aiCar.y,
+      progressHint: aiPhysicsRuntime.progress,
+      maxDistance: aiCfg.softResetSearchRadiusFallback,
+      goalNodeIds: checkpointGoalNodeIds,
+      fallbackGoalNodeIds: checkpointFallbackNodeIds,
+    });
+    if (fallbackPlan) {
+      aiPhysicsRuntime.currentNodeId = fallbackPlan.node.id;
+      plannedNodeIds = fallbackPlan.plannedNodeIds;
+    }
   }
   if (plannedNodeIds.length) {
     plannedNodeIds = appendCheckpointContinuation(
@@ -1702,6 +1772,7 @@ function emitDrivingParticles({
   emitters.smokeCooldown = Math.max(0, emitters.smokeCooldown - dt);
   emitters.splashCooldown = Math.max(0, emitters.splashCooldown - dt);
   emitters.dustCooldown = Math.max(0, emitters.dustCooldown - dt);
+  if (vehicleIsFlying(vehicle)) return;
 
   const speedAbs = Math.abs(headingForwardSpeed);
   const lateralAbs = Math.abs(headingLateralSpeed);
@@ -1730,9 +1801,9 @@ function emitDrivingParticles({
   }
 
   const waterStrength =
-    surfaceName === "water" ? clamp((car.speed - 30) / 115, 0, 1) : 0;
+    surfaceName === "water" ? clamp((vehicle.speed - 30) / 115, 0, 1) : 0;
   if (waterStrength > 0.03 && emitters.splashCooldown <= 0) {
-    const travelAngle = Math.atan2(car.vy, car.vx);
+    const travelAngle = Math.atan2(vehicle.vy, vehicle.vx);
     const sprayAngle = Number.isFinite(travelAngle)
       ? travelAngle
       : Math.atan2(forwardY, forwardX);
@@ -1750,9 +1821,9 @@ function emitDrivingParticles({
   }
 
   const grassStrength =
-    surfaceName === "grass" ? clamp((car.speed - 42) / 120, 0, 1) : 0;
+    surfaceName === "grass" ? clamp((vehicle.speed - 42) / 120, 0, 1) : 0;
   if (grassStrength > 0.02 && emitters.dustCooldown <= 0) {
-    const travelAngle = Math.atan2(car.vy, car.vx);
+    const travelAngle = Math.atan2(vehicle.vy, vehicle.vx);
     const dustAngle = Number.isFinite(travelAngle)
       ? travelAngle + Math.PI
       : Math.atan2(-forwardY, -forwardX);
@@ -2013,7 +2084,6 @@ function integrateAirborneMotion(dt, surfaceName) {
     1.32,
     1 + Math.max(car.z, 0) * airCfg.visualScalePerMeter,
   );
-  physicsRuntime.debug.surface = surfaceName;
   physicsRuntime.debug.vForward = forwardSpeed;
   physicsRuntime.debug.vLateral = 0;
   physicsRuntime.debug.z = car.z;
@@ -2022,13 +2092,15 @@ function integrateAirborneMotion(dt, surfaceName) {
   physicsRuntime.debug.pivotY = car.y;
 
   resolveLanding(surfaceName);
+  const effectiveSurfaceName = getVehicleSurfaceAt(car, surfaceName);
+  physicsRuntime.debug.surface = effectiveSurfaceName;
 
   const prevForward = physicsRuntime.prevForwardSpeed;
   const longAccel =
     prevForward === null || dt <= 0 ? 0 : (forwardSpeed - prevForward) / dt;
   physicsRuntime.prevForwardSpeed = forwardSpeed;
   updateVehicleAudioState({
-    surfaceName,
+    surfaceName: effectiveSurfaceName,
     headingForwardSpeed: forwardSpeed,
     headingLateralSpeed: 0,
     longAccel,
@@ -2125,6 +2197,9 @@ function resetAiOpponentForRace(
 }
 
 export function resetRace() {
+  // Reset the runtime track state to the selected preset so transient race-time
+  // mutations do not leak into the next start.
+  applyTrackPreset(state.selectedTrackIndex);
   const spawnAngle = trackStartAngle(track);
   const spawnPoint = pointOnCenterLine(spawnAngle, track);
   const aheadPoint = pointOnCenterLine(spawnAngle + 0.02, track);
@@ -2378,7 +2453,8 @@ export function updateRace(dt) {
     state.startSequence.goFlash = Math.max(0, state.startSequence.goFlash - dt);
   }
 
-  const surfaceName = surfaceAt(car.x, car.y);
+  const groundSurfaceName = surfaceAt(car.x, car.y);
+  const surfaceName = getVehicleSurfaceAt(car, groundSurfaceName);
 
   if (state.startSequence.active) {
     state.startSequence.elapsed += dt;
@@ -2407,8 +2483,8 @@ export function updateRace(dt) {
       skidAmount: 0,
       surface: surfaceName,
       isMoving: false,
-      airborne: false,
-      airborneAmount: 0,
+      airborne: vehicleIsFlying(car),
+      airborneAmount: clamp(car.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1),
       wheelSpinAmount: 0,
     });
     gameAudio.updateRivalVehicleAudio({
@@ -2433,11 +2509,11 @@ export function updateRace(dt) {
   }
 
   const targetSurface =
-    physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
+    physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
 
   const throttleTarget = keys.accel ? 1 : 0;
   const brakeTarget = keys.brake ? 1 : 0;
-  const steerTarget = car.airborne
+  const steerTarget = vehicleIsFlying(car)
     ? 0
     : (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
   const handbrakeTarget = keys.handbrake ? 1 : 0;
@@ -2470,8 +2546,8 @@ export function updateRace(dt) {
     );
   }
 
-  if (car.airborne) {
-    integrateAirborneMotion(dt, surfaceName);
+  if (vehicleIsFlying(car)) {
+    integrateAirborneMotion(dt, groundSurfaceName);
     updateAiField(dt);
     if (!lapData.finished) {
       checkCheckpointProgress(car, lapData, {
@@ -2580,7 +2656,7 @@ export function updateRace(dt) {
 
   let effectiveLateralGrip =
     carCfg.lateralGrip * physicsRuntime.surface.lateralGripMul;
-  const allowAutoDrift = surfaceName !== "grass";
+  const allowAutoDrift = groundSurfaceName !== "grass";
   if (
     flags.AUTO_DRIFT_ON_STEER &&
     allowAutoDrift &&
@@ -2745,7 +2821,7 @@ export function updateRace(dt) {
   const headingForwardSpeed =
     car.vx * headingForwardX + car.vy * headingForwardY;
   const headingLateralSpeed = car.vx * headingRightX + car.vy * headingRightY;
-  physicsRuntime.debug.surface = surfaceName;
+  physicsRuntime.debug.surface = getVehicleSurfaceAt(car, groundSurfaceName);
   physicsRuntime.debug.vForward = headingForwardSpeed;
   physicsRuntime.debug.vLateral = headingLateralSpeed;
   physicsRuntime.debug.pivotX = car.x + headingForwardX * pivotOffset;
@@ -2763,10 +2839,12 @@ export function updateRace(dt) {
       : (headingForwardSpeed - prevForward) / dt;
   physicsRuntime.prevForwardSpeed = headingForwardSpeed;
   const spring = findSpringTrigger(car.x, car.y);
-  if (spring && !car.airborne) {
+  if (spring && !vehicleIsFlying(car)) {
     launchFromSpring();
   }
   const skidSurface = surfaceAt(car.x, car.y);
+  const effectiveSurfaceName = getVehicleSurfaceAt(car, skidSurface);
+  physicsRuntime.debug.surface = effectiveSurfaceName;
   const wheelPoints = wheelWorldPoints();
   recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
   emitDrivingParticles({
@@ -2782,7 +2860,7 @@ export function updateRace(dt) {
     clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
     clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
   updateVehicleAudioState({
-    surfaceName: skidSurface,
+    surfaceName: effectiveSurfaceName,
     headingForwardSpeed,
     headingLateralSpeed,
     longAccel,

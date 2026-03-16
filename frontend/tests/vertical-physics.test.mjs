@@ -117,6 +117,7 @@ const {
   resolveCarToCarCollision,
   updateRace,
 } = await import("../js/physics.js");
+const { gameAudio } = await import("../js/game-audio.js");
 const {
   findNearestTrackNavNode,
   findSpringTrigger,
@@ -325,6 +326,85 @@ test("updateRace launches on spring and disables steering while airborne", () =>
   updateRace(0.016);
   keys.left = false;
   assert.equal(car.angle, angleBefore);
+});
+
+test("airborne player state reports flying surface instead of water", () => {
+  resetRace();
+  state.startSequence.active = false;
+  worldObjects.length = 0;
+
+  const audioCalls = [];
+  const originalUpdateVehicleAudio = gameAudio.updateVehicleAudio;
+  gameAudio.updateVehicleAudio = (params) => {
+    audioCalls.push(params);
+  };
+
+  try {
+    worldObjects.push({
+      type: "pond",
+      x: car.x,
+      y: car.y,
+      rx: 90,
+      ry: 72,
+      angle: 0,
+      seed: 0.2,
+    });
+    worldObjects.push({
+      type: "spring",
+      x: car.x,
+      y: car.y,
+      r: 20,
+      angle: 0,
+      height: 0.4,
+    });
+    car.vx = Math.cos(car.angle) * 180;
+    car.vy = Math.sin(car.angle) * 180;
+    car.speed = 180;
+
+    updateRace(0.016);
+
+    assert.equal(car.airborne, true);
+    assert.equal(physicsRuntime.debug.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.airborne, true);
+
+    updateRace(0.016);
+
+    assert.equal(car.airborne, true);
+    assert.equal(physicsRuntime.debug.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.airborne, true);
+  } finally {
+    gameAudio.updateVehicleAudio = originalUpdateVehicleAudio;
+  }
+});
+
+test("resetRace restores the selected preset world objects", () => {
+  resetRace();
+  const originalObjects = worldObjects.map((object) => ({ ...object }));
+
+  worldObjects.length = 0;
+  worldObjects.push({
+    type: "pond",
+    x: car.x,
+    y: car.y,
+    rx: 90,
+    ry: 72,
+    angle: 0,
+    seed: 0.2,
+  });
+  worldObjects.push({
+    type: "spring",
+    x: car.x,
+    y: car.y,
+    r: 20,
+    angle: 0,
+    height: 0.4,
+  });
+
+  resetRace();
+
+  assert.deepEqual(worldObjects, originalObjects);
 });
 
 test("resetRace spawns a five-car AI field with matching heading and lap state", () => {

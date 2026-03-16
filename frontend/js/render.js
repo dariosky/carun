@@ -73,6 +73,12 @@ import { drawParticles, drawScreenParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
+const POND_PATH_SEGMENTS = 64;
+const POND_BORDER_WIDTH = 3;
+const POND_RENDER_SCALE = 2;
+const POND_RENDER_PADDING = 10;
+const POND_FILL_COLOR = "#7aa1c2";
+const POND_BORDER_COLOR = "#8de2ff";
 
 function aiOpponentsEnabled() {
   return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
@@ -109,6 +115,7 @@ function activeMenuTagline() {
 let pixelNoiseOverlay = null;
 let cachedTrackBoundaries = null;
 let cachedTrackSignature = null;
+const mergedPondRenderCache = new WeakMap();
 const previewTrackDataCache = new Map();
 const centerlineLengthCache = new WeakMap();
 
@@ -134,6 +141,146 @@ function ensurePixelNoiseOverlay() {
   }
   pixelNoiseOverlay = noiseCanvas;
   return pixelNoiseOverlay;
+}
+
+function tracePath(context, points) {
+  if (!points.length) return;
+  context.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    context.lineTo(points[i].x, points[i].y);
+  }
+  context.closePath();
+}
+
+function getPondPathPoints(pond) {
+  const angle = pond.angle || 0;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return sampleClosedPath((a) => {
+    const radius = blobRadius(pond.rx, pond.ry, a, pond.seed || 0);
+    const localX = Math.cos(a) * radius;
+    const localY = Math.sin(a) * radius;
+    return {
+      x: pond.x + localX * cos - localY * sin,
+      y: pond.y + localX * sin + localY * cos,
+    };
+  }, POND_PATH_SEGMENTS);
+}
+
+function getPondRenderSignature(ponds) {
+  if (!ponds.length) return "";
+  return ponds
+    .map((pond) =>
+      [pond.x, pond.y, pond.rx, pond.ry, pond.seed || 0, pond.angle || 0]
+        .map((value) => Number(value).toFixed(3))
+        .join(":"),
+    )
+    .join("|");
+}
+
+function getPondOutlineOffsets(radiusPx) {
+  const offsets = [];
+  const limit = Math.max(1, Math.round(radiusPx));
+  for (let y = -limit; y <= limit; y++) {
+    for (let x = -limit; x <= limit; x++) {
+      if (!x && !y) continue;
+      if (Math.hypot(x, y) <= limit + 0.15) offsets.push({ x, y });
+    }
+  }
+  return offsets;
+}
+
+function buildMergedPondRender(objects) {
+  if (!Array.isArray(objects)) return null;
+  const ponds = objects
+    .map(normalizeWorldObject)
+    .filter((obj) => obj?.type === "pond");
+  if (!ponds.length) return null;
+
+  const signature = getPondRenderSignature(ponds);
+  const cached = mergedPondRenderCache.get(objects);
+  if (cached?.signature === signature) return cached.render;
+
+  const pondPaths = ponds.map(getPondPathPoints);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const path of pondPaths) {
+    for (const point of path) {
+      if (point.x < minX) minX = point.x;
+      if (point.y < minY) minY = point.y;
+      if (point.x > maxX) maxX = point.x;
+      if (point.y > maxY) maxY = point.y;
+    }
+  }
+
+  if (!Number.isFinite(minX)) return null;
+
+  minX = Math.floor(minX - POND_RENDER_PADDING);
+  minY = Math.floor(minY - POND_RENDER_PADDING);
+  maxX = Math.ceil(maxX + POND_RENDER_PADDING);
+  maxY = Math.ceil(maxY + POND_RENDER_PADDING);
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const pixelWidth = Math.max(1, Math.ceil(width * POND_RENDER_SCALE));
+  const pixelHeight = Math.max(1, Math.ceil(height * POND_RENDER_SCALE));
+
+  const maskCanvas = createTextureCanvas(pixelWidth, pixelHeight);
+  const fillCanvas = createTextureCanvas(pixelWidth, pixelHeight);
+  const resultCanvas = createTextureCanvas(pixelWidth, pixelHeight);
+  const maskCtx = maskCanvas.getContext("2d");
+  const fillCtx = fillCanvas.getContext("2d");
+  const resultCtx = resultCanvas.getContext("2d");
+  const drawMergedPaths = (context) => {
+    context.save();
+    context.scale(POND_RENDER_SCALE, POND_RENDER_SCALE);
+    context.translate(-minX, -minY);
+    for (const path of pondPaths) {
+      context.beginPath();
+      tracePath(context, path);
+      context.fill();
+    }
+    context.restore();
+  };
+
+  maskCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+  maskCtx.fillStyle = POND_BORDER_COLOR;
+  drawMergedPaths(maskCtx);
+
+  fillCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+  fillCtx.fillStyle = POND_FILL_COLOR;
+  drawMergedPaths(fillCtx);
+
+  resultCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+  const outlineOffsets = getPondOutlineOffsets(
+    POND_BORDER_WIDTH * POND_RENDER_SCALE,
+  );
+  for (const offset of outlineOffsets) {
+    resultCtx.drawImage(maskCanvas, offset.x, offset.y);
+  }
+  resultCtx.globalCompositeOperation = "destination-out";
+  resultCtx.drawImage(maskCanvas, 0, 0);
+  resultCtx.globalCompositeOperation = "source-over";
+  resultCtx.drawImage(fillCanvas, 0, 0);
+
+  const render = { canvas: resultCanvas, minX, minY, width, height };
+  mergedPondRenderCache.set(objects, { signature, render });
+  return render;
+}
+
+function drawMergedPonds(objects) {
+  const render = buildMergedPondRender(objects);
+  if (!render) return false;
+  ctx.drawImage(
+    render.canvas,
+    render.minX,
+    render.minY,
+    render.width,
+    render.height,
+  );
+  return true;
 }
 
 function widthProfileSignature(values) {
@@ -303,6 +450,7 @@ function drawDecor(objects = worldObjects) {
     state.mode === "editor" && state.editor.latestEditTarget?.kind === "object"
       ? state.editor.latestEditTarget.objectIndex
       : -1;
+  drawMergedPonds(objects);
   for (const [index, obj] of objects.entries()) {
     const normalized = normalizeWorldObject(obj);
     if (!normalized) continue;
@@ -369,35 +517,15 @@ function drawDecor(objects = worldObjects) {
     }
 
     if (normalized.type === "pond") {
-      const angle = normalized.angle || 0;
-      ctx.fillStyle = "#7aa1c2";
-      const waterPath = sampleClosedPath((a) => {
-        const radius = blobRadius(
-          normalized.rx,
-          normalized.ry,
-          a,
-          normalized.seed || 0,
-        );
-        return {
-          x: Math.cos(a) * radius,
-          y: Math.sin(a) * radius,
-        };
-      }, 64);
-      ctx.save();
-      ctx.translate(normalized.x, normalized.y);
-      ctx.rotate(angle);
-      ctx.beginPath();
-      drawPath(waterPath);
-      ctx.fill();
-      ctx.strokeStyle = "#8de2ff";
-      ctx.lineWidth = 3;
-      ctx.stroke();
       if (shouldFlash) {
         ctx.strokeStyle = "#ffe167";
         ctx.lineWidth = 4;
+        const waterPath = getPondPathPoints(normalized);
+        ctx.beginPath();
+        tracePath(ctx, waterPath);
         ctx.stroke();
       }
-      ctx.restore();
+      continue;
     }
 
     if (normalized.type === "barrel") {
@@ -1338,7 +1466,7 @@ function drawDebugVectors() {
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
   ctx.fillText(
-    `SURFACE: ${physicsRuntime.debug.surface.toUpperCase()}`,
+    `SURFACE AT: ${physicsRuntime.debug.surface.toUpperCase()}`,
     lineX,
     firstLineY,
   );
