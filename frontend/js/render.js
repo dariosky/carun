@@ -1130,6 +1130,21 @@ function getBestLapTime(lapTimes) {
   );
 }
 
+function traceKartOutlinePath() {
+  ctx.beginPath();
+  ctx.moveTo(0, -29);
+  ctx.quadraticCurveTo(10, -28, 13, -20);
+  ctx.lineTo(14, -7);
+  ctx.quadraticCurveTo(15, 6, 12, 20);
+  ctx.quadraticCurveTo(9, 29, 4, 30);
+  ctx.lineTo(-4, 30);
+  ctx.quadraticCurveTo(-9, 29, -12, 20);
+  ctx.quadraticCurveTo(-15, 6, -14, -7);
+  ctx.lineTo(-13, -20);
+  ctx.quadraticCurveTo(-10, -28, 0, -29);
+  ctx.closePath();
+}
+
 function drawVehicle(
   vehicle,
   { accent = "#d22525", blink = false, label = "" } = {},
@@ -1167,6 +1182,16 @@ function drawVehicle(
     ctx.shadowBlur = 18 + 24 * glowStrength;
   }
 
+  ctx.save();
+  ctx.scale(1.11, 1.11);
+  traceKartOutlinePath();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 4;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.stroke();
+  ctx.restore();
+
   if (kartSpriteReady) {
     const spriteWidth = 30;
     const spriteLength = 56;
@@ -1182,13 +1207,15 @@ function drawVehicle(
     ctx.fillRect(-8, -24, 16, 7);
     ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = accent;
-    ctx.fillRect(
-      -vehicle.height / 2,
-      -vehicle.width / 2,
-      vehicle.height,
-      vehicle.width,
-    );
+    traceKartOutlinePath();
+    ctx.fillStyle = "#243541";
+    ctx.fill();
+    traceKartOutlinePath();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
     ctx.fillStyle = "#ffd34d";
     ctx.fillRect(-6, -8, 12, 16);
   }
