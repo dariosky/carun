@@ -36,6 +36,7 @@ def create_tournament_room(
 ):
     room, participant_id = store.create_room(
         display_name=payload.display_name.strip(),
+        player_color=payload.player_color.strip(),
         tracks=[track.model_dump() for track in payload.tracks],
         ai_roster=[slot.model_dump() for slot in payload.ai_roster],
     )
@@ -68,6 +69,7 @@ def join_tournament_room(
         room, participant_id = store.join_room(
             room_id,
             display_name=payload.display_name.strip(),
+            player_color=payload.player_color.strip(),
             participant_id=payload.participant_id.strip() if payload.participant_id else None,
         )
     except KeyError:

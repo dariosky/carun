@@ -1,7 +1,9 @@
 import {
   applyTrackPreset,
   importTrackPresetData,
+  savePlayerColor,
   sanitizePlayerName,
+  sanitizeCarColor,
   trackOptions,
 } from "./parameters.js";
 import {
@@ -156,10 +158,13 @@ function syncRoomRoster(room) {
     localSlot?.display_name || state.playerName,
   );
   state.playerName = localName;
+  state.playerColor = sanitizeCarColor(localSlot?.color, state.playerColor);
+  savePlayerColor(state.playerColor);
 
   const rivals = rivalRoomSlots().map((slot) => ({
     name: slot.display_name,
     style: slot.kind === "ai" ? slot.style || "precise" : "precise",
+    color: slot.color,
     topSpeedMul:
       slot.kind === "ai" && Number.isFinite(slot.top_speed_mul)
         ? Number(slot.top_speed_mul)
@@ -361,6 +366,7 @@ function buildAiRosterPayload() {
   return state.aiRoster.map((entry) => ({
     name: entry.name,
     style: entry.style,
+    color: entry.color,
     top_speed_mul: entry.topSpeedMul,
     lane_offset: entry.laneOffset,
   }));
@@ -463,6 +469,7 @@ export async function createHostedTournamentRoom() {
 
   const response = await createTournamentRoom({
     display_name: sanitizeRoomPlayerName(state.playerName),
+    player_color: state.playerColor,
     tracks: buildRoomTracksPayload(indices),
     ai_roster: buildAiRosterPayload(),
   });
@@ -478,6 +485,7 @@ export async function joinTournamentRoomFromPath(roomId) {
   const existingParticipantId = loadRoomSession(roomId);
   const response = await joinTournamentRoom(roomId, {
     display_name: sanitizeRoomPlayerName(state.playerName),
+    player_color: state.playerColor,
     participant_id: existingParticipantId,
   });
   state.tournamentRoom.participantId = response.participant_id;

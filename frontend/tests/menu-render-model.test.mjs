@@ -168,6 +168,7 @@ test("login providers model exposes provider options and selected row", () => {
 test("settings render layout uses longest rendered row label", () => {
   state.auth.authenticated = true;
   state.playerName = "SUPERLONGNAME";
+  state.playerColor = "sky";
   state.editingName = false;
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
   physicsConfig.flags.AI_OPPONENT_COUNT = 3;
@@ -176,34 +177,38 @@ test("settings render layout uses longest rendered row label", () => {
   const layout = getSettingsRenderLayout((text) => text.length * 10);
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
+    "PLAYER COLOR",
     "MENU MUSIC",
     "AI OPPONENTS",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",
   ]);
-  assert.equal(layout.rowGap, 66);
-  assert.equal(layout.startY, 338);
+  assert.equal(layout.rowGap, 56);
+  assert.equal(layout.startY, 314);
 
   const longestRow = "PLAYER NAME: SUPERLONGNAME";
-  const expected = Math.max(560, longestRow.length * 10 + 92);
+  const expected = Math.max(720, longestRow.length * 10 + 92);
   assert.equal(layout.highlightWidth, expected);
 });
 
 test("settings render layout shows AI count even when AI are disabled", () => {
   state.auth.authenticated = false;
+  state.playerColor = "mint";
   physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
   physicsConfig.flags.AI_OPPONENT_COUNT = 4;
 
   const layout = getSettingsRenderLayout((text) => text.length * 10);
   assert.deepEqual(layout.settingsItems, [
     "PLAYER NAME",
+    "PLAYER COLOR",
     "MENU MUSIC",
     "AI OPPONENTS",
     "DEBUG MODE",
     "BACK",
   ]);
-  assert.equal(layout.rowLabels[2], "AI OPPONENTS: 4 (AI OFF)");
+  assert.equal(layout.rowLabels[1], "PLAYER COLOR: MINT");
+  assert.equal(layout.rowLabels[3], "AI OPPONENTS: 4 (AI OFF)");
 });
 
 test("settings header model defines centered title", () => {

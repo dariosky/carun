@@ -1,6 +1,7 @@
 def make_create_payload():
     return {
         "display_name": "Host Racer",
+        "player_color": "crimson",
         "tracks": [
             {
                 "id": "track-alpha",
@@ -20,10 +21,11 @@ def make_create_payload():
             {
                 "name": f"AI {index}",
                 "style": "precise" if index == 1 else "long",
+                "color": ["sky", "mint", "gold"][index - 1],
                 "top_speed_mul": 1 if index == 1 else 0.9,
                 "lane_offset": 0 if index == 1 else 18,
             }
-            for index in range(1, 6)
+            for index in range(1, 4)
         ],
     }
 
@@ -35,14 +37,16 @@ def test_create_and_join_tournament_room(client):
     create_payload = create_response.json()
     assert create_payload["participant_id"]
     assert create_payload["room"]["phase"] == "lobby"
-    assert len(create_payload["room"]["slots"]) == 6
+    assert len(create_payload["room"]["slots"]) == 4
     assert create_payload["room"]["slots"][0]["kind"] == "human"
+    assert create_payload["room"]["slots"][0]["color"] == "crimson"
     assert create_payload["room"]["slots"][1]["kind"] == "ai"
+    assert create_payload["room"]["slots"][1]["color"] == "sky"
 
     room_id = create_payload["room"]["id"]
     join_response = client.post(
         f"/api/tournaments/{room_id}/join",
-        json={"display_name": "Guest Racer"},
+        json={"display_name": "Guest Racer", "player_color": "pink"},
     )
 
     assert join_response.status_code == 200
@@ -51,6 +55,7 @@ def test_create_and_join_tournament_room(client):
     human_slots = [slot for slot in join_payload["room"]["slots"] if slot["kind"] == "human"]
     assert len(human_slots) == 2
     assert any(slot["display_name"] == "Guest Racer" for slot in human_slots)
+    assert any(slot["color"] == "pink" for slot in human_slots)
 
 
 def test_tournament_room_websocket_broadcasts_state(client):
@@ -61,7 +66,7 @@ def test_tournament_room_websocket_broadcasts_state(client):
 
     guest_response = client.post(
         f"/api/tournaments/{room_id}/join",
-        json={"display_name": "Guest Racer"},
+        json={"display_name": "Guest Racer", "player_color": "pink"},
     )
     guest_payload = guest_response.json()
 

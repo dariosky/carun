@@ -117,6 +117,10 @@ def create_app() -> FastAPI:
         def frontend_tracks():
             return index_response()
 
+        @app.api_route("/settings", methods=["GET", "HEAD"], include_in_schema=False)
+        def frontend_settings():
+            return index_response()
+
         @app.api_route("/tracks/edit/{track_id}", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend_track_editor(track_id: str):
             return index_response()

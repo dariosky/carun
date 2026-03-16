@@ -13,18 +13,21 @@ class TournamentTrackPayload(BaseModel):
 class TournamentAiSlotPayload(BaseModel):
     name: str = Field(min_length=1, max_length=36)
     style: Literal["precise", "long", "bump"]
+    color: str = Field(min_length=1, max_length=24)
     top_speed_mul: float = Field(ge=0.8, le=1.0)
     lane_offset: float = 0
 
 
 class TournamentCreateRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=36)
+    player_color: str = Field(min_length=1, max_length=24)
     tracks: list[TournamentTrackPayload] = Field(min_length=1)
-    ai_roster: list[TournamentAiSlotPayload] = Field(min_length=5, max_length=5)
+    ai_roster: list[TournamentAiSlotPayload] = Field(min_length=1, max_length=5)
 
 
 class TournamentJoinRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=36)
+    player_color: str = Field(min_length=1, max_length=24)
     participant_id: str | None = Field(default=None, max_length=64)
 
 
@@ -35,6 +38,7 @@ class TournamentRoomSlotResponse(BaseModel):
     participant_id: str | None = None
     is_host: bool = False
     connected: bool = True
+    color: str | None = None
     style: Literal["precise", "long", "bump"] | None = None
     top_speed_mul: float | None = None
     lane_offset: float | None = None

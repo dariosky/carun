@@ -5,6 +5,8 @@ import {
   CENTERLINE_SMOOTHING_MODES,
   DEFAULT_CENTERLINE_SMOOTHING_MODE,
   deleteOwnTrackFromApi,
+  CAR_COLOR_PALETTE,
+  getCarColorLabel,
   getMenuItems,
   getGameModeItems,
   getLoginProviderItems,
@@ -19,10 +21,12 @@ import {
   saveAiOpponentsEnabled,
   saveTrackPresetToDb,
   saveMenuMusicEnabled,
+  savePlayerColor,
   setTrackPresetMetadata,
   physicsConfig,
   sanitizePlayerName,
   sanitizeAiOpponentCount,
+  sanitizeCarColor,
   saveDebugMode,
   saveTrackPreset,
   savePlayerName,
@@ -716,13 +720,16 @@ export function getSettingsRenderLayout(measureTextWidth) {
     0,
     Math.min(state.settingsIndex, settingsItems.length - 1),
   );
-  const rowGap = 66;
-  const startY = 338;
+  const rowGap = 56;
+  const startY = 314;
 
   const rowLabels = settingsItems.map((item) => {
     if (item === "PLAYER NAME") {
       const suffix = state.editingName ? "_" : "";
       return `${item}: ${state.playerName}${suffix}`;
+    }
+    if (item === "PLAYER COLOR") {
+      return `${item}: ${getCarColorLabel(state.playerColor)}`;
     }
     if (item === "MENU MUSIC") {
       return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
@@ -745,7 +752,7 @@ export function getSettingsRenderLayout(measureTextWidth) {
   for (const label of rowLabels) {
     maxWidth = Math.max(maxWidth, measureTextWidth(label));
   }
-  const highlightWidth = Math.max(560, maxWidth + 92);
+  const highlightWidth = Math.max(720, maxWidth + 92);
 
   return {
     settingsItems,
@@ -954,6 +961,10 @@ function setTrackEditorUrl(trackId) {
 
 function setMainMenuUrl() {
   replaceAppUrl({ pathname: "/" });
+}
+
+function setSettingsUrl() {
+  replaceAppUrl({ pathname: "/settings" });
 }
 
 function setTrackInUrl(trackId) {
@@ -1732,6 +1743,19 @@ function toggleMenuMusic() {
   setMenuMusicEnabled(nextValue);
 }
 
+function setPlayerColor(nextColor) {
+  state.playerColor = sanitizeCarColor(nextColor, state.playerColor);
+  savePlayerColor(state.playerColor);
+}
+
+function stepPlayerColor(delta) {
+  const paletteIds = CAR_COLOR_PALETTE.map((option) => option.id);
+  const currentIndex = Math.max(0, paletteIds.indexOf(state.playerColor));
+  const nextIndex =
+    (currentIndex + delta + paletteIds.length) % paletteIds.length;
+  setPlayerColor(paletteIds[nextIndex]);
+}
+
 function toggleAiOpponents() {
   physicsConfig.flags.AI_OPPONENTS_ENABLED =
     !physicsConfig.flags.AI_OPPONENTS_ENABLED;
@@ -1957,6 +1981,7 @@ function activateSelection() {
     }
     if (selectedItem === "SETTINGS") {
       state.mode = "settings";
+      setSettingsUrl();
       syncMenuMusicForMode(state.mode);
       state.settingsIndex = 0;
       state.editingName = false;
@@ -2066,6 +2091,10 @@ function activateSelection() {
       state.editingName = !state.editingName;
       return;
     }
+    if (selectedSetting === "PLAYER COLOR") {
+      stepPlayerColor(1);
+      return;
+    }
     if (selectedSetting === "MENU MUSIC") {
       toggleMenuMusic();
       return;
@@ -2087,6 +2116,7 @@ function activateSelection() {
           state.auth.isAdmin = false;
           state.playerName = sanitizePlayerName(state.playerName);
           state.mode = "menu";
+          setMainMenuUrl();
           syncMenuMusicForMode(state.mode);
           state.menuIndex = 0;
           state.settingsIndex = 0;
@@ -2103,6 +2133,7 @@ function activateSelection() {
     }
     if (selectedSetting === "BACK") {
       state.mode = "menu";
+      setMainMenuUrl();
       syncMenuMusicForMode(state.mode);
       state.menuIndex = settingsMenuIndex();
       state.paused = false;
@@ -2392,6 +2423,7 @@ function onKeyDown(e) {
   }
   if (state.mode === "settings" && key === "escape") {
     state.mode = "menu";
+    setMainMenuUrl();
     syncMenuMusicForMode(state.mode);
     state.menuIndex = settingsMenuIndex();
     state.paused = false;
@@ -2811,7 +2843,9 @@ function onKeyDown(e) {
     state.mode === "settings"
   ) {
     const selected = currentSettingsItems()[state.settingsIndex];
-    if (selected === "AI OPPONENTS") {
+    if (selected === "PLAYER COLOR") {
+      stepPlayerColor(key === "arrowleft" ? -1 : 1);
+    } else if (selected === "AI OPPONENTS") {
       stepAiOpponentCount(key === "arrowleft" ? -1 : 1);
     } else if (selected === "DEBUG MODE") {
       toggleDebugMode();

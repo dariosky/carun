@@ -5,8 +5,11 @@ import {
   AI_LONG_NAME_POOL,
   AI_OPPONENT_NAME_POOL,
   AI_PRECISE_NAME_POOL,
+  CAR_COLOR_PALETTE,
   loadPlayerName,
+  loadPlayerColor,
   physicsConfig,
+  sanitizeCarColor,
   track,
 } from "./parameters.js";
 import { nextTaglineSet } from "./taglines.js";
@@ -59,6 +62,7 @@ export const state = {
     remoteStates: {},
   },
   playerName: loadPlayerName(),
+  playerColor: loadPlayerColor(),
   auth: {
     authenticated: false,
     userId: null,
@@ -339,6 +343,39 @@ function syncAiRosterToCars() {
   });
 }
 
+function pickRivalColorIds(count, blockedColorId, shuffle = false) {
+  const pool = CAR_COLOR_PALETTE.map((option) => option.id).filter(
+    (colorId) => colorId !== sanitizeCarColor(blockedColorId),
+  );
+  const orderedPool = shuffle ? shuffleArray(pool) : pool;
+  return Array.from(
+    { length: count },
+    (_, index) => orderedPool[index % orderedPool.length],
+  );
+}
+
+function normalizeAiColorIds(profiles, fallbackColors, blockedColorId) {
+  const blocked = sanitizeCarColor(blockedColorId);
+  const availableColors = CAR_COLOR_PALETTE.map((option) => option.id).filter(
+    (colorId) => colorId !== blocked,
+  );
+  const used = new Set();
+
+  return profiles.map((profile, index) => {
+    const requested = sanitizeCarColor(profile?.color, fallbackColors[index]);
+    if (!used.has(requested) && requested !== blocked) {
+      used.add(requested);
+      return requested;
+    }
+    const fallback =
+      availableColors.find((colorId) => !used.has(colorId)) ||
+      fallbackColors[index] ||
+      availableColors[index % availableColors.length];
+    used.add(fallback);
+    return fallback;
+  });
+}
+
 function getConfiguredAiOpponentCount() {
   const configured = Number(physicsConfig.flags.AI_OPPONENT_COUNT);
   if (!Number.isFinite(configured)) return 0;
@@ -366,6 +403,12 @@ export function assignAiRoster(profiles = null) {
   const rosterSize = Array.isArray(profiles)
     ? Math.max(0, Math.min(AI_OPPONENT_COUNT, rosterProfiles.length))
     : getConfiguredAiOpponentCount();
+  const fallbackColors = pickRivalColorIds(rosterSize, state.playerColor);
+  const normalizedColors = normalizeAiColorIds(
+    rosterProfiles,
+    fallbackColors,
+    state.playerColor,
+  );
   state.aiRoster = Array.from({ length: rosterSize }, (_, index) => {
     const profile = rosterProfiles[index];
     const name = String(profile?.name || "").trim();
@@ -384,6 +427,7 @@ export function assignAiRoster(profiles = null) {
       id: `ai-${index + 1}`,
       name: name || getAiLabel(index),
       style,
+      color: normalizedColors[index],
       topSpeedMul,
       laneOffset,
       kind: profile?.kind === "remoteHuman" ? "remoteHuman" : "ai",
@@ -434,10 +478,12 @@ export function assignRandomAiRoster() {
       };
     }),
   ];
+  const rivalColors = pickRivalColorIds(targetCount, state.playerColor, true);
 
   return assignAiRoster(
     shuffleArray(profiles).map((profile, index) => ({
       id: `ai-${index + 1}`,
+      color: rivalColors[index],
       ...profile,
     })),
   );

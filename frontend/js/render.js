@@ -8,6 +8,7 @@ import {
   CURB_MIN_WIDTH,
   CURB_STRIPE_LENGTH,
   DEFAULT_AI_OPPONENT_COUNT,
+  getCarColorHex,
   checkpoints,
   getConnectedCenterlinePoints,
   getTrackPreset,
@@ -72,10 +73,17 @@ import { drawParticles, drawScreenParticles } from "./particles.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
-const AI_ACCENTS = ["#4db3ff", "#66d987", "#ffd25e", "#ff8f5c", "#bf8cff"];
 
 function aiOpponentsEnabled() {
   return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
+}
+
+function playerAccentColor() {
+  return getCarColorHex(state.playerColor);
+}
+
+function rivalAccentColor(index) {
+  return getCarColorHex(state.aiRoster[index]?.color);
 }
 
 function activeMenuTagline() {
@@ -1202,7 +1210,7 @@ function drawCar() {
   const vehicles = [
     {
       vehicle: car,
-      accent: "#d22525",
+      accent: playerAccentColor(),
       blink: true,
       label: state.playerName,
     },
@@ -1211,7 +1219,7 @@ function drawCar() {
     activeAiCars.forEach((vehicle, index) => {
       vehicles.push({
         vehicle,
-        accent: AI_ACCENTS[index % AI_ACCENTS.length],
+        accent: rivalAccentColor(index),
         label: vehicle.label,
       });
     });
@@ -1264,7 +1272,7 @@ function drawDebugVectors() {
 
   if (aiOpponentsEnabled()) {
     getActiveAiPhysicsRuntimes().forEach((runtime, index) => {
-      const accent = AI_ACCENTS[index % AI_ACCENTS.length];
+      const accent = rivalAccentColor(index);
       if (runtime.debugPathPoints.length > 1) {
         ctx.strokeStyle = `${accent}cc`;
         ctx.lineWidth = 2;
@@ -1541,12 +1549,12 @@ function drawTitleBar() {
     top,
     playerPanelWidth,
     panelHeight,
-    "rgba(148, 200, 230, 0.34)",
+    `${playerAccentColor()}66`,
   );
-  ctx.fillStyle = "#f4fbff";
+  ctx.fillStyle = playerAccentColor();
   ctx.font = "bold 17px Verdana";
   ctx.fillText(state.playerName, x + 12, 25);
-  ctx.fillStyle = "#d8e8f7";
+  ctx.fillStyle = playerAccentColor();
   ctx.font = "bold 11px Verdana";
   ctx.fillText(
     `P${getRaceOrder()}/${aiOpponentsEnabled() ? activeAiCount + 1 : 1}  L${Math.min(lapData.lap, lapData.maxLaps)}/${lapData.maxLaps}`,
@@ -1591,7 +1599,7 @@ function drawTitleBar() {
       const vehicle = activeAiCars[index];
       const aiLapData = activeAiLapDataList[index];
       const bestLap = getBestLapTime(aiLapData.lapTimes);
-      const accent = AI_ACCENTS[index % AI_ACCENTS.length];
+      const accent = rivalAccentColor(index);
       drawHudPanel(aiX, top, aiTileWidth, panelHeight, `${accent}66`);
       ctx.fillStyle = accent;
       ctx.font = "bold 15px Verdana";
@@ -2299,13 +2307,27 @@ function drawTournamentLobby() {
           ? "#ffe167"
           : "#7ee2ff"
         : "#9cc8a3";
+    const slotColor = getCarColorHex(slot.color);
     ctx.fillStyle = accent;
     ctx.font = "bold 12px Verdana";
     ctx.fillText(slot.kind === "human" ? "HUMAN" : "AI", cardX + 18, y + 18);
 
+    const colorChipSize = 16;
+    const colorChipX = cardX + 18;
+    const colorChipY = y + 24;
+    ctx.fillStyle = slotColor;
+    ctx.fillRect(colorChipX, colorChipY, colorChipSize, colorChipSize);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(colorChipX, colorChipY, colorChipSize, colorChipSize);
+
     ctx.fillStyle = "#f4fbff";
     ctx.font = "bold 20px Verdana";
-    ctx.fillText(slot.display_name || "PLAYER", cardX + 18, y + 39);
+    ctx.fillText(
+      slot.display_name || "PLAYER",
+      colorChipX + colorChipSize + 12,
+      y + 39,
+    );
 
     ctx.fillStyle = "#b9ccdc";
     ctx.font = "15px Verdana";
@@ -3027,12 +3049,13 @@ function drawSettings() {
   const textX = highlightX + 30;
   settingsItems.forEach((_, idx) => {
     const y = startY + idx * rowGap;
+    const item = settingsItems[idx];
     if (idx === selectedSettingsIndex) {
       ctx.fillStyle = "#3d7ec7";
       ctx.fillRect(highlightX, y - 42, highlightWidth, 56);
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = item === "PLAYER COLOR" ? playerAccentColor() : "#ffffff";
     } else {
-      ctx.fillStyle = "#9db6c7";
+      ctx.fillStyle = item === "PLAYER COLOR" ? playerAccentColor() : "#9db6c7";
     }
     ctx.fillText(rowLabels[idx], textX, y);
   });

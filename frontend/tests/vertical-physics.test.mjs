@@ -356,6 +356,7 @@ test("resetRace spawns a five-car AI field with matching heading and lap state",
 
 test("random ai roster uses unique names from the configured pool", () => {
   physicsConfig.flags.AI_OPPONENT_COUNT = aiCars.length;
+  state.playerColor = "sky";
   const roster = assignRandomAiRoster();
   const preciseDrivers = roster.filter((entry) => entry.style === "precise");
   const bumpDrivers = roster.filter((entry) => entry.style === "bump");
@@ -387,6 +388,8 @@ test("random ai roster uses unique names from the configured pool", () => {
       .filter((entry) => entry.style !== "precise")
       .every((entry) => entry.topSpeedMul >= 0.8 && entry.topSpeedMul <= 1),
   );
+  assert.equal(new Set(roster.map((entry) => entry.color)).size, aiCars.length);
+  assert.ok(roster.every((entry) => entry.color !== state.playerColor));
   assert.deepEqual(
     aiCars.map((vehicle) => vehicle.label),
     roster.map((entry) => entry.name),
@@ -408,6 +411,21 @@ test("ai roster profiles propagate lane-offset styles into race runtime", () => 
   assert.equal(aiPhysicsRuntimes[0].targetLaneOffset, 22);
   assert.equal(aiPhysicsRuntimes[1].targetLaneOffset, 0);
   assert.equal(aiPhysicsRuntimes[3].targetLaneOffset, -18);
+});
+
+test("ai roster normalizes duplicate and player-conflicting colors", () => {
+  state.playerColor = "sky";
+  const roster = assignAiRoster([
+    { name: "ONE", style: "precise", color: "sky" },
+    { name: "TWO", style: "bump", color: "mint" },
+    { name: "THREE", style: "long", color: "mint" },
+    { name: "FOUR", style: "precise", color: "gold" },
+    { name: "FIVE", style: "long", color: "gold" },
+  ]);
+
+  assert.equal(roster.length, 5);
+  assert.ok(roster.every((entry) => entry.color !== "sky"));
+  assert.equal(new Set(roster.map((entry) => entry.color)).size, roster.length);
 });
 
 test("external human rivals accept replicated lap state and stay counted until finished", () => {

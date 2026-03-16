@@ -25,6 +25,15 @@ def test_head_tracks_returns_index_headers(client):
     assert response.headers["content-type"].startswith("text/html")
 
 
+def test_head_settings_returns_index_headers(client):
+    response = client.head("/settings")
+
+    assert response.status_code == 200
+    assert response.text == ""
+    assert response.headers["cache-control"] == "no-cache, must-revalidate"
+    assert response.headers["content-type"].startswith("text/html")
+
+
 def test_head_track_edit_returns_index_headers(client):
     response = client.head("/tracks/edit/test-track")
 

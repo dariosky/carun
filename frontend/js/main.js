@@ -122,6 +122,8 @@ const tournamentRoomIdFromPath =
     : "";
 const trackSelectFromPath =
   currentUrl.pathname === "/tracks" || currentUrl.pathname === "/tracks/";
+const settingsFromPath =
+  currentUrl.pathname === "/settings" || currentUrl.pathname === "/settings/";
 const shareFromUrl = currentUrl.searchParams.get("share");
 const trackFromUrl = currentUrl.searchParams.get("track");
 const requestedTrackId =
@@ -183,6 +185,8 @@ if (editTrackIdFromPath) {
   syncMenuMusicForMode(state.mode);
 } else if (trackSelectFromPath) {
   state.mode = "trackSelect";
+} else if (settingsFromPath) {
+  state.mode = "settings";
 }
 if (!editTrackIdFromPath && !raceTrackIdFromPath) {
   setCurbSegments(initCurbSegments());

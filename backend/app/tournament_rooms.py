@@ -31,6 +31,7 @@ class RoomSlot:
     participant_id: str | None = None
     is_host: bool = False
     connected: bool = True
+    color: str | None = None
     style: str | None = None
     top_speed_mul: float | None = None
     lane_offset: float | None = None
@@ -44,6 +45,7 @@ class RoomSlot:
             "participant_id": self.participant_id,
             "is_host": self.is_host,
             "connected": self.connected,
+            "color": self.color,
             "style": self.style,
             "top_speed_mul": self.top_speed_mul,
             "lane_offset": self.lane_offset,
@@ -87,6 +89,7 @@ class TournamentRoomStore:
         self,
         *,
         display_name: str,
+        player_color: str,
         tracks: list[dict],
         ai_roster: list[dict],
     ) -> tuple[Room, str]:
@@ -108,11 +111,13 @@ class TournamentRoomStore:
                 participant_id=participant_id,
                 is_host=True,
                 connected=True,
+                color=player_color,
             )
         ]
         for index, ai_entry in enumerate(ai_roster, start=2):
             template = {
                 "display_name": str(ai_entry["name"]),
+                "color": str(ai_entry["color"]),
                 "style": str(ai_entry["style"]),
                 "top_speed_mul": float(ai_entry["top_speed_mul"]),
                 "lane_offset": float(ai_entry.get("lane_offset", 0)),
@@ -122,6 +127,7 @@ class TournamentRoomStore:
                     slot_id=f"slot-{index}",
                     kind="ai",
                     display_name=template["display_name"],
+                    color=template["color"],
                     style=template["style"],
                     top_speed_mul=template["top_speed_mul"],
                     lane_offset=template["lane_offset"],
@@ -149,6 +155,7 @@ class TournamentRoomStore:
         room_id: str,
         *,
         display_name: str,
+        player_color: str,
         participant_id: str | None = None,
     ) -> tuple[Room, str]:
         room = self.rooms.get(room_id)
@@ -159,6 +166,7 @@ class TournamentRoomStore:
             for slot in room.slots:
                 if slot.participant_id == participant_id and slot.kind == "human":
                     slot.display_name = display_name
+                    slot.color = player_color
                     slot.connected = True
                     return room, participant_id
 
@@ -175,6 +183,7 @@ class TournamentRoomStore:
         next_slot.participant_id = assigned_participant_id
         next_slot.is_host = False
         next_slot.connected = True
+        next_slot.color = player_color
         next_slot.style = None
         next_slot.top_speed_mul = None
         next_slot.lane_offset = None
@@ -270,6 +279,7 @@ class TournamentRoomStore:
                 slot.participant_id = None
                 slot.is_host = False
                 slot.connected = True
+                slot.color = template.get("color")
                 slot.style = template.get("style")
                 slot.top_speed_mul = template.get("top_speed_mul")
                 slot.lane_offset = template.get("lane_offset")

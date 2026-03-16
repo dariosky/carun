@@ -20,6 +20,7 @@ const DEBUG_MODE_STORAGE_KEY = "carun.debugMode";
 const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
 const AI_OPPONENTS_STORAGE_KEY = "carun.aiOpponentsEnabled";
 const AI_OPPONENT_COUNT_STORAGE_KEY = "carun.aiOpponentCount";
+const PLAYER_COLOR_STORAGE_KEY = "carun.playerColor";
 const OBJECT_DEFAULTS = {
   tree: { height: 1.5, r: 24, angle: 0 },
   barrel: { height: 1, r: 12, angle: 0 },
@@ -51,6 +52,62 @@ export function savePlayerName(name) {
     localStorage.setItem(PLAYER_NAME_STORAGE_KEY, sanitizePlayerName(name));
   } catch {
     // Ignore storage failures (private mode, blocked storage, etc.).
+  }
+}
+
+export const CAR_COLOR_PALETTE = [
+  { id: "sky", label: "SKY", hex: "#4db3ff" },
+  { id: "mint", label: "MINT", hex: "#66d987" },
+  { id: "gold", label: "GOLD", hex: "#ffd25e" },
+  { id: "orange", label: "ORANGE", hex: "#ff8f5c" },
+  { id: "violet", label: "VIOLET", hex: "#bf8cff" },
+  { id: "crimson", label: "CRIMSON", hex: "#d22525" },
+  { id: "teal", label: "TEAL", hex: "#34d1c6" },
+  { id: "pink", label: "PINK", hex: "#ff6fae" },
+];
+export const DEFAULT_PLAYER_COLOR = "crimson";
+
+export function getCarColorOption(colorId) {
+  return (
+    CAR_COLOR_PALETTE.find((option) => option.id === colorId) ||
+    CAR_COLOR_PALETTE.find((option) => option.id === DEFAULT_PLAYER_COLOR) ||
+    CAR_COLOR_PALETTE[0]
+  );
+}
+
+export function sanitizeCarColor(colorId, fallback = DEFAULT_PLAYER_COLOR) {
+  const raw = typeof colorId === "string" ? colorId.trim().toLowerCase() : "";
+  const match = CAR_COLOR_PALETTE.find((option) => option.id === raw);
+  if (match) return match.id;
+  return getCarColorOption(fallback).id;
+}
+
+export function getCarColorLabel(colorId) {
+  return getCarColorOption(colorId).label;
+}
+
+export function getCarColorHex(colorId) {
+  return getCarColorOption(colorId).hex;
+}
+
+export function loadPlayerColor(defaultValue = DEFAULT_PLAYER_COLOR) {
+  try {
+    const raw = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY);
+    if (raw !== null) return sanitizeCarColor(raw, defaultValue);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return sanitizeCarColor(defaultValue);
+}
+
+export function savePlayerColor(colorId) {
+  try {
+    localStorage.setItem(
+      PLAYER_COLOR_STORAGE_KEY,
+      sanitizeCarColor(colorId, DEFAULT_PLAYER_COLOR),
+    );
+  } catch {
+    // Ignore storage failures in restricted environments.
   }
 }
 
@@ -198,13 +255,21 @@ export function getSettingsItems(authenticated) {
   return authenticated
     ? [
         "PLAYER NAME",
+        "PLAYER COLOR",
         "MENU MUSIC",
         "AI OPPONENTS",
         "DEBUG MODE",
         "LOGOUT",
         "BACK",
       ]
-    : ["PLAYER NAME", "MENU MUSIC", "AI OPPONENTS", "DEBUG MODE", "BACK"];
+    : [
+        "PLAYER NAME",
+        "PLAYER COLOR",
+        "MENU MUSIC",
+        "AI OPPONENTS",
+        "DEBUG MODE",
+        "BACK",
+      ];
 }
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
