@@ -1,6 +1,7 @@
 import {
   CHECKPOINT_WIDTH_MULTIPLIER,
   applyTrackPreset,
+  getCarColorHex,
   physicsConfig,
   checkpoints,
   getTrackPresetById,
@@ -322,8 +323,11 @@ function getRacerDisplayName(racerKey) {
   }
   const aiState = getAiStateById(racerKey);
   if (!aiState) return String(racerKey || "RIVAL");
-  return String(aiState.vehicle?.label || getAiProfileByIndex(aiState.index).name)
-    .trim() || String(racerKey || "RIVAL");
+  return (
+    String(
+      aiState.vehicle?.label || getAiProfileByIndex(aiState.index).name,
+    ).trim() || String(racerKey || "RIVAL")
+  );
 }
 
 function racerIsHuman(racerKey) {
@@ -333,8 +337,19 @@ function racerIsHuman(racerKey) {
   return getAiProfileByIndex(aiState.index).kind === "remoteHuman";
 }
 
+function getRacerAccentColor(racerKey) {
+  if (racerKey === "player") {
+    return getCarColorHex(state.playerColor);
+  }
+  const aiState = getAiStateById(racerKey);
+  if (!aiState) return "#f3f8ff";
+  return getCarColorHex(getAiProfileByIndex(aiState.index).color);
+}
+
 export function getFinishCelebrationStandings() {
-  const activeRivalCount = aiOpponentsEnabled() ? getActiveAiOpponentCount() : 0;
+  const activeRivalCount = aiOpponentsEnabled()
+    ? getActiveAiOpponentCount()
+    : 0;
   const activeRivals = state.aiRoster.slice(0, activeRivalCount);
   const humanFieldCount =
     1 +
@@ -359,7 +374,9 @@ export function getFinishCelebrationStandings() {
         previous && Number.isFinite(previous.finishTime)
           ? Math.max(
               0,
-              Math.round((Number(entry.finishTime) - Number(previous.finishTime)) * 1000),
+              Math.round(
+                (Number(entry.finishTime) - Number(previous.finishTime)) * 1000,
+              ),
             )
           : 0;
       return {
@@ -369,6 +386,7 @@ export function getFinishCelebrationStandings() {
         finishTime: entry.finishTime,
         gapMs,
         isPlayer: entry.id === "player",
+        accentColor: getRacerAccentColor(entry.id),
       };
     }),
   };

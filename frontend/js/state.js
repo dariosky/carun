@@ -131,6 +131,12 @@ export const state = {
       dragOffsetY: 0,
       hoverLabel: "",
     },
+    panMode: false,
+    viewOffsetX: 0,
+    viewOffsetY: 0,
+    viewDragging: false,
+    viewDragLastScreenX: 0,
+    viewDragLastScreenY: 0,
     latestEditTarget: null,
     selectionFlash: {
       kind: null,

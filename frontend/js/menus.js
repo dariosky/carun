@@ -19,6 +19,7 @@ import {
   regenerateTrackFromCenterlineStrokes,
   saveAiOpponentCount,
   saveAiOpponentsEnabled,
+  saveTrackPreset,
   saveTrackPresetToDb,
   saveMenuMusicEnabled,
   savePlayerColor,
@@ -28,7 +29,6 @@ import {
   sanitizeAiOpponentCount,
   sanitizeCarColor,
   saveDebugMode,
-  saveTrackPreset,
   savePlayerName,
   trackOptions,
   track,
@@ -88,7 +88,7 @@ const EDITOR_TOOLBAR_SECTION_HEIGHT = 38;
 const EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT = 22;
 const EDITOR_DEFAULT_HALF_WIDTH = 60;
 const EDITOR_ZOOM_STEP = 0.1;
-const EDITOR_MIN_WORLD_SCALE = 0.5;
+const EDITOR_MIN_WORLD_SCALE = 0.25;
 const EDITOR_MAX_WORLD_SCALE = 1.75;
 const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
 const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
@@ -98,6 +98,11 @@ function clampWorldScale(value) {
     EDITOR_MIN_WORLD_SCALE,
     Math.min(EDITOR_MAX_WORLD_SCALE, value),
   );
+}
+
+function setEditorPanMode(enabled) {
+  state.editor.panMode = Boolean(enabled);
+  state.editor.viewDragging = false;
 }
 
 function loadEditorToolbarPosition() {
@@ -311,6 +316,20 @@ export function getEditorTopBarLayout() {
     shortcut: "S",
   };
   return { save, curbs, back, race, build };
+}
+
+function clearEditorTrackRecords() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset) return null;
+  const updatedPreset = setTrackPresetMetadata(preset.id, {
+    bestLapMs: null,
+    bestLapDisplayName: null,
+    bestRaceMs: null,
+    bestRaceDisplayName: null,
+  });
+  if (!updatedPreset) return null;
+  saveTrackPreset(state.editor.trackIndex);
+  return updatedPreset;
 }
 
 export function getEditorToolbarLayout() {
@@ -541,10 +560,17 @@ export function getEditorToolbarLayout() {
       width: 58,
       height: 28,
     },
-    zoomLabel: { x: panel.x + 14, y: zoomTop, width: 60, height: 28 },
-    zoomOut: { x: panel.x + 102, y: zoomTop + 2, width: 40, height: 24 },
-    zoomIn: { x: panel.x + 154, y: zoomTop + 2, width: 40, height: 24 },
-    zoomValue: { x: panel.x + 196, y: zoomTop, width: 42, height: 28 },
+    panToggle: {
+      x: panel.x + 14,
+      y: zoomTop + 2,
+      width: 40,
+      height: 24,
+      id: "togglePan",
+    },
+    zoomLabel: { x: panel.x + 62, y: zoomTop, width: 52, height: 28 },
+    zoomOut: { x: panel.x + 120, y: zoomTop + 2, width: 38, height: 24 },
+    zoomIn: { x: panel.x + 166, y: zoomTop + 2, width: 38, height: 24 },
+    zoomValue: { x: panel.x + 210, y: zoomTop, width: 48, height: 28 },
   };
 }
 
@@ -596,6 +622,8 @@ function editorToolbarActionAt(x, y) {
   if (pointInRect(x, y, layout.zoomOut))
     return { type: "action", id: "zoomOut" };
   if (pointInRect(x, y, layout.zoomIn)) return { type: "action", id: "zoomIn" };
+  if (pointInRect(x, y, layout.panToggle))
+    return { type: "action", id: layout.panToggle.id };
   return { type: "panel" };
 }
 
@@ -669,6 +697,8 @@ function editorToolbarActionLabel(actionId) {
       return "Zoom Out";
     case "zoomIn":
       return "Zoom In";
+    case "togglePan":
+      return "Pan View";
     default:
       return "";
   }
@@ -1139,9 +1169,13 @@ function updateEditorCursorFromEvent(event) {
   const screenX = (event.clientX - rect.left) * scaleX;
   const canvasY = (event.clientY - rect.top) * scaleY;
   const screenY = canvasY - EDITOR_TOP_BAR_HEIGHT;
+  updateEditorCursorFromScreen(screenX, screenY, canvasY);
+}
+
+function updateEditorCursorFromScreen(screenX, screenY, canvasY = null) {
   const worldScale = clampWorldScale(Number(track.worldScale) || 1);
   state.editor.cursorScreenX = screenX;
-  state.editor.cursorCanvasY = canvasY;
+  if (canvasY !== null) state.editor.cursorCanvasY = canvasY;
   state.editor.cursorScreenY = screenY;
   state.editor.cursorX = track.cx + (screenX - track.cx) / worldScale;
   state.editor.cursorY = track.cy + (screenY - track.cy) / worldScale;
@@ -1164,6 +1198,7 @@ function startEditorRace() {
   setRaceReturnTarget("editor", state.editor.trackIndex);
   state.mode = "racing";
   syncMenuMusicForMode(state.mode);
+  prepareSingleRaceAiRoster();
   resetRace();
   const selected = trackOptions[state.selectedTrackIndex];
   if (selected) setTrackInUrl(selected.id);
@@ -1608,6 +1643,48 @@ function adjustEditorZoom(direction) {
   applyTrackPreset(state.editor.trackIndex);
 }
 
+function startEditorViewPan() {
+  state.editor.viewDragging = true;
+  state.editor.viewDragLastScreenX = state.editor.cursorScreenX;
+  state.editor.viewDragLastScreenY = state.editor.cursorScreenY;
+}
+
+function panEditorTrackBy(dx, dy) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  const worldScale = clampWorldScale(Number(preset.track.worldScale) || 1);
+  const worldDx = dx / worldScale;
+  const worldDy = dy / worldScale;
+
+  preset.track.cx += worldDx;
+  preset.track.cy += worldDy;
+
+  if (Array.isArray(preset.track.centerlineLoop)) {
+    preset.track.centerlineLoop.forEach((point) => {
+      point.x += worldDx;
+      point.y += worldDy;
+    });
+  }
+  if (Array.isArray(preset.centerlineStrokes)) {
+    preset.centerlineStrokes.forEach((stroke) => {
+      stroke.forEach((point) => {
+        point.x += worldDx;
+        point.y += worldDy;
+      });
+    });
+  }
+  if (Array.isArray(preset.worldObjects)) {
+    preset.worldObjects.forEach((object) => {
+      if (Number.isFinite(object.x)) object.x += worldDx;
+      if (Number.isFinite(object.y)) object.y += worldDy;
+    });
+  }
+
+  applyTrackPreset(state.editor.trackIndex);
+  setCurbSegments(initCurbSegments());
+}
+
 function adjustEditorSmoothing(direction) {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
@@ -1658,6 +1735,7 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "roadSmoothNext") adjustEditorSmoothing(1);
   if (actionId === "zoomOut") adjustEditorZoom(-1);
   if (actionId === "zoomIn") adjustEditorZoom(1);
+  if (actionId === "togglePan") setEditorPanMode(!state.editor.panMode);
 }
 
 function performEditorTopBarAction(actionId) {
@@ -1749,6 +1827,33 @@ function promptSaveEditorTrack() {
       await saveEditorTrack(rawName);
     },
   });
+}
+
+export function promptClearEditorTrackRecords() {
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset) return false;
+  const hasRecords =
+    Number.isFinite(preset.bestLapMs) || Number.isFinite(preset.bestRaceMs);
+  if (!hasRecords) {
+    showSnackbar("No records to clear", { seconds: 1.6, kind: "error" });
+    return false;
+  }
+  openConfirmModal({
+    title: "Clear Records",
+    message: `Clear best lap and race times for ${preset.name || "this track"}?`,
+    confirmLabel: "Clear",
+    cancelLabel: "Cancel",
+    danger: true,
+    onConfirm: () => {
+      const updatedPreset = clearEditorTrackRecords();
+      if (!updatedPreset) return;
+      showSnackbar("Track records cleared", {
+        seconds: 1.6,
+        kind: "success",
+      });
+    },
+  });
+  return true;
 }
 
 function toggleDebugMode() {
@@ -1855,6 +1960,10 @@ export function enterEditor(trackIndex) {
   state.editor.roadMode = "segment";
   state.editor.drawing = false;
   state.editor.activeStroke = [];
+  state.editor.panMode = false;
+  state.editor.viewOffsetX = 0;
+  state.editor.viewOffsetY = 0;
+  state.editor.viewDragging = false;
   state.editor.toolbar.dragging = false;
   const savedToolbarPosition = loadEditorToolbarPosition();
   if (savedToolbarPosition) {
@@ -1968,6 +2077,12 @@ export function getTournamentStandingsData() {
   const lastResult =
     state.tournament.raceResults[state.tournament.raceResults.length - 1] || {};
   return { sorted, raceIndex, totalRaces, lastResult };
+}
+
+export function prepareSingleRaceAiRoster() {
+  if (state.gameMode === "tournament") return state.aiRoster;
+  if (physicsConfig.flags.AI_OPPONENTS_ENABLED === false) return state.aiRoster;
+  return assignRandomAiRoster();
 }
 
 function activateSelection() {
@@ -2094,9 +2209,7 @@ function activateSelection() {
       setRaceReturnTarget("trackSelect");
       state.mode = "racing";
       syncMenuMusicForMode(state.mode);
-      if (physicsConfig.flags.AI_OPPONENTS_ENABLED !== false) {
-        assignRandomAiRoster();
-      }
+      prepareSingleRaceAiRoster();
       resetRace();
       const selected = trackOptions[state.selectedTrackIndex];
       if (selected) setTrackInUrl(selected.id);
@@ -2675,6 +2788,16 @@ function onKeyDown(e) {
       toggleEditorTool("wall");
       return;
     }
+    if (key === "x") {
+      if (e.repeat) return;
+      promptClearEditorTrackRecords();
+      return;
+    }
+    if (key === "h") {
+      if (e.repeat) return;
+      setEditorPanMode(!state.editor.panMode);
+      return;
+    }
     if (key === "r") {
       startEditorRace();
       return;
@@ -2934,6 +3057,19 @@ export function initInputHandlers() {
       saveEditorToolbarPosition();
       return;
     }
+    if (state.mode === "editor" && state.editor.viewDragging) {
+      const dx = state.editor.cursorScreenX - state.editor.viewDragLastScreenX;
+      const dy = state.editor.cursorScreenY - state.editor.viewDragLastScreenY;
+      panEditorTrackBy(dx, dy);
+      state.editor.viewDragLastScreenX = state.editor.cursorScreenX;
+      state.editor.viewDragLastScreenY = state.editor.cursorScreenY;
+      updateEditorCursorFromScreen(
+        state.editor.cursorScreenX,
+        state.editor.cursorScreenY,
+        state.editor.cursorCanvasY,
+      );
+      return;
+    }
     if (state.mode === "editor") {
       const toolbarHit = editorToolbarActionAt(
         state.editor.cursorScreenX,
@@ -3004,6 +3140,10 @@ export function initInputHandlers() {
       performEditorTopBarAction(topBarAction);
       return;
     }
+    if (state.editor.panMode) {
+      startEditorViewPan();
+      return;
+    }
     if (state.editor.activeTool !== "road") {
       placeEditorObject(state.editor.activeTool);
       return;
@@ -3025,6 +3165,10 @@ export function initInputHandlers() {
       state.editor.toolbar.dragging = false;
       clampEditorToolbarPosition();
       saveEditorToolbarPosition();
+      return;
+    }
+    if (state.editor.viewDragging) {
+      state.editor.viewDragging = false;
       return;
     }
     if (!state.editor.drawing) return;

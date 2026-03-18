@@ -44,6 +44,8 @@ function setupDomStubs() {
     history: { replaceState: noop },
     addEventListener: noop,
   };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = noop;
   globalThis.localStorage = {
     getItem: () => null,
     setItem: noop,
@@ -55,6 +57,23 @@ function setupDomStubs() {
   globalThis.Image = class {
     addEventListener() {}
     set src(_) {}
+  };
+  globalThis.Audio = class {
+    constructor() {
+      this.loop = false;
+      this.preload = "";
+      this.volume = 0;
+      this.paused = true;
+      this.currentTime = 0;
+      this.muted = false;
+    }
+    play() {
+      this.paused = false;
+      return Promise.resolve();
+    }
+    pause() {
+      this.paused = true;
+    }
   };
   globalThis.OffscreenCanvas = class {
     constructor(width, height) {
@@ -69,7 +88,7 @@ function setupDomStubs() {
 
 setupDomStubs();
 
-const { keys, state } = await import("../js/state.js");
+const { assignAiRoster, keys, state } = await import("../js/state.js");
 const {
   canDeleteTrackPreset,
   getTrackPreset,
@@ -82,14 +101,19 @@ const {
   trackOptions,
 } = await import("../js/parameters.js");
 const {
+  enterEditor,
+  getEditorToolbarLayout,
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
   pauseActiveRace,
+  prepareSingleRaceAiRoster,
+  promptClearEditorTrackRecords,
   getSettingsRenderLayout,
   getSettingsHeaderRenderModel,
   getTrackSelectRenderModel,
   syncTrackSelectWindow,
 } = await import("../js/menus.js");
+const { getTrackWorldScale } = await import("../js/track.js");
 
 function makeTrackData({
   cx = 640,
@@ -627,4 +651,113 @@ test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke
   assert.ok(Math.abs(rebuilt.track.centerlineWidthProfile[0] - 44) < 4);
 
   removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("editor clear-records command opens confirmation and clears stored best times", () => {
+  const writes = [];
+  const originalSetItem = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = (key, value) => {
+    writes.push({ key, value });
+  };
+
+  try {
+    const imported = importTrackPresetData({
+      id: "clear-records-local",
+      name: "CLEAR RECORDS",
+      source: "user",
+      ownerUserId: "user-1",
+      isPublished: false,
+      canDelete: false,
+      fromDb: false,
+      bestLapMs: 41_250,
+      bestLapDisplayName: "LUNA",
+      bestRaceMs: 132_900,
+      bestRaceDisplayName: "MARIO",
+      track: makeTrackData(),
+      checkpoints: [],
+      worldObjects: [],
+      centerlineStrokes: [],
+      editStack: [],
+    });
+    assert.ok(imported);
+
+    const trackIndex = trackOptions.findIndex(
+      (track) => track.id === imported.id,
+    );
+    assert.ok(trackIndex >= 0);
+    enterEditor(trackIndex);
+
+    assert.equal(promptClearEditorTrackRecords(), true);
+    assert.equal(state.modal.open, true);
+    assert.equal(state.modal.title, "Clear Records");
+    assert.equal(state.modal.confirmLabel, "Clear");
+    assert.equal(typeof state.modal.onConfirm, "function");
+
+    state.modal.onConfirm();
+
+    const updated = getTrackPreset(trackIndex);
+    assert.equal(updated.bestLapMs, null);
+    assert.equal(updated.bestLapDisplayName, null);
+    assert.equal(updated.bestRaceMs, null);
+    assert.equal(updated.bestRaceDisplayName, null);
+    assert.ok(writes.length > 0);
+    assert.match(writes[writes.length - 1].value, /"bestLapMs":null/);
+    assert.match(writes[writes.length - 1].value, /"bestRaceMs":null/);
+
+    removeTrackPresetById(imported.id, { removePersisted: false });
+  } finally {
+    globalThis.localStorage.setItem = originalSetItem;
+  }
+});
+
+test("editor toolbar exposes a pan toggle and track zoom can clamp to 25 percent", () => {
+  const imported = importTrackPresetData({
+    id: "editor-pan-layout",
+    name: "EDITOR PAN",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ worldScale: 0.1 }),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex(
+    (track) => track.id === imported.id,
+  );
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  const layout = getEditorToolbarLayout();
+  assert.equal(layout.panToggle.id, "togglePan");
+  assert.ok(layout.panToggle.width > 0);
+  assert.equal(getTrackWorldScale(getTrackPreset(trackIndex).track), 0.25);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("single-race roster prep keeps unique rival colors for editor and track starts", () => {
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  physicsConfig.flags.AI_OPPONENT_COUNT = 5;
+  state.gameMode = "single";
+  state.playerColor = "crimson";
+
+  assignAiRoster([
+    { name: "ONE", color: "mint" },
+    { name: "TWO", color: "mint" },
+    { name: "THREE", color: "mint" },
+    { name: "FOUR", color: "mint" },
+    { name: "FIVE", color: "mint" },
+  ]);
+
+  const roster = prepareSingleRaceAiRoster();
+
+  assert.equal(roster.length, 5);
+  assert.ok(roster.every((entry) => entry.color !== state.playerColor));
+  assert.equal(new Set(roster.map((entry) => entry.color)).size, roster.length);
 });

@@ -602,17 +602,25 @@ test("finish celebration stats report improvements against previous records", ()
 test("finish celebration standings focus on human racers when remote rivals are present", () => {
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
   physicsConfig.flags.AI_OPPONENT_COUNT = 3;
+  state.playerColor = "crimson";
   assignAiRoster([
     {
       name: "Remote One",
       style: "precise",
       kind: "remoteHuman",
       externalControl: true,
+      color: "mint",
       slotId: "slot-2",
       participantId: "guest-1",
     },
-    { name: "AI Two", style: "long", topSpeedMul: 0.92, laneOffset: 18 },
-    { name: "AI Three", style: "bump", topSpeedMul: 0.9 },
+    {
+      name: "AI Two",
+      style: "long",
+      topSpeedMul: 0.92,
+      laneOffset: 18,
+      color: "gold",
+    },
+    { name: "AI Three", style: "bump", topSpeedMul: 0.9, color: "teal" },
   ]);
   resetRace();
 
@@ -652,6 +660,60 @@ test("finish celebration standings focus on human racers when remote rivals are 
   assert.deepEqual(
     summary.entries.map((entry) => entry.gapMs),
     [0, 3400],
+  );
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.accentColor),
+    ["#d22525", "#66d987"],
+  );
+
+  assignRandomAiRoster();
+  resetRace();
+});
+
+test("finish celebration standings keep unique accent colors for AI finishers", () => {
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  physicsConfig.flags.AI_OPPONENT_COUNT = 3;
+  state.playerColor = "crimson";
+  assignAiRoster([
+    { name: "AI One", style: "precise", color: "mint" },
+    { name: "AI Two", style: "long", laneOffset: 18, color: "gold" },
+    { name: "AI Three", style: "bump", color: "teal" },
+  ]);
+  resetRace();
+
+  lapData.finished = true;
+  lapData.finishTime = 60;
+  lapData.finalPosition = 1;
+  state.finished = true;
+  state.raceStandings.playerFinishOrder = 1;
+  state.raceStandings.finishOrders.player = 1;
+
+  aiLapDataList[0].finished = true;
+  aiLapDataList[0].finishTime = 61;
+  aiLapDataList[0].finalPosition = 2;
+  state.raceStandings.finishOrders["ai-1"] = 2;
+
+  aiLapDataList[1].finished = true;
+  aiLapDataList[1].finishTime = 62.5;
+  aiLapDataList[1].finalPosition = 3;
+  state.raceStandings.finishOrders["ai-2"] = 3;
+
+  aiLapDataList[2].finished = true;
+  aiLapDataList[2].finishTime = 64;
+  aiLapDataList[2].finalPosition = 4;
+  state.raceStandings.finishOrders["ai-3"] = 4;
+  state.raceStandings.nextFinishOrder = 5;
+
+  const summary = getFinishCelebrationStandings();
+
+  assert.equal(summary.mode, "all");
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.accentColor),
+    ["#d22525", "#66d987", "#ffd25e", "#34d1c6"],
+  );
+  assert.equal(
+    new Set(summary.entries.map((entry) => entry.accentColor)).size,
+    4,
   );
 
   assignRandomAiRoster();

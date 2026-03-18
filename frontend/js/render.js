@@ -1944,8 +1944,9 @@ function drawEditorToolbar() {
     preset.track.centerlineSmoothingMode,
   );
   const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
-  const activeToolLabel =
-    state.editor.activeTool === "road"
+  const activeToolLabel = state.editor.panMode
+    ? "PAN"
+    : state.editor.activeTool === "road"
       ? state.editor.roadMode === "checkpoint"
         ? "CHECKPOINT"
         : "ROAD"
@@ -2145,6 +2146,14 @@ function drawEditorToolbar() {
     layout.zoomValue.x + layout.zoomValue.width * 0.5,
     layout.zoomValue.y + 17,
   );
+  drawToolbarButton(layout.panToggle, "", { active: state.editor.panMode });
+  ctx.fillStyle = "#dff7ff";
+  ctx.font = "bold 16px Verdana";
+  ctx.fillText(
+    "🖐",
+    layout.panToggle.x + layout.panToggle.width * 0.5,
+    layout.panToggle.y + 18,
+  );
   ctx.restore();
 }
 
@@ -2165,7 +2174,15 @@ function drawFinishOverlay() {
   const panelX = WIDTH * 0.5 - panelW * 0.5;
   const panelY = viewportCenterY - panelH * 0.5;
   const dividerX = panelX + 344;
-  const playerPosition = state.raceStandings.playerFinishOrder || getRacePosition();
+  const leftColX = panelX + 28;
+  const leftValueX = panelX + 236;
+  const leftDetailMaxW = dividerX - leftColX - 36;
+  const stackNameX = dividerX + 28;
+  const stackTimeX = panelX + panelW - 132;
+  const stackGapX = panelX + panelW - 24;
+  const stackNameMaxW = stackTimeX - stackNameX - 18;
+  const playerPosition =
+    state.raceStandings.playerFinishOrder || getRacePosition();
 
   ctx.fillStyle = "rgba(12, 22, 18, 0.88)";
   ctx.fillRect(panelX, panelY, panelW, panelH);
@@ -2198,76 +2215,72 @@ function drawFinishOverlay() {
       improvementMs: state.finishCelebration.bestRaceImprovementMs,
       previousMs: state.finishCelebration.previousBestRaceMs,
       previousHolder: state.finishCelebration.previousBestRaceDisplayName,
-      y: panelY + 94,
+      y: panelY + 92,
     },
     {
-      label: "BEST LAP",
+      label: "LAP",
       value: formatTime(bestLap),
       rewarded: state.finishCelebration.bestLap,
       rewardLabel: "BEST LAP",
       improvementMs: state.finishCelebration.bestLapImprovementMs,
       previousMs: state.finishCelebration.previousBestLapMs,
       previousHolder: state.finishCelebration.previousBestLapDisplayName,
-      y: panelY + 156,
+      y: panelY + 148,
     },
   ];
 
   for (const row of rows) {
     ctx.fillStyle = row.rewarded ? "#ffe167" : "#ffffff";
-    ctx.font = "bold 24px Verdana";
-    ctx.fillText(`${row.label}`, panelX + 28, row.y);
+    ctx.font = "bold 22px Verdana";
+    ctx.fillText(`${row.label}`, leftColX, row.y);
     ctx.textAlign = "right";
-    ctx.fillText(row.value, panelX + 236, row.y);
+    ctx.fillText(row.value, leftValueX, row.y);
     ctx.textAlign = "left";
 
     const detailText = getFinishRecordDetail(row);
     if (detailText) {
       ctx.fillStyle = row.rewarded ? "#fff1a8" : "#9bb0c4";
-      ctx.font = "12px Verdana";
-      ctx.fillText(detailText, panelX + 28, row.y + 20);
+      ctx.font = "11px Verdana";
+      ctx.fillText(
+        fitTextToWidth(detailText, leftDetailMaxW),
+        leftColX,
+        row.y + 18,
+      );
     }
 
     if (!row.rewarded) continue;
     const badgeText = row.rewardLabel;
+    ctx.font = "bold 12px Verdana";
     const badgeW = ctx.measureText(badgeText).width + 20;
-    const badgeX = panelX + 244;
+    const badgeX = leftValueX + 10;
     const badgeY = row.y - 18;
     ctx.fillStyle = "#ffe167";
     ctx.fillRect(badgeX, badgeY, badgeW, 24);
     ctx.fillStyle = "#4e3600";
-    ctx.font = "bold 12px Verdana";
     ctx.fillText(badgeText, badgeX + 10, badgeY + 16);
   }
 
-  const stackLabel = finishStack.mode === "human" ? "PLAYERS" : "FIELD";
-  ctx.fillStyle = "#d7ebf7";
-  ctx.font = "bold 18px Verdana";
-  ctx.fillText(
-    `${stackLabel} ${finishStack.finishedCount}/${finishStack.totalRacers}`,
-    dividerX + 28,
-    panelY + 42,
-  );
-  ctx.font = "11px Verdana";
-  ctx.fillStyle = "#93abc0";
-  ctx.fillText("Finish times in arrival order", dividerX + 28, panelY + 58);
-
   if (!stackEntries.length) {
     ctx.fillStyle = "#f3f8ff";
-    ctx.font = "bold 14px Verdana";
-    ctx.fillText("WAITING FOR FIRST FINISHER...", dividerX + 28, panelY + 94);
+    ctx.font = "bold 13px Verdana";
+    ctx.fillText("WAITING FOR FIRST FINISHER...", stackNameX, panelY + 82);
   } else {
     stackEntries.forEach((entry, index) => {
-      const rowY = panelY + 92 + index * 26;
-      ctx.fillStyle = entry.isPlayer ? playerAccentColor() : "#f3f8ff";
-      ctx.font = "bold 13px Verdana";
-      ctx.fillText(`${entry.position}. ${entry.label}`, dividerX + 28, rowY);
+      const rowY = panelY + 78 + index * 26;
+      ctx.fillStyle = entry.accentColor || "#f3f8ff";
+      ctx.font = "bold 12px Verdana";
+      ctx.fillText(
+        fitTextToWidth(`${entry.position}. ${entry.label}`, stackNameMaxW),
+        stackNameX,
+        rowY,
+      );
       ctx.textAlign = "right";
       ctx.fillStyle = "#f3f8ff";
-      ctx.fillText(formatTime(entry.finishTime), panelX + panelW - 94, rowY);
+      ctx.fillText(formatTime(entry.finishTime), stackTimeX, rowY);
       ctx.fillStyle = entry.gapMs > 0 ? "#ffe167" : "#6af0a8";
       ctx.fillText(
-        entry.gapMs > 0 ? `+${formatTime(entry.gapMs / 1000)}` : "LEAD",
-        panelX + panelW - 28,
+        entry.gapMs > 0 ? `+${formatTime(entry.gapMs / 1000)}` : "--",
+        stackGapX,
         rowY,
       );
       ctx.textAlign = "left";
@@ -2284,15 +2297,28 @@ function drawFinishOverlay() {
 function getFinishRecordDetail(row) {
   if (!row.rewarded) return "";
   if (!Number.isFinite(row.previousMs) || !Number.isFinite(row.improvementMs)) {
-    return "FIRST TRACK RECORD";
+    return "NEW RECORD";
   }
   const previousTime = formatTime(row.previousMs / 1000);
   const improvement = formatTime(row.improvementMs / 1000);
   const previousHolder = String(row.previousHolder || "").trim();
   if (previousHolder) {
-    return `${improvement} faster than ${previousHolder} (${previousTime})`;
+    return `-${improvement} vs ${previousHolder} ${previousTime}`;
   }
-  return `${improvement} faster than ${previousTime}`;
+  return `-${improvement} vs ${previousTime}`;
+}
+
+function fitTextToWidth(text, maxWidth) {
+  const value = String(text || "");
+  if (!value || maxWidth <= 0) return "";
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  let end = value.length;
+  while (end > 0) {
+    const candidate = `${value.slice(0, end).trimEnd()}...`;
+    if (ctx.measureText(candidate).width <= maxWidth) return candidate;
+    end -= 1;
+  }
+  return "...";
 }
 
 function drawPauseOverlay() {
