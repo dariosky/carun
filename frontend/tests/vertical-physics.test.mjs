@@ -109,7 +109,9 @@ const {
 } = await import("../js/state.js");
 const {
   applyExternalRivalState,
+  buildFinishCelebrationStats,
   getExternalHumanRivalCount,
+  getFinishCelebrationStandings,
   getRacePosition,
   getRaceStandings,
   planTrackNavPath,
@@ -569,6 +571,88 @@ test("external human rivals accept replicated lap state and stay counted until f
   assert.equal(aiLapDataList[0].finished, true);
   assert.equal(state.raceStandings.finishOrders["ai-1"], 2);
   assert.equal(getExternalHumanRivalCount(), 0);
+
+  assignRandomAiRoster();
+  resetRace();
+});
+
+test("finish celebration stats report improvements against previous records", () => {
+  const summary = buildFinishCelebrationStats({
+    lapTimes: [32.5, 31.2, 30.4],
+    selectedTrack: {
+      bestLapMs: 31_000,
+      bestRaceMs: 100_000,
+      bestLapDisplayName: "LUNA",
+      bestRaceDisplayName: "MARIO",
+    },
+  });
+
+  assert.equal(summary.bestLap, true);
+  assert.equal(summary.bestRace, true);
+  assert.equal(summary.totalTime, 94.1);
+  assert.equal(summary.bestLapTime, 30.4);
+  assert.equal(summary.bestLapImprovementMs, 600);
+  assert.equal(summary.bestRaceImprovementMs, 5900);
+  assert.equal(summary.previousBestLapMs, 31_000);
+  assert.equal(summary.previousBestRaceMs, 100_000);
+  assert.equal(summary.previousBestLapDisplayName, "LUNA");
+  assert.equal(summary.previousBestRaceDisplayName, "MARIO");
+});
+
+test("finish celebration standings focus on human racers when remote rivals are present", () => {
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
+  physicsConfig.flags.AI_OPPONENT_COUNT = 3;
+  assignAiRoster([
+    {
+      name: "Remote One",
+      style: "precise",
+      kind: "remoteHuman",
+      externalControl: true,
+      slotId: "slot-2",
+      participantId: "guest-1",
+    },
+    { name: "AI Two", style: "long", topSpeedMul: 0.92, laneOffset: 18 },
+    { name: "AI Three", style: "bump", topSpeedMul: 0.9 },
+  ]);
+  resetRace();
+
+  state.playerName = "PLAYER ONE";
+  lapData.finished = true;
+  lapData.finishTime = 50;
+  lapData.finalPosition = 1;
+  state.finished = true;
+  state.raceStandings.playerFinishOrder = 1;
+  state.raceStandings.finishOrders.player = 1;
+
+  aiLapDataList[0].finished = true;
+  aiLapDataList[0].finishTime = 53.4;
+  aiLapDataList[0].finalPosition = 3;
+  state.raceStandings.finishOrders["ai-1"] = 3;
+
+  aiLapDataList[1].finished = true;
+  aiLapDataList[1].finishTime = 51.1;
+  aiLapDataList[1].finalPosition = 2;
+  state.raceStandings.finishOrders["ai-2"] = 2;
+
+  state.raceStandings.nextFinishOrder = 4;
+
+  const summary = getFinishCelebrationStandings();
+
+  assert.equal(summary.mode, "human");
+  assert.equal(summary.totalRacers, 2);
+  assert.equal(summary.finishedCount, 2);
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.label),
+    ["PLAYER ONE", "Remote One"],
+  );
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.position),
+    [1, 2],
+  );
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.gapMs),
+    [0, 3400],
+  );
 
   assignRandomAiRoster();
   resetRace();

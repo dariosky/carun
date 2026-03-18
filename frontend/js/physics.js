@@ -316,6 +316,114 @@ export function getRaceStandings() {
   return filteredStandings;
 }
 
+function getRacerDisplayName(racerKey) {
+  if (racerKey === "player") {
+    return String(state.playerName || "PLAYER").trim() || "PLAYER";
+  }
+  const aiState = getAiStateById(racerKey);
+  if (!aiState) return String(racerKey || "RIVAL");
+  return String(aiState.vehicle?.label || getAiProfileByIndex(aiState.index).name)
+    .trim() || String(racerKey || "RIVAL");
+}
+
+function racerIsHuman(racerKey) {
+  if (racerKey === "player") return true;
+  const aiState = getAiStateById(racerKey);
+  if (!aiState) return false;
+  return getAiProfileByIndex(aiState.index).kind === "remoteHuman";
+}
+
+export function getFinishCelebrationStandings() {
+  const activeRivalCount = aiOpponentsEnabled() ? getActiveAiOpponentCount() : 0;
+  const activeRivals = state.aiRoster.slice(0, activeRivalCount);
+  const humanFieldCount =
+    1 +
+    activeRivals.reduce((count, entry) => {
+      return entry?.kind === "remoteHuman" ? count + 1 : count;
+    }, 0);
+  const showHumanOnly = humanFieldCount > 1;
+  const finishedStandings = getRaceStandings().filter(
+    (entry) => entry.finished && entry.finishTime > 0,
+  );
+  const scopedStandings = showHumanOnly
+    ? finishedStandings.filter((entry) => racerIsHuman(entry.id))
+    : finishedStandings;
+
+  return {
+    mode: showHumanOnly ? "human" : "all",
+    totalRacers: showHumanOnly ? humanFieldCount : 1 + activeRivalCount,
+    finishedCount: scopedStandings.length,
+    entries: scopedStandings.map((entry, index, list) => {
+      const previous = list[index - 1] || null;
+      const gapMs =
+        previous && Number.isFinite(previous.finishTime)
+          ? Math.max(
+              0,
+              Math.round((Number(entry.finishTime) - Number(previous.finishTime)) * 1000),
+            )
+          : 0;
+      return {
+        id: entry.id,
+        position: index + 1,
+        label: getRacerDisplayName(entry.id),
+        finishTime: entry.finishTime,
+        gapMs,
+        isPlayer: entry.id === "player",
+      };
+    }),
+  };
+}
+
+export function buildFinishCelebrationStats({
+  lapTimes = lapData.lapTimes,
+  selectedTrack = trackOptions[state.selectedTrackIndex] || null,
+} = {}) {
+  const totalTime = lapTimes.reduce((sum, lapSeconds) => sum + lapSeconds, 0);
+  const bestLapTime = lapTimes.length ? Math.min(...lapTimes) : 0;
+  const previousBestLapMs =
+    selectedTrack && Number.isFinite(selectedTrack.bestLapMs)
+      ? Number(selectedTrack.bestLapMs)
+      : null;
+  const previousBestRaceMs =
+    selectedTrack && Number.isFinite(selectedTrack.bestRaceMs)
+      ? Number(selectedTrack.bestRaceMs)
+      : null;
+  const totalMs = Math.round(totalTime * 1000);
+  const bestLapMs = Math.round(bestLapTime * 1000);
+  const bestLap =
+    lapTimes.length > 0 &&
+    (previousBestLapMs === null || bestLapMs < previousBestLapMs);
+  const bestRace =
+    lapTimes.length > 0 &&
+    (previousBestRaceMs === null || totalMs < previousBestRaceMs);
+
+  return {
+    bestLap,
+    bestRace,
+    totalTime,
+    bestLapTime,
+    bestLapImprovementMs:
+      bestLap && previousBestLapMs !== null
+        ? previousBestLapMs - bestLapMs
+        : null,
+    bestRaceImprovementMs:
+      bestRace && previousBestRaceMs !== null
+        ? previousBestRaceMs - totalMs
+        : null,
+    previousBestLapMs,
+    previousBestRaceMs,
+    previousBestLapDisplayName:
+      selectedTrack && typeof selectedTrack.bestLapDisplayName === "string"
+        ? selectedTrack.bestLapDisplayName
+        : null,
+    previousBestRaceDisplayName:
+      selectedTrack && typeof selectedTrack.bestRaceDisplayName === "string"
+        ? selectedTrack.bestRaceDisplayName
+        : null,
+    confettiActive: bestLap || bestRace,
+  };
+}
+
 export function getRacePosition(racerKey = "player") {
   const targetLapData =
     racerKey === "player" ? lapData : getAiStateById(racerKey)?.lapData;
@@ -2641,6 +2749,12 @@ export function resetRace() {
   state.finishCelebration.bestRace = false;
   state.finishCelebration.totalTime = 0;
   state.finishCelebration.bestLapTime = 0;
+  state.finishCelebration.bestLapImprovementMs = null;
+  state.finishCelebration.bestRaceImprovementMs = null;
+  state.finishCelebration.previousBestLapMs = null;
+  state.finishCelebration.previousBestRaceMs = null;
+  state.finishCelebration.previousBestLapDisplayName = null;
+  state.finishCelebration.previousBestRaceDisplayName = null;
   state.finishCelebration.confettiActive = false;
 }
 
@@ -3328,34 +3442,13 @@ async function persistRaceResults() {
 }
 
 function finalizeFinishCelebration() {
-  const lapTimes = lapData.lapTimes;
-  const totalTime = lapTimes.reduce((sum, lapSeconds) => sum + lapSeconds, 0);
-  const bestLapTime = lapTimes.length ? Math.min(...lapTimes) : 0;
-  const selectedTrack = trackOptions[state.selectedTrackIndex] || null;
-  const previousBestLapMs =
-    selectedTrack && Number.isFinite(selectedTrack.bestLapMs)
-      ? Number(selectedTrack.bestLapMs)
-      : null;
-  const previousBestRaceMs =
-    selectedTrack && Number.isFinite(selectedTrack.bestRaceMs)
-      ? Number(selectedTrack.bestRaceMs)
-      : null;
-  const totalMs = Math.round(totalTime * 1000);
-  const bestLapMs = Math.round(bestLapTime * 1000);
-  const bestLap =
-    lapTimes.length > 0 &&
-    (previousBestLapMs === null || bestLapMs < previousBestLapMs);
-  const bestRace =
-    lapTimes.length > 0 &&
-    (previousBestRaceMs === null || totalMs < previousBestRaceMs);
+  const summary = buildFinishCelebrationStats();
+  Object.assign(state.finishCelebration, summary);
 
-  state.finishCelebration.bestLap = bestLap;
-  state.finishCelebration.bestRace = bestRace;
-  state.finishCelebration.totalTime = totalTime;
-  state.finishCelebration.bestLapTime = bestLapTime;
-  state.finishCelebration.confettiActive = bestLap || bestRace;
-
-  if (bestLap || bestRace) {
-    emitFinishConfetti({ bestLap, bestRace });
+  if (summary.bestLap || summary.bestRace) {
+    emitFinishConfetti({
+      bestLap: summary.bestLap,
+      bestRace: summary.bestRace,
+    });
   }
 }

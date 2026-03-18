@@ -49,7 +49,11 @@ import {
   getTrackSelectRenderModel,
   getTournamentStandingsData,
 } from "./menus.js";
-import { getRacePosition, getRaceStandings } from "./physics.js";
+import {
+  getFinishCelebrationStandings,
+  getRacePosition,
+  getRaceStandings,
+} from "./physics.js";
 import { tournamentRoomActive } from "./tournament-room.js";
 import { formatTime } from "./utils.js";
 import {
@@ -2153,13 +2157,37 @@ function drawFinishOverlay() {
   const bestLap =
     state.finishCelebration.bestLapTime ||
     (lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0);
+  const finishStack = getFinishCelebrationStandings();
+  const stackEntries = finishStack.entries;
+  const stackRows = Math.max(1, stackEntries.length);
+  const panelW = 696;
+  const panelH = Math.max(252, 188 + stackRows * 26);
+  const panelX = WIDTH * 0.5 - panelW * 0.5;
+  const panelY = viewportCenterY - panelH * 0.5;
+  const dividerX = panelX + 344;
+  const playerPosition = state.raceStandings.playerFinishOrder || getRacePosition();
 
-  ctx.fillStyle = "rgba(12, 22, 18, 0.86)";
-  ctx.fillRect(WIDTH / 2 - 248, viewportCenterY - 104, 496, 222);
+  ctx.fillStyle = "rgba(12, 22, 18, 0.88)";
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = "rgba(106, 240, 168, 0.28)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
   ctx.fillStyle = "#6af0a8";
-  ctx.font = "bold 42px Verdana";
-  ctx.fillText("FINISH!", WIDTH / 2 - 95, viewportCenterY - 28);
-  ctx.font = "20px Verdana";
+  ctx.font = "bold 40px Verdana";
+  ctx.fillText("FINISH!", panelX + 28, panelY + 46);
+  ctx.textAlign = "right";
+  ctx.font = "bold 18px Verdana";
+  ctx.fillStyle = "#dfffee";
+  ctx.fillText(`P${playerPosition}`, panelX + 322, panelY + 42);
+  ctx.textAlign = "left";
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dividerX, panelY + 22);
+  ctx.lineTo(dividerX, panelY + panelH - 22);
+  ctx.stroke();
 
   const rows = [
     {
@@ -2167,37 +2195,104 @@ function drawFinishOverlay() {
       value: formatTime(total),
       rewarded: state.finishCelebration.bestRace,
       rewardLabel: "BEST RACE",
-      y: viewportCenterY + 14,
+      improvementMs: state.finishCelebration.bestRaceImprovementMs,
+      previousMs: state.finishCelebration.previousBestRaceMs,
+      previousHolder: state.finishCelebration.previousBestRaceDisplayName,
+      y: panelY + 94,
     },
     {
-      label: "BEST",
+      label: "BEST LAP",
       value: formatTime(bestLap),
       rewarded: state.finishCelebration.bestLap,
       rewardLabel: "BEST LAP",
-      y: viewportCenterY + 54,
+      improvementMs: state.finishCelebration.bestLapImprovementMs,
+      previousMs: state.finishCelebration.previousBestLapMs,
+      previousHolder: state.finishCelebration.previousBestLapDisplayName,
+      y: panelY + 156,
     },
   ];
 
   for (const row of rows) {
     ctx.fillStyle = row.rewarded ? "#ffe167" : "#ffffff";
-    ctx.fillText(`${row.label}: ${row.value}`, WIDTH / 2 - 136, row.y);
+    ctx.font = "bold 24px Verdana";
+    ctx.fillText(`${row.label}`, panelX + 28, row.y);
+    ctx.textAlign = "right";
+    ctx.fillText(row.value, panelX + 236, row.y);
+    ctx.textAlign = "left";
+
+    const detailText = getFinishRecordDetail(row);
+    if (detailText) {
+      ctx.fillStyle = row.rewarded ? "#fff1a8" : "#9bb0c4";
+      ctx.font = "12px Verdana";
+      ctx.fillText(detailText, panelX + 28, row.y + 20);
+    }
+
     if (!row.rewarded) continue;
     const badgeText = row.rewardLabel;
     const badgeW = ctx.measureText(badgeText).width + 20;
-    const badgeX = WIDTH / 2 + 58;
-    const badgeY = row.y - 19;
+    const badgeX = panelX + 244;
+    const badgeY = row.y - 18;
     ctx.fillStyle = "#ffe167";
     ctx.fillRect(badgeX, badgeY, badgeW, 24);
     ctx.fillStyle = "#4e3600";
     ctx.font = "bold 12px Verdana";
     ctx.fillText(badgeText, badgeX + 10, badgeY + 16);
-    ctx.font = "20px Verdana";
+  }
+
+  const stackLabel = finishStack.mode === "human" ? "PLAYERS" : "FIELD";
+  ctx.fillStyle = "#d7ebf7";
+  ctx.font = "bold 18px Verdana";
+  ctx.fillText(
+    `${stackLabel} ${finishStack.finishedCount}/${finishStack.totalRacers}`,
+    dividerX + 28,
+    panelY + 42,
+  );
+  ctx.font = "11px Verdana";
+  ctx.fillStyle = "#93abc0";
+  ctx.fillText("Finish times in arrival order", dividerX + 28, panelY + 58);
+
+  if (!stackEntries.length) {
+    ctx.fillStyle = "#f3f8ff";
+    ctx.font = "bold 14px Verdana";
+    ctx.fillText("WAITING FOR FIRST FINISHER...", dividerX + 28, panelY + 94);
+  } else {
+    stackEntries.forEach((entry, index) => {
+      const rowY = panelY + 92 + index * 26;
+      ctx.fillStyle = entry.isPlayer ? playerAccentColor() : "#f3f8ff";
+      ctx.font = "bold 13px Verdana";
+      ctx.fillText(`${entry.position}. ${entry.label}`, dividerX + 28, rowY);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#f3f8ff";
+      ctx.fillText(formatTime(entry.finishTime), panelX + panelW - 94, rowY);
+      ctx.fillStyle = entry.gapMs > 0 ? "#ffe167" : "#6af0a8";
+      ctx.fillText(
+        entry.gapMs > 0 ? `+${formatTime(entry.gapMs / 1000)}` : "LEAD",
+        panelX + panelW - 28,
+        rowY,
+      );
+      ctx.textAlign = "left";
+    });
   }
 
   ctx.fillStyle = "#ffffff";
+  ctx.font = "20px Verdana";
   const isTournament = state.gameMode === "tournament";
   const returnText = isTournament ? "ENTER FOR STANDINGS" : "ENTER TO CONTINUE";
-  ctx.fillText(returnText, WIDTH / 2 - 144, viewportCenterY + 96);
+  ctx.fillText(returnText, panelX + 28, panelY + panelH - 24);
+}
+
+function getFinishRecordDetail(row) {
+  if (!row.rewarded) return "";
+  if (!Number.isFinite(row.previousMs) || !Number.isFinite(row.improvementMs)) {
+    return "FIRST TRACK RECORD";
+  }
+  const previousTime = formatTime(row.previousMs / 1000);
+  const improvement = formatTime(row.improvementMs / 1000);
+  const previousHolder = String(row.previousHolder || "").trim();
+  if (previousHolder) {
+    return `${improvement} faster than ${previousHolder} (${previousTime})`;
+  }
+  return `${improvement} faster than ${previousTime}`;
 }
 
 function drawPauseOverlay() {

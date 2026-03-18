@@ -91,6 +91,12 @@ export const state = {
     bestRace: false,
     totalTime: 0,
     bestLapTime: 0,
+    bestLapImprovementMs: null,
+    bestRaceImprovementMs: null,
+    previousBestLapMs: null,
+    previousBestRaceMs: null,
+    previousBestLapDisplayName: null,
+    previousBestRaceDisplayName: null,
     confettiActive: false,
   },
   startSequence: {
