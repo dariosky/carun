@@ -1662,18 +1662,33 @@ function buildCurbSegments(trackDef = track) {
   // ── Collect contiguous runs and filter by minimum arc length ───────
   const minRunArcLength = CURB_STRIPE_LENGTH * 1.2;
 
-  // Compute the centroid of the centerline — used to determine the
-  // outward extrusion direction for each curb run.
-  let centroidX = 0,
-    centroidY = 0;
-  for (let i = 0; i < segmentCount; i++) {
-    centroidX += center[i].x;
-    centroidY += center[i].y;
-  }
-  centroidX /= segmentCount;
-  centroidY /= segmentCount;
+  const computeOutwardSign = (points) => {
+    if (!Array.isArray(points) || points.length < 2) return 1;
+    const midIdx = Math.floor(points.length / 2);
+    const pA = points[Math.max(0, midIdx - 1)];
+    const pB = points[Math.min(points.length - 1, midIdx)];
+    const tdx = pB.x - pA.x;
+    const tdy = pB.y - pA.y;
+    const tlen = Math.hypot(tdx, tdy) || 1;
+    const nxPos = -tdy / tlen;
+    const nyPos = tdx / tlen;
+    const mx = (pA.x + pB.x) * 0.5;
+    const my = (pA.y + pB.y) * 0.5;
+    const probeDist = Math.max(CURB_MIN_WIDTH, trackDef.borderSize * 0.75);
+    const plusDistance = nearestDistanceAndProgressToLoop(
+      mx + nxPos * probeDist,
+      my + nyPos * probeDist,
+      center,
+    ).distance;
+    const minusDistance = nearestDistanceAndProgressToLoop(
+      mx - nxPos * probeDist,
+      my - nyPos * probeDist,
+      center,
+    ).distance;
+    return plusDistance >= minusDistance ? 1 : -1;
+  };
 
-  const collectRuns = (points, mask, isOuter, renderStyle, stripeScale = 1) => {
+  const collectRuns = (points, mask, renderStyle, stripeScale = 1) => {
     const runs = [];
     const allTrue = mask.every((v) => v);
     if (allTrue) {
@@ -1719,48 +1734,23 @@ function buildCurbSegments(trackDef = track) {
       })
       .map((run) => {
         const simplified = simplifyOpenRunPath(run, 1.8, 4);
-
-        // Determine outward sign: the curb must extrude AWAY from the
-        // track surface.
-        //   - Outer curbs: away from centroid (outward from the track ring).
-        //   - Inner curbs: toward centroid (into the hole, away from road).
-        const midIdx = Math.floor(simplified.length / 2);
-        const pA = simplified[Math.max(0, midIdx - 1)];
-        const pB = simplified[Math.min(simplified.length - 1, midIdx)];
-        const tdx = pB.x - pA.x;
-        const tdy = pB.y - pA.y;
-        const tlen = Math.hypot(tdx, tdy) || 1;
-        const tx = tdx / tlen;
-        const ty = tdy / tlen;
-        // Normal for sideSign=+1: (-ty, tx)
-        const nxPos = -ty;
-        const nyPos = tx;
-        // Midpoint of this segment
-        const mx = (pA.x + pB.x) * 0.5;
-        const my = (pA.y + pB.y) * 0.5;
-        // Dot with vector from midpoint to centroid
-        const toCenterX = centroidX - mx;
-        const toCenterY = centroidY - my;
-        const dot = nxPos * toCenterX + nyPos * toCenterY;
-
-        // For outer curbs: extrude away from centroid.
-        //   dot > 0 means sideSign=+1 normal points toward centroid → need -1.
-        // For inner curbs: extrude toward centroid.
-        //   dot > 0 means sideSign=+1 normal points toward centroid → need +1.
-        const outwardSign = isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
-
-        return { points: simplified, outwardSign, renderStyle, stripeScale };
+        return {
+          points: simplified,
+          outwardSign: computeOutwardSign(simplified),
+          renderStyle,
+          stripeScale,
+        };
       });
   };
 
   return {
     outer: [
-      ...collectRuns(outer, outerPrimaryExpanded, true, "striped", 1.15),
-      ...collectRuns(outer, outerSecondaryExpanded, true, "dotted", 1),
+      ...collectRuns(outer, outerPrimaryExpanded, "striped", 1.15),
+      ...collectRuns(outer, outerSecondaryExpanded, "dotted", 1),
     ],
     inner: [
-      ...collectRuns(inner, innerPrimaryExpanded, false, "striped", 1.15),
-      ...collectRuns(inner, innerSecondaryExpanded, false, "dotted", 1),
+      ...collectRuns(inner, innerPrimaryExpanded, "striped", 1.15),
+      ...collectRuns(inner, innerSecondaryExpanded, "dotted", 1),
     ],
   };
 }
@@ -1792,16 +1782,9 @@ function buildFullCurbSegments(trackDef = track) {
     simplifyParams,
   );
 
-  const computeOutwardSign = (loop, isOuter) => {
+  const computeOutwardSign = (loop) => {
     const n = loop.length;
-    let cx = 0,
-      cy = 0;
-    for (let i = 0; i < center.length; i++) {
-      cx += center[i].x;
-      cy += center[i].y;
-    }
-    cx /= center.length;
-    cy /= center.length;
+    if (!n) return 1;
     const midIdx = Math.floor(n / 2);
     const pA = loop[midIdx];
     const pB = loop[(midIdx + 1) % n];
@@ -1810,21 +1793,33 @@ function buildFullCurbSegments(trackDef = track) {
     const len = Math.hypot(dx, dy) || 1;
     const nx = -(dy / len);
     const ny = dx / len;
-    const dot = nx * (cx - pA.x) + ny * (cy - pA.y);
-    return isOuter ? (dot > 0 ? -1 : 1) : dot > 0 ? 1 : -1;
+    const mx = (pA.x + pB.x) * 0.5;
+    const my = (pA.y + pB.y) * 0.5;
+    const probeDist = Math.max(CURB_MIN_WIDTH, trackDef.borderSize * 0.75);
+    const plusDistance = nearestDistanceAndProgressToLoop(
+      mx + nx * probeDist,
+      my + ny * probeDist,
+      center,
+    ).distance;
+    const minusDistance = nearestDistanceAndProgressToLoop(
+      mx - nx * probeDist,
+      my - ny * probeDist,
+      center,
+    ).distance;
+    return plusDistance >= minusDistance ? 1 : -1;
   };
 
   return {
     outer: [
       {
         points: outerLoop,
-        outwardSign: computeOutwardSign(outerLoop, true),
+        outwardSign: computeOutwardSign(outerLoop),
       },
     ],
     inner: [
       {
         points: innerLoop,
-        outwardSign: computeOutwardSign(innerLoop, false),
+        outwardSign: computeOutwardSign(innerLoop),
       },
     ],
   };

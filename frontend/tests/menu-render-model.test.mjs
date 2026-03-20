@@ -203,6 +203,25 @@ function curbOuterProbePoint(points, index, sideSign, width) {
   };
 }
 
+function nearestDistanceToLoop(point, loop) {
+  let best = Infinity;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i];
+    const b = loop[(i + 1) % loop.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = Math.max(dx * dx + dy * dy, 1e-8);
+    const t = Math.max(
+      0,
+      Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq),
+    );
+    const px = a.x + dx * t;
+    const py = a.y + dy * t;
+    best = Math.min(best, Math.hypot(point.x - px, point.y - py));
+  }
+  return best;
+}
+
 test("main menu model switches items by auth state", () => {
   state.auth.authenticated = false;
   state.menuIndex = 1;
@@ -307,6 +326,43 @@ test("curb generation keeps striped runs on the outer ring for reversed loops", 
     false,
     "expected inner ring to avoid striped curb runs on reversed loops",
   );
+});
+
+test("striped curb outward signs point away from the centerline", () => {
+  const tracks = [makeTrackData(), reverseTrackLoop(makeTrackData())];
+
+  for (const trackData of tracks) {
+    const curbs = initCurbSegments(trackData);
+    const probeDist = Math.max(8, trackData.borderSize * 0.75);
+    for (const segment of [...curbs.outer, ...curbs.inner]) {
+      if (segment.renderStyle !== "striped") continue;
+      const points = segment.points || segment;
+      const midIdx = Math.floor(points.length / 2);
+      const a = points[Math.max(0, midIdx - 1)];
+      const b = points[Math.min(points.length - 1, midIdx)];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const mx = (a.x + b.x) * 0.5;
+      const my = (a.y + b.y) * 0.5;
+      const outward = segment.outwardSign ?? 1;
+      const outwardPoint = {
+        x: mx + nx * probeDist * outward,
+        y: my + ny * probeDist * outward,
+      };
+      const inwardPoint = {
+        x: mx - nx * probeDist * outward,
+        y: my - ny * probeDist * outward,
+      };
+      assert.ok(
+        nearestDistanceToLoop(outwardPoint, trackData.centerlineLoop) >=
+          nearestDistanceToLoop(inwardPoint, trackData.centerlineLoop) - 0.001,
+        "expected outwardSign to increase distance from the centerline",
+      );
+    }
+  }
 });
 
 test("intersection curbs collapse when the outside of the curb is asphalt", () => {
