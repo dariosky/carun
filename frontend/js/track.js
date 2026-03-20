@@ -1553,6 +1553,8 @@ function buildCurbSegments(trackDef = track) {
     absCurvatures[i] = Math.abs(kappa);
   }
 
+  const loopArea = signedLoopArea(center);
+
   // ── Adaptive curvature threshold ───────────────────────────────────
   const sortedAbs = Array.from(absCurvatures).sort((a, b) => a - b);
   const curvatureThreshold =
@@ -1606,9 +1608,10 @@ function buildCurbSegments(trackDef = track) {
   for (let i = 0; i < segmentCount; i++) {
     if (absCurvatures[i] < primaryCurbThreshold) continue;
 
-    // Positive signed curvature → turning left → outer side is convex
-    // (outside of turn), inner is concave (inside of turn).
-    const outerIsOutside = signedCurvatures[i] > 0;
+    // Which ring is on the outside of the turn depends on loop winding.
+    // Reversed/editor-created tracks can flip winding, so use the loop area
+    // instead of assuming one curvature sign always means "outer".
+    const outerIsOutside = signedCurvatures[i] * loopArea > 0;
 
     // Outer side eligibility
     if (outerSpace[i] >= minCurbSpaces[i]) {

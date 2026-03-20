@@ -376,6 +376,27 @@ function expandBounds(bounds, x, y) {
   bounds.maxY = Math.max(bounds.maxY, y);
 }
 
+function getPathBounds(points, padding = 0) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const bounds = {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  };
+  for (const point of points) {
+    if (!point) continue;
+    expandBounds(bounds, point.x, point.y);
+  }
+  if (!Number.isFinite(bounds.minX)) return null;
+  return {
+    minX: Math.floor(bounds.minX - padding),
+    minY: Math.floor(bounds.minY - padding),
+    maxX: Math.ceil(bounds.maxX + padding),
+    maxY: Math.ceil(bounds.maxY + padding),
+  };
+}
+
 function getPreviewBounds(preset, boundaries, curbs) {
   const trackDef = preset.track;
   const worldScale = getTrackWorldScale(trackDef);
@@ -834,6 +855,11 @@ function drawTrackSurface(
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
   if (!outerPath.length || !innerPath.length) return;
+  const worldScale = Math.max(getTrackWorldScale(trackDef), 0.01);
+  const asphaltPadding = Math.ceil(
+    Math.max(WIDTH, HEIGHT) / worldScale + CURB_MAX_WIDTH * 2,
+  );
+  const asphaltBounds = getPathBounds(outerPath, asphaltPadding);
 
   ctx.save();
   ctx.beginPath();
@@ -857,7 +883,7 @@ function drawTrackSurface(
     drawPath([...innerPath].reverse());
     ctx.clip("evenodd");
   }
-  drawAsphaltMaterial(ctx);
+  drawAsphaltMaterial(ctx, asphaltBounds);
   ctx.restore();
 
   if (showCurbs) {
@@ -1056,6 +1082,52 @@ function shouldRenderExplicitGuideSegment(
   return supportedWidthRatio >= 0.55 && averageWidth >= CURB_MIN_WIDTH * 1.55;
 }
 
+export function measureCurbSupportWidth(
+  points,
+  index,
+  sideSign,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  if (!Array.isArray(points) || !points.length) return 0;
+  let sawGrassGap = false;
+  let lastGrassDistance = 0;
+  const sampleCount = 12;
+
+  for (let step = 0; step <= sampleCount; step++) {
+    const distance = (step / sampleCount) * CURB_MAX_WIDTH;
+    const probe = curbOuterProbePoint(points, index, sideSign, distance);
+    const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
+
+    if (!sawGrassGap) {
+      if (surface === "grass") {
+        sawGrassGap = true;
+        lastGrassDistance = distance;
+      }
+    } else if (surface !== "grass") {
+      let lo = lastGrassDistance;
+      let hi = distance;
+      for (let refine = 0; refine < 8; refine++) {
+        const mid = (lo + hi) * 0.5;
+        const midProbe = curbOuterProbePoint(points, index, sideSign, mid);
+        const midSurface = surfaceAtForTrack(
+          midProbe.x,
+          midProbe.y,
+          trackDef,
+          objects,
+        );
+        if (midSurface === "grass") lo = mid;
+        else hi = mid;
+      }
+      return lo < CURB_MIN_WIDTH * 0.25 ? 0 : lo;
+    }
+  }
+
+  // If the probe never reaches grass, the curb edge is facing asphalt or
+  // another drivable branch, so there is no valid curb width to render.
+  return sawGrassGap ? CURB_MAX_WIDTH : 0;
+}
+
 function buildCurbWidthCaps(
   points,
   sideSign,
@@ -1063,45 +1135,9 @@ function buildCurbWidthCaps(
   objects = worldObjects,
 ) {
   if (!Array.isArray(points) || !points.length) return null;
-  const caps = points.map((_, index) => {
-    let sawGrassGap = false;
-    let lastGrassDistance = 0;
-    let previousDistance = 0;
-    const sampleCount = 12;
-
-    for (let step = 0; step <= sampleCount; step++) {
-      const distance = (step / sampleCount) * CURB_MAX_WIDTH;
-      const probe = curbOuterProbePoint(points, index, sideSign, distance);
-      const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
-
-      if (!sawGrassGap) {
-        if (surface === "grass") {
-          sawGrassGap = true;
-          lastGrassDistance = distance;
-        }
-      } else if (surface !== "grass") {
-        let lo = lastGrassDistance;
-        let hi = distance;
-        for (let refine = 0; refine < 8; refine++) {
-          const mid = (lo + hi) * 0.5;
-          const midProbe = curbOuterProbePoint(points, index, sideSign, mid);
-          const midSurface = surfaceAtForTrack(
-            midProbe.x,
-            midProbe.y,
-            trackDef,
-            objects,
-          );
-          if (midSurface === "grass") lo = mid;
-          else hi = mid;
-        }
-        return lo < CURB_MIN_WIDTH * 0.25 ? 0 : lo;
-      }
-
-      previousDistance = distance;
-    }
-
-    return sawGrassGap ? CURB_MAX_WIDTH : Math.max(0, previousDistance);
-  });
+  const caps = points.map((_, index) =>
+    measureCurbSupportWidth(points, index, sideSign, trackDef, objects),
+  );
 
   for (let pass = 0; pass < 2; pass++) {
     for (let i = 1; i < caps.length - 1; i++) {

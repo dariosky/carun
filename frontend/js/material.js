@@ -69,9 +69,24 @@ export function getAsphaltPattern(targetCtx) {
   return asphaltPattern;
 }
 
-export function drawAsphaltMaterial(targetCtx) {
+export function drawAsphaltMaterial(targetCtx, bounds = null) {
   targetCtx.save();
   targetCtx.fillStyle = getAsphaltPattern(targetCtx);
-  targetCtx.fillRect(-WIDTH, -HEIGHT, WIDTH * 3, HEIGHT * 3);
+  if (
+    bounds &&
+    Number.isFinite(bounds.minX) &&
+    Number.isFinite(bounds.minY) &&
+    Number.isFinite(bounds.maxX) &&
+    Number.isFinite(bounds.maxY)
+  ) {
+    targetCtx.fillRect(
+      bounds.minX,
+      bounds.minY,
+      Math.max(1, bounds.maxX - bounds.minX),
+      Math.max(1, bounds.maxY - bounds.minY),
+    );
+  } else {
+    targetCtx.fillRect(-WIDTH, -HEIGHT, WIDTH * 3, HEIGHT * 3);
+  }
   targetCtx.restore();
 }
