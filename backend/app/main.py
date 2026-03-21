@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -85,6 +85,15 @@ def create_app() -> FastAPI:
                 "__BUILD_LABEL__", build_label
             )
 
+        def render_index_html_for_request(request: Request) -> str:
+            social_image_url = str(request.url_for("frontend-static", path="assets/social.png"))
+            page_url = str(request.url)
+            return (
+                render_index_html()
+                .replace("__OG_URL__", page_url)
+                .replace("__SOCIAL_IMAGE_URL__", social_image_url)
+            )
+
         def render_privacy_html() -> str:
             if privacy_template is None:
                 return "<h1>Privacy page not found</h1>"
@@ -99,39 +108,39 @@ def create_app() -> FastAPI:
                 "__ADMIN_EMAIL__", settings.admin_email
             )
 
-        def index_response():
+        def index_response(request: Request):
             return HTMLResponse(
-                content=render_index_html(),
+                content=render_index_html_for_request(request),
                 headers={"Cache-Control": "no-cache, must-revalidate"},
             )
 
         @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_index():
-            return index_response()
+        def frontend_index(request: Request):
+            return index_response(request)
 
         @app.api_route("/index.html", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_index_file():
-            return index_response()
+        def frontend_index_file(request: Request):
+            return index_response(request)
 
         @app.api_route("/tracks", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_tracks():
-            return index_response()
+        def frontend_tracks(request: Request):
+            return index_response(request)
 
         @app.api_route("/settings", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_settings():
-            return index_response()
+        def frontend_settings(request: Request):
+            return index_response(request)
 
         @app.api_route("/tracks/edit/{track_id}", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_track_editor(track_id: str):
-            return index_response()
+        def frontend_track_editor(track_id: str, request: Request):
+            return index_response(request)
 
         @app.api_route("/tracks/{track_id}", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_track_race(track_id: str):
-            return index_response()
+        def frontend_track_race(track_id: str, request: Request):
+            return index_response(request)
 
         @app.api_route("/tournament/{room_id}", methods=["GET", "HEAD"], include_in_schema=False)
-        def frontend_tournament_room(room_id: str):
-            return index_response()
+        def frontend_tournament_room(room_id: str, request: Request):
+            return index_response(request)
 
         @app.api_route("/privacy", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend_privacy():
