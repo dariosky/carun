@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
+import {
+  makeTrackData,
+  setupFrontendTestEnv,
+} from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
@@ -14,9 +17,8 @@ const {
   saveTrackPresetToDb,
   trackOptions,
 } = await import("../js/parameters.js");
-const { getTrackSelectRenderModel, syncTrackSelectWindow } = await import(
-  "../js/menus.js"
-);
+const { getTrackSelectRenderModel, syncTrackSelectWindow } =
+  await import("../js/menus.js");
 
 test("canDeleteTrackPreset allows admins to delete any unpublished db track", () => {
   const currentUserId = "user-1";
@@ -196,7 +198,10 @@ test("visible tracks from API replace local presets and keep published flags", a
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(trackOptions.some((t) => t.id === "bootstrap"), false);
+  assert.equal(
+    trackOptions.some((t) => t.id === "bootstrap"),
+    false,
+  );
   assert.equal(
     trackOptions.some((t) => t.id === "11111111-1111-1111-1111-111111111111"),
     true,

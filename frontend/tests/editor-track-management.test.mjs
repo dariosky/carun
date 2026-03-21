@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
+import {
+  makeTrackData,
+  setupFrontendTestEnv,
+} from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
@@ -14,11 +17,8 @@ const {
   trackOptions,
 } = await import("../js/parameters.js");
 const { getTrackWorldScale } = await import("../js/track.js");
-const {
-  enterEditor,
-  getEditorToolbarLayout,
-  promptClearEditorTrackRecords,
-} = await import("../js/menus.js");
+const { enterEditor, getEditorToolbarLayout, promptClearEditorTrackRecords } =
+  await import("../js/menus.js");
 
 test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke order", () => {
   const imported = importTrackPresetData({

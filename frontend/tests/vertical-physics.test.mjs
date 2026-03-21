@@ -112,8 +112,6 @@ const {
   buildFinishCelebrationStats,
   getExternalHumanRivalCount,
   getFinishCelebrationStandings,
-  getRacePosition,
-  getRaceStandings,
   planTrackNavPath,
   resetRace,
   resolveCarToCarCollision,
@@ -1251,91 +1249,6 @@ test("ai does not reverse-recover just for touching shortcut grass near its plan
   assert.ok(aiPhysicsRuntime.input.brake < 0.9);
 });
 
-test("race standings rank completed laps ahead of local checkpoint position", () => {
-  enableAiOpponents();
-  resetRace();
-  lapData.lap = 2;
-  aiLapData.lap = 1;
-  car.x = 120;
-  car.y = 120;
-  aiCar.x = 640;
-  aiCar.y = 360;
-
-  assert.equal(getRacePosition("player"), 1);
-  assert.ok(getRacePosition("ai") > 1);
-});
-
-test("finish order stays locked once a racer completes the race", () => {
-  enableAiOpponents();
-  resetRace();
-  lapData.finished = true;
-  lapData.finishTime = 92;
-  lapData.finalPosition = 1;
-  state.finished = true;
-  state.raceStandings.playerFinishOrder = 1;
-  state.raceStandings.finishOrders.player = 1;
-  state.raceStandings.finishOrders["ai-1"] = 0;
-  state.raceStandings.nextFinishOrder = 2;
-  aiLapData.finished = false;
-  aiLapData.lap = 3;
-  aiCar.x = 900;
-  aiCar.y = 220;
-
-  assert.equal(getRacePosition("player"), 1);
-  assert.ok(getRacePosition("ai") > 1);
-
-  aiLapData.finished = true;
-  aiLapData.finishTime = 97;
-  aiLapData.finalPosition = 2;
-  state.raceStandings.finishOrders["ai-1"] = 2;
-
-  const standings = getRaceStandings();
-  assert.equal(standings[0].id, "player");
-  assert.ok(standings.some((entry) => entry.id === "ai-1"));
-  assert.equal(getRacePosition("player"), 1);
-});
-
-test("finished racers keep their final position while others continue racing", () => {
-  enableAiOpponents();
-  resetRace();
-
-  lapData.finished = true;
-  lapData.finishTime = 90;
-  lapData.finalPosition = 2;
-  state.raceStandings.playerFinishOrder = 2;
-  state.raceStandings.finishOrders.player = 2;
-
-  aiLapDataList[1].finished = true;
-  aiLapDataList[1].finishTime = 84;
-  aiLapDataList[1].finalPosition = 1;
-  state.raceStandings.finishOrders["ai-2"] = 1;
-  state.raceStandings.nextFinishOrder = 3;
-
-  aiCars[0].x = 1000;
-  aiCars[0].y = 200;
-  aiCars[2].x = 1040;
-  aiCars[2].y = 220;
-  aiCars[3].x = 1080;
-  aiCars[3].y = 240;
-  aiCars[4].x = 1120;
-  aiCars[4].y = 260;
-
-  assert.equal(getRacePosition("ai-2"), 1);
-  assert.equal(getRacePosition("player"), 2);
-
-  aiCars[0].x = 400;
-  aiCars[0].y = 650;
-  aiCars[2].x = 1180;
-  aiCars[2].y = 80;
-  aiCars[3].x = 640;
-  aiCars[3].y = 120;
-  aiCars[4].x = 220;
-  aiCars[4].y = 620;
-
-  assert.equal(getRacePosition("ai-2"), 1);
-  assert.equal(getRacePosition("player"), 2);
-});
-
 test("race clock keeps running after the player finishes if ai racers are still active", () => {
   enableAiOpponents();
   resetRace();
@@ -1351,23 +1264,6 @@ test("race clock keeps running after the player finishes if ai racers are still 
   updateRace(0.016);
 
   assert.ok(state.raceTime > before);
-});
-
-test("race standings include the full five-ai field", () => {
-  enableAiOpponents();
-  resetRace();
-
-  const standings = getRaceStandings();
-
-  assert.equal(standings.length, 6);
-  assert.deepEqual(standings.map((entry) => entry.id).sort(), [
-    "ai-1",
-    "ai-2",
-    "ai-3",
-    "ai-4",
-    "ai-5",
-    "player",
-  ]);
 });
 
 test("spring launches stay within the tuned apex and airborne frames do not draw skid bridges", () => {

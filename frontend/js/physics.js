@@ -35,6 +35,7 @@ import { gameAudio } from "./game-audio.js";
 import { clamp, moveTowards } from "./utils.js";
 import {
   checkpointFrame,
+  checkpointProgress,
   findSpringTrigger,
   findNearestTrackNavNode,
   getTrackNavigationGraph,
@@ -169,14 +170,60 @@ function getStartCheckpointIndex() {
   return checkpoints.length ? 0 : -1;
 }
 
-function getStartProgressReference() {
-  const startAngle = trackStartAngle(track);
-  const startPoint = pointOnCenterLine(startAngle, track);
-  return trackProgressAtPoint(startPoint.x, startPoint.y, track);
-}
-
 function wrapProgress(progress) {
   return ((progress % 1) + 1) % 1;
+}
+
+function normalizeCheckpointIndex(index, total) {
+  if (!Number.isFinite(index) || total <= 0) return 0;
+  return ((Math.round(index) % total) + total) % total;
+}
+
+function getCheckpointProgressValue(index) {
+  if (!checkpoints.length) return 0;
+  const checkpointIndex = normalizeCheckpointIndex(index, checkpoints.length);
+  return checkpointProgress(checkpoints[checkpointIndex], track);
+}
+
+function getCheckpointsPassedThisLap(racerLapData) {
+  const checkpointCount = checkpoints.length;
+  if (checkpointCount <= 1) return 0;
+  const startCheckpointIndex = getStartCheckpointIndex();
+  const nextCheckpointIndex = normalizeCheckpointIndex(
+    racerLapData?.nextCheckpointIndex,
+    checkpointCount,
+  );
+  const firstCheckpointAfterStart =
+    (startCheckpointIndex + 1) % checkpointCount;
+  return normalizeCheckpointIndex(
+    nextCheckpointIndex - firstCheckpointAfterStart,
+    checkpointCount,
+  );
+}
+
+function getSegmentProgress(rawProgress, racerLapData) {
+  const checkpointCount = checkpoints.length;
+  if (checkpointCount <= 1) return 0;
+  const nextCheckpointIndex = normalizeCheckpointIndex(
+    racerLapData?.nextCheckpointIndex,
+    checkpointCount,
+  );
+  const lastCheckpointIndex =
+    (nextCheckpointIndex - 1 + checkpointCount) % checkpointCount;
+  const lastCheckpointProgress =
+    getCheckpointProgressValue(lastCheckpointIndex);
+  const nextCheckpointProgress =
+    getCheckpointProgressValue(nextCheckpointIndex);
+  const segmentSpan = progressDeltaForward(
+    lastCheckpointProgress,
+    nextCheckpointProgress,
+  );
+  if (segmentSpan <= 1e-6) return 0;
+  const segmentDistance = progressDeltaForward(
+    lastCheckpointProgress,
+    rawProgress,
+  );
+  return clamp(segmentDistance / segmentSpan, 0, 1);
 }
 
 function signedAngleDelta(from, to) {
@@ -252,18 +299,26 @@ function recordRaceFinish(racerKey) {
 function getRacerSnapshot(racerKey) {
   let vehicle = car;
   let racerLapData = lapData;
+  let sortOrder = 0;
   if (racerKey !== "player") {
     const aiState = getAiStateById(racerKey);
     if (!aiState) return null;
     vehicle = aiState.vehicle;
     racerLapData = aiState.lapData;
+    sortOrder = aiState.index + 1;
   }
   const rawProgress = trackProgressAtPoint(vehicle.x, vehicle.y, track);
-  const startProgress = getStartProgressReference();
-  const lapProgress =
-    racerLapData.lap === 1 && racerLapData.passed.size <= 1
-      ? rawProgress - startProgress
-      : wrapProgress(rawProgress - startProgress);
+  const checkpointsPassedThisLap = getCheckpointsPassedThisLap(racerLapData);
+  const nextCheckpointIndex = checkpoints.length
+    ? normalizeCheckpointIndex(
+        racerLapData.nextCheckpointIndex,
+        checkpoints.length,
+      )
+    : -1;
+  const lastCheckpointIndex =
+    nextCheckpointIndex >= 0 && checkpoints.length
+      ? (nextCheckpointIndex - 1 + checkpoints.length) % checkpoints.length
+      : -1;
   const finishOrder =
     racerKey === "player"
       ? state.raceStandings.playerFinishOrder
@@ -280,7 +335,11 @@ function getRacerSnapshot(racerKey) {
       0,
       Math.min(racerLapData.lap - 1, racerLapData.maxLaps),
     ),
-    lapProgress,
+    checkpointsPassedThisLap,
+    lastCheckpointIndex,
+    nextCheckpointIndex,
+    segmentProgress: getSegmentProgress(rawProgress, racerLapData),
+    sortOrder,
   };
 }
 
@@ -298,10 +357,13 @@ function compareRaceSnapshots(a, b) {
   if (a.lapsCompleted !== b.lapsCompleted) {
     return b.lapsCompleted - a.lapsCompleted;
   }
-  if (a.lapProgress !== b.lapProgress) {
-    return b.lapProgress - a.lapProgress;
+  if (a.checkpointsPassedThisLap !== b.checkpointsPassedThisLap) {
+    return b.checkpointsPassedThisLap - a.checkpointsPassedThisLap;
   }
-  return 0;
+  if (a.segmentProgress !== b.segmentProgress) {
+    return b.segmentProgress - a.segmentProgress;
+  }
+  return a.sortOrder - b.sortOrder;
 }
 
 export function getRaceStandings() {

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
+import {
+  makeTrackData,
+  setupFrontendTestEnv,
+} from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
