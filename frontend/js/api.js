@@ -199,6 +199,25 @@ export async function deleteTrackById(trackId) {
   }
 }
 
+export async function clearTrackRecords(trackId) {
+  const response = await request(
+    `/api/tracks/${encodeURIComponent(trackId)}/records`,
+    {
+      method: "DELETE",
+    },
+  );
+  const payload = await parseJsonSafe(response);
+  if (!response.ok) {
+    const message =
+      isObject(payload) && typeof payload.detail === "string"
+        ? payload.detail
+        : "Clear records failed";
+    throw new Error(message);
+  }
+  if (!isObject(payload)) throw new Error("Clear records failed");
+  return payload;
+}
+
 export async function submitLapResult(payload) {
   const response = await request("/api/laps", {
     method: "POST",

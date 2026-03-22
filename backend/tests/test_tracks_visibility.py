@@ -310,6 +310,49 @@ def test_deleting_track_removes_related_race_data(client, session):
     assert session.exec(select(LapEvent).where(LapEvent.track_id == track_id)).first() is None
 
 
+def test_owner_can_clear_track_records_without_deleting_track(client, session):
+    owner = create_user(session, "OWNER")
+    other = create_user(session, "OTHER")
+    track = create_track(session, "Draft", owner=owner, is_published=False)
+    session.add(BestLap(user_id=owner.id, track_id=track.id, lap_ms=11111, build_version="test"))
+    session.add(BestLap(user_id=other.id, track_id=track.id, lap_ms=11222, build_version="test"))
+    session.add(BestRace(user_id=owner.id, track_id=track.id, race_ms=33333, build_version="test"))
+    session.commit()
+
+    login_as(client, owner)
+    response = client.delete(f"/api/tracks/{track.id}/records")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == str(track.id)
+    assert payload["best_lap_ms"] is None
+    assert payload["best_lap_display_name"] is None
+    assert payload["best_race_ms"] is None
+    assert payload["best_race_display_name"] is None
+    session.expire_all()
+    assert session.get(Track, track.id) is not None
+    assert session.exec(select(BestLap).where(BestLap.track_id == track.id)).first() is None
+    assert session.exec(select(BestRace).where(BestRace.track_id == track.id)).first() is None
+
+
+def test_non_owner_non_admin_cannot_clear_track_records(client, session):
+    owner = create_user(session, "OWNER")
+    other = create_user(session, "OTHER")
+    track = create_track(session, "Draft", owner=owner, is_published=False)
+    session.add(BestLap(user_id=owner.id, track_id=track.id, lap_ms=11111, build_version="test"))
+    session.add(BestRace(user_id=owner.id, track_id=track.id, race_ms=33333, build_version="test"))
+    session.commit()
+
+    login_as(client, other)
+    response = client.delete(f"/api/tracks/{track.id}/records")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Not allowed"
+    session.expire_all()
+    assert session.exec(select(BestLap).where(BestLap.track_id == track.id)).first() is not None
+    assert session.exec(select(BestRace).where(BestRace.track_id == track.id)).first() is not None
+
+
 def test_leaderboard_hides_unpublished_tracks_from_non_owner(client, session):
     owner = create_user(session, "OWNER")
     other = create_user(session, "OTHER")

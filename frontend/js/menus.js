@@ -46,6 +46,7 @@ import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments, surfaceAt, trackProgressAtPoint } from "./track.js";
 import {
+  clearTrackRecords,
   logoutAuth,
   renameTrack,
   setTrackPublished,
@@ -318,15 +319,40 @@ export function getEditorTopBarLayout() {
   return { save, curbs, back, race, build };
 }
 
-function clearEditorTrackRecords() {
+async function clearEditorTrackRecords() {
   const preset = getTrackPreset(state.editor.trackIndex);
   if (!preset) return null;
-  const updatedPreset = setTrackPresetMetadata(preset.id, {
-    bestLapMs: null,
-    bestLapDisplayName: null,
-    bestRaceMs: null,
-    bestRaceDisplayName: null,
-  });
+  const metadata = preset.fromDb
+    ? await clearTrackRecords(preset.id)
+    : {
+        best_lap_ms: null,
+        best_lap_display_name: null,
+        best_race_ms: null,
+        best_race_display_name: null,
+      };
+  const updatedPreset = setTrackPresetMetadata(
+    preset.id,
+    {
+      bestLapMs: Number.isFinite(metadata.best_lap_ms)
+        ? Number(metadata.best_lap_ms)
+        : null,
+      bestLapDisplayName:
+        typeof metadata.best_lap_display_name === "string"
+          ? metadata.best_lap_display_name
+          : null,
+      bestRaceMs: Number.isFinite(metadata.best_race_ms)
+        ? Number(metadata.best_race_ms)
+        : null,
+      bestRaceDisplayName:
+        typeof metadata.best_race_display_name === "string"
+          ? metadata.best_race_display_name
+          : null,
+    },
+    {
+      currentUserId: state.auth.userId,
+      currentUserIsAdmin: state.auth.isAdmin,
+    },
+  );
   if (!updatedPreset) return null;
   saveTrackPreset(state.editor.trackIndex);
   return updatedPreset;
@@ -1844,8 +1870,20 @@ export function promptClearEditorTrackRecords() {
     confirmLabel: "Clear",
     cancelLabel: "Cancel",
     danger: true,
-    onConfirm: () => {
-      const updatedPreset = clearEditorTrackRecords();
+    onConfirm: async () => {
+      let updatedPreset = null;
+      try {
+        updatedPreset = await clearEditorTrackRecords();
+      } catch (error) {
+        showSnackbar(
+          error instanceof Error ? error.message : "Could not clear records",
+          {
+            seconds: 2,
+            kind: "error",
+          },
+        );
+        return;
+      }
       if (!updatedPreset) return;
       showSnackbar("Track records cleared", {
         seconds: 1.6,

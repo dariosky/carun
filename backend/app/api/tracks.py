@@ -251,6 +251,27 @@ def update_track(
     return _to_track_response(session, track)
 
 
+@router.delete("/{track_id}/records", response_model=TrackResponse)
+def clear_track_records(
+    track_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    track = session.get(Track, _parse_track_id(track_id))
+    if not track:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+
+    allowed = bool(current_user.is_admin or track.owner_user_id == current_user.id)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+
+    session.exec(delete(BestLap).where(BestLap.track_id == track.id))
+    session.exec(delete(BestRace).where(BestRace.track_id == track.id))
+    session.commit()
+
+    return _to_track_response(session, track)
+
+
 @router.delete("/{track_id}", status_code=204)
 def delete_track(
     track_id: str,

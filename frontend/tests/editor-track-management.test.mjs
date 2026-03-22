@@ -76,7 +76,7 @@ test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke
   removeTrackPresetById(imported.id, { removePersisted: false });
 });
 
-test("editor clear-records command opens confirmation and clears stored best times", () => {
+test("editor clear-records command opens confirmation and clears stored best times", async () => {
   const writes = [];
   const originalSetItem = globalThis.localStorage.setItem;
   globalThis.localStorage.setItem = (key, value) => {
@@ -116,7 +116,7 @@ test("editor clear-records command opens confirmation and clears stored best tim
     assert.equal(state.modal.confirmLabel, "Clear");
     assert.equal(typeof state.modal.onConfirm, "function");
 
-    state.modal.onConfirm();
+    await state.modal.onConfirm();
 
     const updated = getTrackPreset(trackIndex);
     assert.equal(updated.bestLapMs, null);
@@ -130,6 +130,79 @@ test("editor clear-records command opens confirmation and clears stored best tim
     removeTrackPresetById(imported.id, { removePersisted: false });
   } finally {
     globalThis.localStorage.setItem = originalSetItem;
+  }
+});
+
+test("editor clear-records command calls API for DB-backed tracks", async () => {
+  const fetchCalls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    fetchCalls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return {
+          id: "db-clear-records",
+          name: "DB CLEAR",
+          source: "user",
+          is_published: false,
+          owner_user_id: "user-1",
+          owner_display_name: "OWNER",
+          best_lap_ms: null,
+          best_lap_display_name: null,
+          best_race_ms: null,
+          best_race_display_name: null,
+          created_at: "2026-03-22T12:00:00Z",
+        };
+      },
+    };
+  };
+
+  try {
+    state.auth.userId = "user-1";
+    const imported = importTrackPresetData({
+      id: "db-clear-records",
+      name: "DB CLEAR",
+      source: "user",
+      ownerUserId: "user-1",
+      isPublished: false,
+      canDelete: true,
+      fromDb: true,
+      bestLapMs: 41_250,
+      bestLapDisplayName: "LUNA",
+      bestRaceMs: 132_900,
+      bestRaceDisplayName: "MARIO",
+      track: makeTrackData(),
+      checkpoints: [],
+      worldObjects: [],
+      centerlineStrokes: [],
+      editStack: [],
+    });
+    assert.ok(imported);
+
+    const trackIndex = trackOptions.findIndex(
+      (track) => track.id === imported.id,
+    );
+    assert.ok(trackIndex >= 0);
+    enterEditor(trackIndex);
+
+    assert.equal(promptClearEditorTrackRecords(), true);
+    await state.modal.onConfirm();
+
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, "/api/tracks/db-clear-records/records");
+    assert.equal(fetchCalls[0].options.method, "DELETE");
+
+    const updated = getTrackPreset(trackIndex);
+    assert.equal(updated.bestLapMs, null);
+    assert.equal(updated.bestLapDisplayName, null);
+    assert.equal(updated.bestRaceMs, null);
+    assert.equal(updated.bestRaceDisplayName, null);
+    removeTrackPresetById(imported.id, { removePersisted: false });
+  } finally {
+    globalThis.fetch = originalFetch;
+    state.auth.userId = null;
+    state.auth.isAdmin = false;
   }
 });
 
