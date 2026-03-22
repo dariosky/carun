@@ -299,6 +299,16 @@ function createAiPhysicsRuntimeState() {
     desiredSpeed: 0,
     targetPoint: { x: track.cx, y: track.cy },
     debugPathPoints: [],
+    debug: {
+      slipAngle: 0,
+      surface: "asphalt",
+      vForward: 0,
+      vLateral: 0,
+      pivotX: track.cx,
+      pivotY: track.cy,
+      z: 0,
+      vz: 0,
+    },
     surface: {
       lateralGripMul: 1,
       longDragMul: 1,

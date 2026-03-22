@@ -564,7 +564,15 @@ function trackNavSignature(trackDef = track, objects = worldObjects) {
   ].join("#");
 }
 
-function addNavEdge(edges, fromNode, toNode, cost, step, kind = "progress") {
+function addNavEdge(
+  edges,
+  fromNode,
+  toNode,
+  cost,
+  step,
+  kind = "progress",
+  extra = null,
+) {
   if (!fromNode || !toNode || toNode.id === fromNode.id) return;
   const edgeList = edges[fromNode.id];
   if (!edgeList) return;
@@ -574,10 +582,11 @@ function addNavEdge(edges, fromNode, toNode, cost, step, kind = "progress") {
       existing.cost = cost;
       existing.step = step;
       existing.kind = kind;
+      if (extra && typeof extra === "object") Object.assign(existing, extra);
     }
     return;
   }
-  edgeList.push({ to: toNode.id, cost, step, kind });
+  edgeList.push({ to: toNode.id, cost, step, kind, ...(extra || {}) });
 }
 
 function nodeSurfacePenalty(surfaceName) {
@@ -644,6 +653,326 @@ function navSurfacePenaltyAlongSegment(
     (totalPenalty / (samples + 1)) *
     physicsConfig.ai.edgeSegmentSurfacePenaltyWeight
   );
+}
+
+function getSpringObjects(objects = worldObjects) {
+  return objects
+    .map(normalizeWorldObject)
+    .filter((obj) => obj && obj.type === "spring");
+}
+
+function springLaunchApexHeight(speed) {
+  const airCfg = physicsConfig.air;
+  const speedRatio = clamp(
+    speed / Math.max(physicsConfig.car.maxSpeed, 1),
+    0,
+    1,
+  );
+  return Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
+}
+
+function estimateJumpLaunchReach(node, nodeEdges, nodes) {
+  const aiCfg = physicsConfig.ai;
+  const baseReach = aiCfg.jumpApproachDistance || 42;
+  let forwardReach = 0;
+
+  for (const edge of nodeEdges || []) {
+    if (edge?.kind !== "progress" || edge.step !== 1) continue;
+    const nextNode = nodes[edge.to];
+    if (!nextNode) continue;
+    forwardReach = Math.max(
+      forwardReach,
+      Math.hypot(nextNode.x - node.x, nextNode.y - node.y),
+    );
+  }
+
+  // On long straights the nav graph can leave ~one slice length between nodes.
+  // Let spring approaches reach about one forward slice, but cap the expansion
+  // so springs do not attract cars from implausibly far away.
+  return Math.max(baseReach, Math.min(baseReach * 2, forwardReach));
+}
+
+function springLaunchOpportunity(
+  node,
+  spring,
+  launchReach = physicsConfig.ai.jumpApproachDistance || 42,
+) {
+  const aiCfg = physicsConfig.ai;
+  const dx = spring.x - node.x;
+  const dy = spring.y - node.y;
+  const along = dx * node.tangentX + dy * node.tangentY;
+  const lateral = Math.abs(dx * -node.tangentY + dy * node.tangentX);
+  const approachSlack = Math.max(
+    spring.r * 0.35,
+    Math.min(launchReach * 0.2, spring.r),
+  );
+  return (
+    along >= -approachSlack &&
+    along <= launchReach &&
+    lateral <= spring.r + (aiCfg.jumpLaunchLateralMargin || 12)
+  );
+}
+
+function estimateGroundAlternativeCost(
+  edges,
+  startNodeId,
+  goalNodeId,
+  maxVisits,
+) {
+  if (startNodeId === goalNodeId) return 0;
+  const best = new Map([[startNodeId, 0]]);
+  const queue = [{ nodeId: startNodeId, cost: 0 }];
+  let visits = 0;
+
+  while (queue.length && visits < maxVisits) {
+    queue.sort((a, b) => a.cost - b.cost);
+    const current = queue.shift();
+    if (!current) break;
+    if (current.nodeId === goalNodeId) return current.cost;
+    if (current.cost > (best.get(current.nodeId) ?? Infinity)) continue;
+    visits += 1;
+
+    for (const edge of edges[current.nodeId] || []) {
+      if (edge.kind === "jump") continue;
+      const nextCost = current.cost + edge.cost;
+      if (nextCost >= (best.get(edge.to) ?? Infinity)) continue;
+      best.set(edge.to, nextCost);
+      queue.push({ nodeId: edge.to, cost: nextCost });
+    }
+  }
+
+  return Infinity;
+}
+
+function simulateSpringJumpArc(
+  node,
+  spring,
+  trackDef = track,
+  objects = worldObjects,
+  {
+    launchSpeed = clamp(
+      Math.max(node.baseTargetSpeed || 0, physicsConfig.ai.targetSpeedMin),
+      physicsConfig.ai.targetSpeedMin,
+      physicsConfig.ai.targetSpeedMax,
+    ),
+    dt = physicsConfig.ai.jumpArcSampleDt || 1 / 60,
+    maxAirTime = physicsConfig.ai.jumpMaxAirTime || 1.8,
+  } = {},
+) {
+  const carCfg = physicsConfig.car;
+  const airCfg = physicsConfig.air;
+  const headingX = node.tangentX;
+  const headingY = node.tangentY;
+  let x = spring.x;
+  let y = spring.y;
+  let z = Math.max(Number(spring?.height) || 0, 0.02);
+  let vz = Math.sqrt(2 * airCfg.gravity * springLaunchApexHeight(launchSpeed));
+  let forwardSpeed = launchSpeed;
+  let airTime = 0;
+  let maxHeight = z;
+  let travelDistance = 0;
+  let obstacleBypassed = false;
+  let penaltySurfaceDistance = 0;
+  const samples = [];
+
+  while (airTime < maxAirTime) {
+    forwardSpeed += carCfg.engineAccel * airCfg.throttleAccelMul * dt;
+    forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
+
+    const nextX = x + headingX * forwardSpeed * dt;
+    const nextY = y + headingY * forwardSpeed * dt;
+    const nextVz = vz - airCfg.gravity * dt;
+    const nextZ = z + nextVz * dt;
+
+    const groundCollision = resolveObjectCollisions(nextX, nextY, 0, objects);
+    if (groundCollision.hit) obstacleBypassed = true;
+
+    const midGroundSurface = surfaceAtForTrack(nextX, nextY, trackDef, objects);
+    if (midGroundSurface === "grass" || midGroundSurface === "water") {
+      penaltySurfaceDistance += Math.hypot(nextX - x, nextY - y);
+    }
+
+    const airborneCollision = resolveObjectCollisions(
+      nextX,
+      nextY,
+      Math.max(nextZ, 0),
+      objects,
+    );
+    if (airborneCollision.hit) return null;
+
+    x = nextX;
+    y = nextY;
+    z = nextZ;
+    vz = nextVz;
+    airTime += dt;
+    const segmentDistance = forwardSpeed * dt;
+    travelDistance += segmentDistance;
+    maxHeight = Math.max(maxHeight, z);
+    samples.push({ x, y, z: Math.max(z, 0) });
+
+    if (z <= 0) {
+      return {
+        launchX: spring.x,
+        launchY: spring.y,
+        launchSpeed,
+        airTime,
+        travelDistance,
+        landingX: x,
+        landingY: y,
+        maxHeight,
+        obstacleBypassed,
+        penaltySurfaceDistance,
+        samples,
+      };
+    }
+  }
+
+  return null;
+}
+
+function collectSpringJumpCandidates(
+  node,
+  nodes,
+  progressCount,
+  trackDef,
+  objects,
+  jumpArc,
+) {
+  const aiCfg = physicsConfig.ai;
+  const landingRadius = aiCfg.jumpLandingRadius || 42;
+  const landingHeadingThreshold = aiCfg.jumpLandingHeadingThreshold || 0.2;
+  const minProgressStep = aiCfg.jumpMinProgressStep || 4;
+  const candidates = [];
+
+  for (const candidate of nodes) {
+    if (candidate.id === node.id) continue;
+    const distanceToLanding = Math.hypot(
+      candidate.x - jumpArc.landingX,
+      candidate.y - jumpArc.landingY,
+    );
+    if (distanceToLanding > landingRadius) continue;
+    const headingAlignment =
+      candidate.tangentX * node.tangentX + candidate.tangentY * node.tangentY;
+    if (headingAlignment < landingHeadingThreshold) continue;
+    const progressStep =
+      (candidate.sliceIndex - node.sliceIndex + progressCount) %
+        progressCount || 0;
+    if (progressStep < minProgressStep) continue;
+    const landingSurface = surfaceAtForTrack(
+      candidate.x,
+      candidate.y,
+      trackDef,
+      objects,
+    );
+    const landingPenalty =
+      nodeSurfacePenalty(landingSurface) *
+      (aiCfg.jumpLandingSurfacePenaltyMul || 0.55);
+    const rolloutDistance = Math.max(distanceToLanding, 1);
+    const rolloutPenalty = distanceToLanding * 0.35;
+    const obstaclePenalty = (candidate.obstaclePenalty || 0) * 0.12;
+    const riskPenalty = aiCfg.jumpRiskPenalty || 16;
+    const cost =
+      jumpArc.travelDistance +
+      rolloutDistance +
+      rolloutPenalty +
+      landingPenalty +
+      obstaclePenalty +
+      riskPenalty;
+    const rolloutSpeed = Math.max(candidate.baseTargetSpeed || 0, 1);
+    candidates.push({
+      candidate,
+      cost,
+      step: progressStep,
+      travelTime: jumpArc.airTime + rolloutDistance / rolloutSpeed,
+      landingError: distanceToLanding,
+      distanceCost: jumpArc.travelDistance + rolloutDistance,
+      plannerPenaltyCost:
+        rolloutPenalty + landingPenalty + obstaclePenalty + riskPenalty,
+    });
+  }
+
+  candidates.sort((a, b) => a.cost - b.cost);
+  return candidates.slice(0, aiCfg.jumpMaxLandingOptions || 2);
+}
+
+function addSpringJumpEdges(
+  nodes,
+  edges,
+  progressCount,
+  trackDef = track,
+  objects = worldObjects,
+) {
+  const aiCfg = physicsConfig.ai;
+  const springs = getSpringObjects(objects);
+  if (!springs.length) return;
+  const maxGroundVisits = Math.max(progressCount * 3, 48);
+
+  for (const node of nodes) {
+    if (node.surface !== "asphalt" && node.surface !== "curb") continue;
+    const launchReach = estimateJumpLaunchReach(node, edges[node.id], nodes);
+    const spring = springs.find((obj) =>
+      springLaunchOpportunity(node, obj, launchReach),
+    );
+    if (!spring) continue;
+    const jumpArc = simulateSpringJumpArc(node, spring, trackDef, objects, {
+      launchSpeed: clamp(
+        Math.max(node.baseTargetSpeed || 0, aiCfg.targetSpeedMin),
+        aiCfg.targetSpeedMin,
+        aiCfg.targetSpeedMax,
+      ),
+    });
+    if (!jumpArc) continue;
+    if (
+      !jumpArc.obstacleBypassed &&
+      jumpArc.penaltySurfaceDistance <
+        (aiCfg.jumpMinPenaltySurfaceDistance || 18)
+    ) {
+      continue;
+    }
+    const candidates = collectSpringJumpCandidates(
+      node,
+      nodes,
+      progressCount,
+      trackDef,
+      objects,
+      jumpArc,
+    );
+    for (const option of candidates) {
+      const groundAlternativeCost = estimateGroundAlternativeCost(
+        edges,
+        node.id,
+        option.candidate.id,
+        maxGroundVisits,
+      );
+      const benefitCost = groundAlternativeCost - option.cost;
+      if (
+        Number.isFinite(groundAlternativeCost) &&
+        benefitCost < (aiCfg.jumpMinBenefitCost || 18)
+      ) {
+        continue;
+      }
+      addNavEdge(
+        edges,
+        node,
+        option.candidate,
+        option.cost,
+        option.step,
+        "jump",
+        {
+          airborne: true,
+          travelTime: option.travelTime,
+          distanceCost: option.distanceCost,
+          plannerPenaltyCost: option.plannerPenaltyCost,
+          launchSpeed: jumpArc.launchSpeed,
+          landingError: option.landingError,
+          obstacleBypassed: jumpArc.obstacleBypassed,
+          penaltySurfaceDistance: jumpArc.penaltySurfaceDistance,
+          groundAlternativeCost,
+          benefitCost,
+        },
+      );
+    }
+  }
 }
 
 function distanceToSolidObject(x, y, obj) {
@@ -1066,34 +1395,30 @@ export function getTrackNavigationGraph(
         const laneChangePenalty =
           Math.abs(nextNode.laneIndex - node.laneIndex) *
           aiCfg.laneChangePenalty;
-        // When the departure node sits on a spring, the car will fly — reduce
-        // surface and obstacle penalties significantly since the car won't be
-        // touching the ground.
-        const springDiscount = node.nearSpring ? 0.2 : 1;
         const surfacePenalty =
-          (nodeSurfacePenalty(node.surface) +
-            nodeSurfacePenalty(nextNode.surface) +
-            navSurfacePenaltyAlongSegment(
-              node.x,
-              node.y,
-              nextNode.x,
-              nextNode.y,
-              trackDef,
-              objects,
-            )) *
-          springDiscount;
+          nodeSurfacePenalty(node.surface) +
+          nodeSurfacePenalty(nextNode.surface) +
+          navSurfacePenaltyAlongSegment(
+            node.x,
+            node.y,
+            nextNode.x,
+            nextNode.y,
+            trackDef,
+            objects,
+          );
         const curvaturePenalty = nextNode.curvature * 42;
-        const cost =
-          distance +
+        const plannerPenaltyCost =
           laneChangePenalty +
           surfacePenalty +
           curvaturePenalty +
-          (node.obstaclePenalty + nextNode.obstaclePenalty) *
-            0.35 *
-            springDiscount +
-          segmentObstacleInfo.penalty * 0.8 * springDiscount +
+          (node.obstaclePenalty + nextNode.obstaclePenalty) * 0.35 +
+          segmentObstacleInfo.penalty * 0.8 +
           (step - 1) * 4;
-        addNavEdge(edges, node, nextNode, cost, step, "progress");
+        const cost = distance + plannerPenaltyCost;
+        addNavEdge(edges, node, nextNode, cost, step, "progress", {
+          distanceCost: distance,
+          plannerPenaltyCost,
+        });
       }
     }
   }
@@ -1140,13 +1465,16 @@ export function getTrackNavigationGraph(
         trackDef,
         objects,
       );
-    const cost =
-      distance +
+    const plannerPenaltyCost =
       surfPenalty +
       prevNode.curvature * 42 +
       (node.obstaclePenalty + prevNode.obstaclePenalty) * 0.35 +
       segInfo.penalty * 0.8;
-    addNavEdge(edges, node, prevNode, cost, -1, "backward");
+    const cost = distance + plannerPenaltyCost;
+    addNavEdge(edges, node, prevNode, cost, -1, "backward", {
+      distanceCost: distance,
+      plannerPenaltyCost,
+    });
   }
 
   for (const node of nodes) {
@@ -1191,39 +1519,42 @@ export function getTrackNavigationGraph(
         objects,
       );
       if (segmentObstacleInfo.blocked) continue;
-      const junctionSpringDiscount = node.nearSpring ? 0.2 : 1;
       const surfacePenalty =
-        (nodeSurfacePenalty(node.surface) +
-          nodeSurfacePenalty(candidate.surface) +
-          navSurfacePenaltyAlongSegment(
-            node.x,
-            node.y,
-            candidate.x,
-            candidate.y,
-            trackDef,
-            objects,
-          )) *
-        junctionSpringDiscount;
-      const cost =
-        distance +
+        nodeSurfacePenalty(node.surface) +
+        nodeSurfacePenalty(candidate.surface) +
+        navSurfacePenaltyAlongSegment(
+          node.x,
+          node.y,
+          candidate.x,
+          candidate.y,
+          trackDef,
+          objects,
+        );
+      const plannerPenaltyCost =
         surfacePenalty +
         candidate.curvature * 24 +
-        (node.obstaclePenalty + candidate.obstaclePenalty) *
-          0.2 *
-          junctionSpringDiscount +
-        segmentObstacleInfo.penalty * 0.85 * junctionSpringDiscount +
+        (node.obstaclePenalty + candidate.obstaclePenalty) * 0.2 +
+        segmentObstacleInfo.penalty * 0.85 +
         aiCfg.navIntersectionPenalty;
+      const cost = distance + plannerPenaltyCost;
       shortcutEdges.push({
         toNode: candidate,
         cost,
         step: sliceGap,
+        plannerPenaltyCost,
+        distanceCost: distance,
       });
     }
     shortcutEdges.sort((a, b) => a.cost - b.cost);
     for (const edge of shortcutEdges.slice(0, aiCfg.navIntersectionMaxLinks)) {
-      addNavEdge(edges, node, edge.toNode, edge.cost, edge.step, "junction");
+      addNavEdge(edges, node, edge.toNode, edge.cost, edge.step, "junction", {
+        distanceCost: edge.distanceCost,
+        plannerPenaltyCost: edge.plannerPenaltyCost,
+      });
     }
   }
+
+  addSpringJumpEdges(nodes, edges, progressCount, trackDef, objects);
 
   const checkpointNodeIds = checkpoints.map((checkpoint) => {
     const checkpointProgressValue = checkpointProgress(checkpoint, trackDef);

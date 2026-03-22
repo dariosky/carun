@@ -2266,7 +2266,7 @@ function drawFinishOverlay() {
   ];
 
   for (const row of rows) {
-    ctx.fillStyle = row.rewarded ? "#ffe167" : "#ffffff";
+    ctx.fillStyle = row.rewarded ? "#ffe167" : "#f3f8ff";
     ctx.font = "bold 22px Verdana";
     ctx.fillText(`${row.label}`, leftColX, row.y);
     ctx.textAlign = "right";
@@ -2275,7 +2275,7 @@ function drawFinishOverlay() {
 
     const detailText = getFinishRecordDetail(row);
     if (detailText) {
-      ctx.fillStyle = row.rewarded ? "#fff1a8" : "#9bb0c4";
+      ctx.fillStyle = row.rewarded ? "#fff1a8" : "#c5d0dc";
       ctx.font = "11px Verdana";
       ctx.fillText(
         fitTextToWidth(detailText, leftDetailMaxW),
@@ -2330,14 +2330,22 @@ function drawFinishOverlay() {
   ctx.fillText(returnText, panelX + 28, panelY + panelH - 24);
 }
 
-function getFinishRecordDetail(row) {
-  if (!row.rewarded) return "";
-  if (!Number.isFinite(row.previousMs) || !Number.isFinite(row.improvementMs)) {
-    return "NEW RECORD";
+export function getFinishRecordDetail(row) {
+  if (!Number.isFinite(row.previousMs)) {
+    return row.rewarded ? "NEW RECORD" : "";
   }
+
   const previousTime = formatTime(row.previousMs / 1000);
-  const improvement = formatTime(row.improvementMs / 1000);
   const previousHolder = String(row.previousHolder || "").trim();
+
+  if (!row.rewarded || !Number.isFinite(row.improvementMs)) {
+    if (previousHolder) {
+      return `RECORD ${previousHolder} ${previousTime}`;
+    }
+    return `RECORD ${previousTime}`;
+  }
+
+  const improvement = formatTime(row.improvementMs / 1000);
   if (previousHolder) {
     return `-${improvement} vs ${previousHolder} ${previousTime}`;
   }

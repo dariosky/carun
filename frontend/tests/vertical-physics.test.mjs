@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { aiWallJumpShortcutTrack } from "./fixtures/ai-wall-jump-shortcut-track.mjs";
 
 function setupDomStubs() {
   const noop = () => {};
@@ -206,6 +207,43 @@ function getPathSurfaceExposure(graph, pathNodeIds, samplesPerSegment = 10) {
   return counts;
 }
 
+function makeSpringShortcutScenario(kind = "wall") {
+  const trackData = makeTrackData();
+  const frame = trackFrameAtAngle(Math.PI * 0.18, trackData);
+  const objects = [
+    {
+      type: "spring",
+      x: frame.point.x,
+      y: frame.point.y,
+      r: 20,
+      angle: 0,
+      height: 0.4,
+    },
+  ];
+  if (kind === "wall") {
+    objects.push({
+      type: "wall",
+      x: frame.point.x + frame.tangent.x * 70,
+      y: frame.point.y + frame.tangent.y * 70,
+      angle: Math.atan2(frame.tangent.y, frame.tangent.x) + Math.PI * 0.5,
+      width: 18,
+      length: 120,
+      height: 2.5,
+    });
+  } else if (kind === "pond") {
+    objects.push({
+      type: "pond",
+      x: frame.point.x + frame.tangent.x * 95,
+      y: frame.point.y + frame.tangent.y * 95,
+      rx: 70,
+      ry: 42,
+      angle: Math.atan2(frame.tangent.y, frame.tangent.x),
+      seed: 0.2,
+    });
+  }
+  return { trackData, objects };
+}
+
 test("legacy world objects gain default heights and wall defaults", () => {
   const imported = importTrackPresetData({
     id: "vertical-legacy",
@@ -393,6 +431,43 @@ test("airborne player state reports flying surface instead of water", () => {
     assert.equal(audioCalls.at(-1)?.airborne, true);
   } finally {
     gameAudio.updateVehicleAudio = originalUpdateVehicleAudio;
+  }
+});
+
+test("ai launches when it reaches a spring mid-frame and reports flying surface", () => {
+  enableAiOpponents();
+  resetRace();
+  state.startSequence.active = false;
+  worldObjects.length = 0;
+  const audioCalls = [];
+  const originalUpdateRivalVehicleAudio = gameAudio.updateRivalVehicleAudio;
+  gameAudio.updateRivalVehicleAudio = (params) => {
+    audioCalls.push(params);
+  };
+
+  try {
+    const springDistance = 18;
+    worldObjects.push({
+      type: "spring",
+      x: aiCar.x + Math.cos(aiCar.angle) * springDistance,
+      y: aiCar.y + Math.sin(aiCar.angle) * springDistance,
+      r: 16,
+      angle: 0,
+      height: 0.4,
+    });
+    aiCar.vx = Math.cos(aiCar.angle) * 220;
+    aiCar.vy = Math.sin(aiCar.angle) * 220;
+    aiCar.speed = 220;
+    aiPhysicsRuntime.softResetCooldown = 99;
+
+    updateRace(0.016);
+
+    assert.equal(aiCar.airborne, true);
+    assert.equal(aiPhysicsRuntime.debug.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.surface, "flying");
+    assert.equal(audioCalls.at(-1)?.airborne, true);
+  } finally {
+    gameAudio.updateRivalVehicleAudio = originalUpdateRivalVehicleAudio;
   }
 });
 
@@ -1049,6 +1124,146 @@ test("track navigation graph adds junction links for intersecting layouts", () =
       (edge) => edge.step >= physicsConfig.ai.navIntersectionMinSliceGap,
     ),
   );
+});
+
+test("track navigation graph adds jump edges that clear blocking walls near springs", () => {
+  const { trackData, objects } = makeSpringShortcutScenario("wall");
+  const graph = getTrackNavigationGraph(trackData, objects);
+  const jumpEdges = graph.edges.flat().filter((edge) => edge.kind === "jump");
+
+  assert.ok(jumpEdges.length > 0);
+  assert.ok(jumpEdges.some((edge) => edge.obstacleBypassed));
+  assert.ok(
+    jumpEdges.some((edge) => !Number.isFinite(edge.groundAlternativeCost)),
+  );
+});
+
+test("planTrackNavPath uses a spring jump route to cross a wall shortcut", () => {
+  const { trackData, objects } = makeSpringShortcutScenario("wall");
+  const graph = getTrackNavigationGraph(trackData, objects);
+  const springNode = graph.nodes.find((node) =>
+    graph.edges[node.id].some((edge) => edge.kind === "jump"),
+  );
+  const jumpEdge = graph.edges[springNode.id].find(
+    (edge) => edge.kind === "jump",
+  );
+  const fartherGoal = graph.nodes.find(
+    (node) =>
+      node.sliceIndex >= graph.nodes[jumpEdge.to].sliceIndex + 3 &&
+      (node.surface === "asphalt" || node.surface === "curb"),
+  );
+  const path = planTrackNavPath(graph, springNode.id, [fartherGoal.id]);
+  const kinds = path
+    .map((nodeId, index) =>
+      index < path.length - 1
+        ? graph.edges[nodeId].find((edge) => edge.to === path[index + 1])?.kind
+        : null,
+    )
+    .filter(Boolean);
+
+  assert.equal(kinds[0], "jump");
+  assert.ok(kinds.includes("progress"));
+});
+
+test("planTrackNavPath uses a spring jump to skip a penalty pond when faster", () => {
+  const { trackData, objects } = makeSpringShortcutScenario("pond");
+  const graph = getTrackNavigationGraph(trackData, objects);
+  const springNode = graph.nodes.find((node) =>
+    graph.edges[node.id].some((edge) => edge.kind === "jump"),
+  );
+  const jumpEdge = graph.edges[springNode.id].find(
+    (edge) => edge.kind === "jump",
+  );
+  const fartherGoal = graph.nodes.find(
+    (node) =>
+      node.sliceIndex >= graph.nodes[jumpEdge.to].sliceIndex + 3 &&
+      (node.surface === "asphalt" || node.surface === "curb"),
+  );
+  const path = planTrackNavPath(graph, springNode.id, [fartherGoal.id]);
+  const kinds = path
+    .map((nodeId, index) =>
+      index < path.length - 1
+        ? graph.edges[nodeId].find((edge) => edge.to === path[index + 1])?.kind
+        : null,
+    )
+    .filter(Boolean);
+
+  assert.ok(jumpEdge.penaltySurfaceDistance > 60);
+  assert.ok(jumpEdge.benefitCost > physicsConfig.ai.jumpMinBenefitCost);
+  assert.equal(kinds[0], "jump");
+});
+
+test("checkpoint planning uses the wall-clearing jump on coarse spring spacing", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const imported = importTrackPresetData(
+    {
+      id: "vertical-wall-jump-regression",
+      name: "VERTICAL WALL JUMP REGRESSION",
+      track: aiWallJumpShortcutTrack.track,
+      checkpoints: aiWallJumpShortcutTrack.checkpoints,
+      worldObjects: aiWallJumpShortcutTrack.worldObjects,
+      centerlineStrokes: [],
+      editStack: [],
+    },
+    { persist: false },
+  );
+
+  try {
+    const trackIndex = trackOptions.findIndex(
+      (option) => option.id === imported.id,
+    );
+    applyTrackPreset(trackIndex);
+
+    const graph = getTrackNavigationGraph();
+    const jumpEdges = graph.edges.flat().filter((edge) => edge.kind === "jump");
+    const goalNodeIds = graph.checkpointGoalNodeIds[2] || [];
+    const approachNodes = graph.nodes.filter(
+      (node) =>
+        node.progress > 0.12 &&
+        node.progress < 0.18 &&
+        (node.surface === "asphalt" || node.surface === "curb"),
+    );
+
+    let jumpRoute = null;
+    for (const node of approachNodes) {
+      const path = planTrackNavPath(graph, node.id, goalNodeIds);
+      const kinds = path
+        .map((nodeId, index) =>
+          index < path.length - 1
+            ? graph.edges[nodeId].find((edge) => edge.to === path[index + 1])
+                ?.kind
+            : null,
+        )
+        .filter(Boolean);
+      if (kinds.includes("jump")) {
+        jumpRoute = { nodeId: node.id, kinds };
+        break;
+      }
+    }
+
+    assert.ok(
+      jumpEdges.length > 0,
+      "expected jump edges on the spring section",
+    );
+    assert.ok(
+      jumpEdges.some((edge) => edge.obstacleBypassed),
+      "expected a jump edge that clears the wall line",
+    );
+    assert.ok(
+      jumpRoute,
+      "expected checkpoint routing to use the jump shortcut",
+    );
+    assert.ok(
+      jumpRoute.kinds.slice(0, 4).includes("jump"),
+      `expected the jump to appear early in the route, got ${jumpRoute.kinds.join(" -> ")}`,
+    );
+  } finally {
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex(
+      (option) => option.id === originalTrackId,
+    );
+    applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
+  }
 });
 
 test("checkpoint path planning avoids off-road shortcuts when a dry route exists", () => {

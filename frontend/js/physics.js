@@ -538,21 +538,21 @@ function surfaceSpeedRatio(surfaceName) {
 
 // Estimate how long (in seconds) it takes to traverse the edge from→to,
 // considering curvature-limited speed and surface slowdown.
-function computeEdgeTimeCost(fromNode, toNode) {
+function computeEdgeTimeCost(edge, fromNode, toNode) {
   const dx = toNode.x - fromNode.x;
   const dy = toNode.y - fromNode.y;
   const distance = Math.hypot(dx, dy);
   if (distance < 1e-5) return 0;
+  if (edge?.kind === "jump" && Number.isFinite(edge.travelTime)) {
+    return edge.travelTime;
+  }
   const maxSpeed = physicsConfig.ai.targetSpeedMax;
   // Average curvature-limited speed along the edge
   const curvatureSpeed =
     ((fromNode.baseTargetSpeed || maxSpeed) +
       (toNode.baseTargetSpeed || maxSpeed)) *
     0.5;
-  // Surface speed limit — if the departure node is a spring the car will fly
-  const fromRatio = fromNode.nearSpring
-    ? 1
-    : surfaceSpeedRatio(fromNode.surface || "asphalt");
+  const fromRatio = surfaceSpeedRatio(fromNode.surface || "asphalt");
   const toRatio = surfaceSpeedRatio(toNode.surface || "asphalt");
   const avgSurfaceRatio = (fromRatio + toRatio) * 0.5;
   const surfaceSpeed = maxSpeed * avgSurfaceRatio;
@@ -671,7 +671,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
       // rejected — the AI must actually reach the checkpoint, not skip it.
       if (
         hasGoalProgress &&
-        edge.kind === "junction" &&
+        (edge.kind === "junction" || edge.kind === "jump") &&
         Number.isFinite(currentNode.progress) &&
         Number.isFinite(neighbor.progress)
       ) {
@@ -690,11 +690,19 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
       }
 
       // --- Time-based edge cost ---
-      const timeCost = computeEdgeTimeCost(currentNode, neighbor);
+      const timeCost = computeEdgeTimeCost(edge, currentNode, neighbor);
+      const plannerPenaltyTime =
+        Math.max(edge?.plannerPenaltyCost || 0, 0) /
+        Math.max(aiCfg.targetSpeedMax, 1);
 
       // Backward edges incur a reversal penalty: the car must brake, turn
       // around, and re-accelerate.  Still much cheaper than a full lap.
       const reversalPenalty = edge.kind === "backward" ? 0.35 : 0;
+      const jumpBenefitCredit =
+        edge.kind === "jump" && Number.isFinite(edge.benefitCost)
+          ? (Math.max(0, edge.benefitCost) * (aiCfg.jumpBenefitWeight || 0)) /
+            Math.max(aiCfg.targetSpeedMax, 1)
+          : 0;
 
       // Obstacle proximity penalty (safety concern, in time-equivalent units)
       const obstaclePenalty =
@@ -713,6 +721,8 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
       const tentative =
         gScore[currentId] +
         timeCost +
+        plannerPenaltyTime -
+        jumpBenefitCredit +
         reversalPenalty +
         obstaclePenalty +
         dynamicPenalty;
@@ -1083,7 +1093,31 @@ function projectPointToSegment(px, py, ax, ay, bx, by) {
   };
 }
 
-function aiSightlineBlocked(ax, ay, bx, by, samples) {
+function getGraphEdge(graph, fromNodeId, toNodeId) {
+  if (!graph || fromNodeId < 0 || toNodeId < 0) return null;
+  const edgeList = graph.edges?.[fromNodeId];
+  if (!edgeList) return null;
+  return edgeList.find((edge) => edge.to === toNodeId) || null;
+}
+
+function pathRangeIncludesJump(graph, startIndex, endIndex) {
+  if (!graph || endIndex <= startIndex) return false;
+  for (let index = startIndex; index < endIndex; index++) {
+    const fromNodeId = aiPhysicsRuntime.plannedNodeIds[index];
+    const toNodeId = aiPhysicsRuntime.plannedNodeIds[index + 1];
+    if (getGraphEdge(graph, fromNodeId, toNodeId)?.kind === "jump") return true;
+  }
+  return false;
+}
+
+function aiSightlineBlocked(
+  ax,
+  ay,
+  bx,
+  by,
+  samples,
+  { ignoreGroundPenalties = false } = {},
+) {
   const isFlying = vehicleIsFlying(aiCar);
   let penaltySurfaceCount = 0;
   const penaltySurfaceThreshold = Math.max(1, Math.floor(samples * 0.25));
@@ -1092,7 +1126,7 @@ function aiSightlineBlocked(ax, ay, bx, by, samples) {
     const x = ax + (bx - ax) * t;
     const y = ay + (by - ay) * t;
     if (!isFlying && resolveObjectCollisions(x, y, 0).hit) return true;
-    if (!isFlying) {
+    if (!isFlying && !ignoreGroundPenalties) {
       const surface = surfaceAt(x, y);
       if (surface === "grass" || surface === "water") {
         penaltySurfaceCount += 1;
@@ -1160,6 +1194,12 @@ function buildAiTargetPreview(graph) {
     const toNode =
       graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1]];
     if (!fromNode || !toNode) break;
+    const edge = getGraphEdge(
+      graph,
+      aiPhysicsRuntime.plannedNodeIds[segmentIndex],
+      aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1],
+    );
+    const jumpSegment = edge?.kind === "jump";
     const fromX =
       segmentIndex === aiPhysicsRuntime.pathCursor ? anchorX : fromNode.x;
     const fromY =
@@ -1178,7 +1218,8 @@ function buildAiTargetPreview(graph) {
     const midY = fromY + segDy * 0.5;
     const midSurface = surfaceAt(midX, midY);
     const isPenalty = midSurface === "grass" || midSurface === "water";
-    const springBypass = fromNode.nearSpring || vehicleIsFlying(aiCar);
+    const springBypass =
+      fromNode.nearSpring || vehicleIsFlying(aiCar) || jumpSegment;
     const segTravel = Math.min(remainingDistance, segLen);
     if (isPenalty && !springBypass) {
       penaltySurfaceDistance += segTravel;
@@ -1214,12 +1255,21 @@ function buildAiTargetPreview(graph) {
 
   while (
     segmentIndex > aiPhysicsRuntime.pathCursor &&
+    !pathRangeIncludesJump(graph, aiPhysicsRuntime.pathCursor, segmentIndex) &&
     aiSightlineBlocked(
       aiCar.x,
       aiCar.y,
       previewX,
       previewY,
       aiCfg.targetSightlineSamples,
+      {
+        ignoreGroundPenalties:
+          getGraphEdge(
+            graph,
+            aiPhysicsRuntime.plannedNodeIds[Math.max(segmentIndex - 1, 0)],
+            aiPhysicsRuntime.plannedNodeIds[segmentIndex],
+          )?.kind === "jump",
+      },
     )
   ) {
     const fallbackNode =
@@ -1385,6 +1435,21 @@ function computeAiTargetSpeed(graph) {
       }
     }
     prevNode = node;
+  }
+
+  const nextJumpEdge =
+    cursor < aiPhysicsRuntime.plannedNodeIds.length - 1
+      ? getGraphEdge(
+          graph,
+          aiPhysicsRuntime.plannedNodeIds[cursor],
+          aiPhysicsRuntime.plannedNodeIds[cursor + 1],
+        )
+      : null;
+  if (
+    nextJumpEdge?.kind === "jump" &&
+    Number.isFinite(nextJumpEdge.launchSpeed)
+  ) {
+    targetSpeed = Math.max(targetSpeed, nextJumpEdge.launchSpeed);
   }
 
   const profile = getActiveAiProfile();
@@ -1802,387 +1867,17 @@ function updateAiProgressHealth(dt, collision) {
 }
 
 function updateAiVehicle(dt) {
-  const carCfg = physicsConfig.car;
-  const assistCfg = physicsConfig.assists;
-  const flags = physicsConfig.flags;
-  const constants = physicsConfig.constants;
-  const airCfg = physicsConfig.air;
-  const surfaceName = surfaceAt(aiCar.x, aiCar.y);
-
-  // --- Spring trigger (same as player) ---
-  const spring = findSpringTrigger(aiCar.x, aiCar.y);
-  if (spring && !vehicleIsFlying(aiCar)) {
-    launchAiFromSpring();
-  }
-
-  // --- Airborne branch: simplified physics while flying ---
-  if (vehicleIsFlying(aiCar)) {
-    const headingX = Math.cos(aiCar.angle);
-    const headingY = Math.sin(aiCar.angle);
-    const headingForwardSpeed = aiCar.vx * headingX + aiCar.vy * headingY;
-    let forwardSpeed = headingForwardSpeed;
-
-    forwardSpeed +=
-      carCfg.engineAccel *
-      airCfg.throttleAccelMul *
-      aiPhysicsRuntime.input.throttle *
-      dt;
-    forwardSpeed -=
-      carCfg.brakeDecel *
-      airCfg.brakeDecelMul *
-      aiPhysicsRuntime.input.brake *
-      dt;
-    forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
-
-    aiCar.vx = headingX * forwardSpeed;
-    aiCar.vy = headingY * forwardSpeed;
-    const collision = resolveObjectCollisions(
-      aiCar.x + aiCar.vx * dt,
-      aiCar.y + aiCar.vy * dt,
-      aiCar.z || 0,
-    );
-    aiCar.x = collision.x;
-    aiCar.y = collision.y;
-    if (collision.hit) {
-      const inwardSpeed =
-        aiCar.vx * collision.normalX + aiCar.vy * collision.normalY;
-      if (inwardSpeed < 0) {
-        aiCar.vx -= inwardSpeed * collision.normalX;
-        aiCar.vy -= inwardSpeed * collision.normalY;
-      }
-    }
-
-    aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
-    aiCar.vz = (aiCar.vz || 0) - airCfg.gravity * dt;
-    aiCar.z = (aiCar.z || 0) + aiCar.vz * dt;
-    aiCar.airTime = (aiCar.airTime || 0) + dt;
-    aiCar.visualScale = Math.min(
-      1.32,
-      1 + Math.max(aiCar.z, 0) * airCfg.visualScalePerMeter,
-    );
-
-    // Landing
-    if (aiCar.z <= 0) {
-      aiCar.z = 0;
-      const landingImpact = clamp(Math.abs(aiCar.vz) / 8, 0, 1);
-      if (
-        aiCar.vz < -airCfg.minBounceVz &&
-        aiPhysicsRuntime.landingBouncePending
-      ) {
-        aiCar.vz = Math.abs(aiCar.vz) * airCfg.bounceRestitution;
-        aiCar.airborne = true;
-        aiCar.airTime += 0.01;
-        aiPhysicsRuntime.landingBouncePending = false;
-        aiPhysicsRuntime.wheelLastPoints = null;
-      } else {
-        aiCar.vz = 0;
-        aiCar.airborne = false;
-        aiCar.airTime = 0;
-        aiCar.visualScale = 1;
-        aiPhysicsRuntime.landingBouncePending = false;
-        aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
-        aiPhysicsRuntime.wheelLastPoints = null;
-        if (surfaceName === "grass") aiPhysicsRuntime.collisionGripTimer = 0.04;
-      }
-      if (landingImpact > 0.08) {
-        emitLandingMarks(surfaceName, landingImpact, aiCar);
-      }
-    }
-
-    const aiHeadingForwardSpeed = aiCar.vx * headingX + aiCar.vy * headingY;
-    const prevForward = aiPhysicsRuntime.prevForwardSpeed;
-    const longAccel =
-      prevForward === null || dt <= 0
-        ? 0
-        : (aiHeadingForwardSpeed - prevForward) / dt;
-    aiPhysicsRuntime.prevForwardSpeed = aiHeadingForwardSpeed;
-    updateAiProgressHealth(dt, collision);
-    return;
-  }
-
-  // --- Grounded physics (existing code) ---
-  const targetSurface =
-    physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
-  const blendAlpha = flags.SURFACE_BLENDING
-    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
-    : 1;
-
-  aiPhysicsRuntime.surface.lateralGripMul +=
-    (targetSurface.lateralGripMul - aiPhysicsRuntime.surface.lateralGripMul) *
-    blendAlpha;
-  aiPhysicsRuntime.surface.longDragMul +=
-    (targetSurface.longDragMul - aiPhysicsRuntime.surface.longDragMul) *
-    blendAlpha;
-  aiPhysicsRuntime.surface.engineMul +=
-    (targetSurface.engineMul - aiPhysicsRuntime.surface.engineMul) * blendAlpha;
-  aiPhysicsRuntime.surface.coastDecelMul +=
-    (targetSurface.coastDecelMul - aiPhysicsRuntime.surface.coastDecelMul) *
-    blendAlpha;
-
-  const forwardX = Math.cos(aiCar.angle);
-  const forwardY = Math.sin(aiCar.angle);
-  const rightX = -forwardY;
-  const rightY = forwardX;
-  let forwardSpeed = aiCar.vx * forwardX + aiCar.vy * forwardY;
-  let lateralSpeed = aiCar.vx * rightX + aiCar.vy * rightY;
-
-  if (aiPhysicsRuntime.input.throttle > 0.01) {
-    forwardSpeed +=
-      carCfg.engineAccel *
-      aiPhysicsRuntime.surface.engineMul *
-      aiPhysicsRuntime.input.throttle *
-      dt;
-  }
-  if (aiPhysicsRuntime.input.brake > 0.01) {
-    forwardSpeed -= carCfg.brakeDecel * aiPhysicsRuntime.input.brake * dt;
-  }
-  if (
-    aiPhysicsRuntime.input.throttle <= 0.01 &&
-    aiPhysicsRuntime.input.brake <= 0.01
-  ) {
-    forwardSpeed = moveTowards(
-      forwardSpeed,
-      0,
-      carCfg.coastDecel * aiPhysicsRuntime.surface.coastDecelMul * dt,
-    );
-  }
-  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
-    const handbrakeDecel =
-      assistCfg.handbrakeLongDecel * aiPhysicsRuntime.input.handbrake * dt;
-    if (forwardSpeed > 0) {
-      forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
-    } else {
-      forwardSpeed = moveTowards(
-        forwardSpeed,
-        0,
-        assistCfg.handbrakeReverseKillDecel *
-          aiPhysicsRuntime.input.handbrake *
-          dt,
-      );
-    }
-  }
-  forwardSpeed *= Math.exp(
-    -carCfg.longDrag * aiPhysicsRuntime.surface.longDragMul * dt,
-  );
-  const maxForwardSpeed = carCfg.maxSpeed;
-  const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
-  forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
-
-  const speedAbs = Math.abs(forwardSpeed);
-  const lowSpeedSteerMul =
-    carCfg.steerAtLowSpeedMul +
-    (1 - carCfg.steerAtLowSpeedMul) *
-      clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
-  const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
-    ? 1 -
-      assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
-    : 1;
-  const targetYawRate =
-    aiPhysicsRuntime.input.steer *
-    carCfg.steerRate *
-    lowSpeedSteerMul *
-    speedSteerMul;
-  let desiredYawRate = targetYawRate;
-  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
-    desiredYawRate +=
-      assistCfg.handbrakeYawBoost *
-      aiPhysicsRuntime.input.handbrake *
-      aiPhysicsRuntime.input.steer;
-  }
-  aiPhysicsRuntime.steeringRate +=
-    (desiredYawRate - aiPhysicsRuntime.steeringRate) *
-    clamp(carCfg.yawDamping * dt, 0, 1);
-  const oldAngle = aiCar.angle;
-  aiCar.angle += aiPhysicsRuntime.steeringRate * dt;
-
-  let effectiveLateralGrip =
-    carCfg.lateralGrip * aiPhysicsRuntime.surface.lateralGripMul;
-  const allowAutoDrift = surfaceName !== "grass";
-  if (
-    flags.AUTO_DRIFT_ON_STEER &&
-    allowAutoDrift &&
-    Math.abs(aiPhysicsRuntime.input.steer) > constants.driftSteerThreshold
-  ) {
-    effectiveLateralGrip *=
-      1 - assistCfg.autoDriftGripCut * Math.abs(aiPhysicsRuntime.input.steer);
-  }
-  if (flags.DRIFT_ASSIST_RECOVERY) {
-    const steerAbs = Math.abs(aiPhysicsRuntime.input.steer);
-    if (
-      aiPhysicsRuntime.prevSteerAbs > constants.driftSteerThreshold &&
-      steerAbs <= constants.driftSteerThreshold
-    ) {
-      aiPhysicsRuntime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
-    }
-    aiPhysicsRuntime.prevSteerAbs = steerAbs;
-    if (aiPhysicsRuntime.recoveryTimer > 0) {
-      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
-      aiPhysicsRuntime.recoveryTimer = Math.max(
-        0,
-        aiPhysicsRuntime.recoveryTimer - dt,
-      );
-    }
-  }
-  if (
-    allowAutoDrift &&
-    aiPhysicsRuntime.input.throttle < 0.08 &&
-    speedAbs > assistCfg.throttleLiftMinSpeed
-  ) {
-    const liftBlend =
-      (1 - aiPhysicsRuntime.input.throttle) *
-      clamp(
-        (speedAbs - assistCfg.throttleLiftMinSpeed) /
-          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
-        0,
-        1,
-      );
-    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
-    lateralSpeed +=
-      aiPhysicsRuntime.input.steer *
-      speedAbs *
-      assistCfg.throttleLiftSlipBoost *
-      liftBlend *
-      dt;
-  }
-  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
-    const gripMul =
-      1 + (assistCfg.handbrakeGrip - 1) * aiPhysicsRuntime.input.handbrake;
-    effectiveLateralGrip *= gripMul;
-    lateralSpeed +=
-      aiPhysicsRuntime.input.steer *
-      Math.max(speedAbs, 0) *
-      assistCfg.handbrakeSlipBoost *
-      aiPhysicsRuntime.input.handbrake *
-      dt;
-  }
-  if (aiPhysicsRuntime.collisionGripTimer > 0) {
-    effectiveLateralGrip *= 0.7;
-    aiPhysicsRuntime.collisionGripTimer = Math.max(
-      0,
-      aiPhysicsRuntime.collisionGripTimer - dt,
-    );
-  }
-
-  lateralSpeed *= 1 - clamp(effectiveLateralGrip * dt, 0, 1);
-  aiCar.vx =
-    Math.cos(aiCar.angle) * forwardSpeed +
-    -Math.sin(aiCar.angle) * lateralSpeed;
-  aiCar.vy =
-    Math.sin(aiCar.angle) * forwardSpeed + Math.cos(aiCar.angle) * lateralSpeed;
-
-  const headingForwardX = Math.cos(aiCar.angle);
-  const headingForwardY = Math.sin(aiCar.angle);
-  const pivotBlend = clamp(
-    Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1),
-    0,
-    1,
-  );
-  let pivotRatio =
-    constants.pivotAtLowSpeedRatio +
-    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
-      pivotBlend;
-  if (flags.HANDBRAKE_MODE && aiPhysicsRuntime.input.handbrake > 0.05) {
-    pivotRatio +=
-      (constants.pivotAtLowSpeedRatio - pivotRatio) *
-      clamp(aiPhysicsRuntime.input.handbrake, 0, 1);
-  }
-  const pivotOffset = aiCar.width * (pivotRatio - 0.5);
-  const pivotShiftX =
-    Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
-  const pivotShiftY =
-    Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
-  const collision = resolveObjectCollisions(
-    aiCar.x + aiCar.vx * dt + pivotShiftX,
-    aiCar.y + aiCar.vy * dt + pivotShiftY,
-    aiCar.z || 0,
-  );
-  aiCar.x = collision.x;
-  aiCar.y = collision.y;
-  if (collision.hit) {
-    const inwardSpeed =
-      aiCar.vx * collision.normalX + aiCar.vy * collision.normalY;
-    if (inwardSpeed < 0) {
-      aiCar.vx -= inwardSpeed * collision.normalX;
-      aiCar.vy -= inwardSpeed * collision.normalY;
-    }
-    if (flags.ARCADE_COLLISION_PUSH) {
-      aiCar.vx *= 0.72;
-      aiCar.vy *= 0.72;
-      aiCar.vx += collision.normalX * 18;
-      aiCar.vy += collision.normalY * 18;
-      aiPhysicsRuntime.collisionGripTimer = 0.08;
-    } else {
-      aiCar.vx *= 0.55;
-      aiCar.vy *= 0.55;
-    }
-  }
-
-  const headingRightX = -headingForwardY;
-  const headingRightY = headingForwardX;
-  let rawHeadingForwardSpeed =
-    aiCar.vx * headingForwardX + aiCar.vy * headingForwardY;
-  if (
-    flags.HANDBRAKE_MODE &&
-    aiPhysicsRuntime.input.handbrake > 0.05 &&
-    rawHeadingForwardSpeed < 0
-  ) {
-    aiCar.vx -= rawHeadingForwardSpeed * headingForwardX;
-    aiCar.vy -= rawHeadingForwardSpeed * headingForwardY;
-    rawHeadingForwardSpeed = 0;
-  }
-  const maxVectorSpeed =
-    rawHeadingForwardSpeed >= 0
-      ? carCfg.maxSpeed
-      : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
-  const vectorSpeed = Math.hypot(aiCar.vx, aiCar.vy);
-  if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
-    const scale = maxVectorSpeed / vectorSpeed;
-    aiCar.vx *= scale;
-    aiCar.vy *= scale;
-  }
-
-  aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
-  aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
-  const headingForwardSpeed =
-    aiCar.vx * headingForwardX + aiCar.vy * headingForwardY;
-  const headingLateralSpeed =
-    aiCar.vx * headingRightX + aiCar.vy * headingRightY;
-  const prevForward = aiPhysicsRuntime.prevForwardSpeed;
-  const longAccel =
-    prevForward === null || dt <= 0
-      ? 0
-      : (headingForwardSpeed - prevForward) / dt;
-  aiPhysicsRuntime.prevForwardSpeed = headingForwardSpeed;
-  const skidSurface = surfaceAt(aiCar.x, aiCar.y);
-  const wheelPoints = wheelWorldPoints(aiCar);
-  recordSkids(
-    skidSurface,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    longAccel,
-    {
-      vehicle: aiCar,
-      runtime: aiPhysicsRuntime,
-    },
-  );
-  emitDrivingParticles({
-    dt,
-    vehicle: aiCar,
-    runtime: aiPhysicsRuntime,
-    wheelPoints,
-    forwardX: headingForwardX,
-    forwardY: headingForwardY,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    surfaceName: skidSurface,
-  });
+  const groundSurfaceName = surfaceAt(aiCar.x, aiCar.y);
+  const motion = vehicleIsFlying(aiCar)
+    ? integrateVehicleAirborne(aiCar, aiPhysicsRuntime, dt, groundSurfaceName)
+    : integrateVehicleGround(aiCar, aiPhysicsRuntime, dt, groundSurfaceName);
   updateAiVehicleAudioState({
-    surfaceName: skidSurface,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    longAccel,
+    surfaceName: motion.effectiveSurfaceName,
+    headingForwardSpeed: motion.headingForwardSpeed,
+    headingLateralSpeed: motion.headingLateralSpeed,
+    longAccel: motion.longAccel,
   });
-  updateAiProgressHealth(dt, collision);
+  updateAiProgressHealth(dt, motion.collision);
 }
 
 export function resolveCarToCarCollision(
@@ -2534,132 +2229,490 @@ function updateAiVehicleAudioState({
   });
 }
 
-function launchFromSpring() {
+function springLaunchApexHeight(speed) {
   const airCfg = physicsConfig.air;
   const speedRatio = clamp(
-    car.speed / Math.max(physicsConfig.car.maxSpeed, 1),
+    speed / Math.max(physicsConfig.car.maxSpeed, 1),
     0,
     1,
   );
-  const apexHeight = Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
-  car.airborne = true;
-  car.airTime = 0;
-  car.z = Math.max(car.z, 0.02);
-  car.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
-  car.visualScale = 1 + car.z * airCfg.visualScalePerMeter;
-  physicsRuntime.landingBouncePending = true;
-  physicsRuntime.lastGroundedSpeed = car.speed;
-  physicsRuntime.wheelLastPoints = null;
+  return Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
+}
+
+function launchVehicleFromSpring(
+  vehicle = car,
+  runtime = physicsRuntime,
+  speed = vehicle.speed,
+) {
+  const airCfg = physicsConfig.air;
+  const apexHeight = springLaunchApexHeight(speed);
+  vehicle.airborne = true;
+  vehicle.airTime = 0;
+  vehicle.z = Math.max(vehicle.z || 0, 0.02);
+  vehicle.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
+  vehicle.visualScale = 1 + vehicle.z * airCfg.visualScalePerMeter;
+  runtime.landingBouncePending = true;
+  runtime.lastGroundedSpeed = vehicle.speed;
+  runtime.wheelLastPoints = null;
+}
+
+function launchFromSpring() {
+  launchVehicleFromSpring(car, physicsRuntime);
 }
 
 function launchAiFromSpring() {
-  const airCfg = physicsConfig.air;
-  const speedRatio = clamp(
-    aiCar.speed / Math.max(physicsConfig.car.maxSpeed, 1),
-    0,
-    1,
-  );
-  const apexHeight = Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
-  aiCar.airborne = true;
-  aiCar.airTime = 0;
-  aiCar.z = Math.max(aiCar.z || 0, 0.02);
-  aiCar.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
-  aiCar.visualScale = 1 + aiCar.z * airCfg.visualScalePerMeter;
-  aiPhysicsRuntime.landingBouncePending = true;
-  aiPhysicsRuntime.lastGroundedSpeed = aiCar.speed;
-  aiPhysicsRuntime.wheelLastPoints = null;
+  launchVehicleFromSpring(aiCar, aiPhysicsRuntime);
 }
 
-function resolveLanding(surfaceName) {
+function resolveVehicleLanding(
+  vehicle = car,
+  runtime = physicsRuntime,
+  surfaceName,
+  { playLandingAudio = false } = {},
+) {
   const airCfg = physicsConfig.air;
-  if (car.z > 0) return;
-  car.z = 0;
-  const landingImpact = clamp(Math.abs(car.vz) / 8, 0, 1);
-  if (landingImpact > 0.08) emitLandingMarks(surfaceName, landingImpact);
-  if (car.vz < -airCfg.minBounceVz && physicsRuntime.landingBouncePending) {
-    car.vz = Math.abs(car.vz) * airCfg.bounceRestitution;
-    car.airborne = true;
-    car.airTime += 0.01;
-    physicsRuntime.landingBouncePending = false;
-    physicsRuntime.wheelLastPoints = null;
+  if (vehicle.z > 0) return;
+  vehicle.z = 0;
+  const landingImpact = clamp(Math.abs(vehicle.vz) / 8, 0, 1);
+  if (landingImpact > 0.08)
+    emitLandingMarks(surfaceName, landingImpact, vehicle);
+  if (vehicle.vz < -airCfg.minBounceVz && runtime.landingBouncePending) {
+    vehicle.vz = Math.abs(vehicle.vz) * airCfg.bounceRestitution;
+    vehicle.airborne = true;
+    vehicle.airTime += 0.01;
+    runtime.landingBouncePending = false;
+    runtime.wheelLastPoints = null;
     return;
   }
 
-  car.vz = 0;
-  car.airborne = false;
-  car.airTime = 0;
-  car.visualScale = 1;
-  physicsRuntime.landingBouncePending = false;
-  physicsRuntime.landingCooldown = 0.1;
-  physicsRuntime.lastGroundedSpeed = car.speed;
-  physicsRuntime.wheelLastPoints = wheelWorldPoints();
-  if (landingImpact > 0.08) gameAudio.playLandingBump(landingImpact);
-  if (surfaceName === "grass") physicsRuntime.collisionGripTimer = 0.04;
+  vehicle.vz = 0;
+  vehicle.airborne = false;
+  vehicle.airTime = 0;
+  vehicle.visualScale = 1;
+  runtime.landingBouncePending = false;
+  runtime.landingCooldown = 0.1;
+  runtime.lastGroundedSpeed = vehicle.speed;
+  runtime.wheelLastPoints = wheelWorldPoints(vehicle);
+  if (playLandingAudio && landingImpact > 0.08) {
+    gameAudio.playLandingBump(landingImpact);
+  }
+  if (surfaceName === "grass") runtime.collisionGripTimer = 0.04;
 }
 
-function integrateAirborneMotion(dt, surfaceName) {
+function resolveLanding(surfaceName) {
+  resolveVehicleLanding(car, physicsRuntime, surfaceName, {
+    playLandingAudio: true,
+  });
+}
+
+function integrateVehicleAirborne(
+  vehicle = car,
+  runtime = physicsRuntime,
+  dt,
+  surfaceName,
+  { playLandingAudio = false } = {},
+) {
   const airCfg = physicsConfig.air;
   const carCfg = physicsConfig.car;
-  const headingX = Math.cos(car.angle);
-  const headingY = Math.sin(car.angle);
-  const headingForwardSpeed = car.vx * headingX + car.vy * headingY;
+  const headingX = Math.cos(vehicle.angle);
+  const headingY = Math.sin(vehicle.angle);
+  const headingForwardSpeed = vehicle.vx * headingX + vehicle.vy * headingY;
   let forwardSpeed = headingForwardSpeed;
 
   forwardSpeed +=
-    carCfg.engineAccel *
-    airCfg.throttleAccelMul *
-    physicsRuntime.input.throttle *
-    dt;
+    carCfg.engineAccel * airCfg.throttleAccelMul * runtime.input.throttle * dt;
   forwardSpeed -=
-    carCfg.brakeDecel * airCfg.brakeDecelMul * physicsRuntime.input.brake * dt;
+    carCfg.brakeDecel * airCfg.brakeDecelMul * runtime.input.brake * dt;
   forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
 
-  car.vx = headingX * forwardSpeed;
-  car.vy = headingY * forwardSpeed;
+  vehicle.vx = headingX * forwardSpeed;
+  vehicle.vy = headingY * forwardSpeed;
   const collision = resolveObjectCollisions(
-    car.x + car.vx * dt,
-    car.y + car.vy * dt,
-    car.z,
+    vehicle.x + vehicle.vx * dt,
+    vehicle.y + vehicle.vy * dt,
+    vehicle.z,
   );
-  car.x = collision.x;
-  car.y = collision.y;
+  vehicle.x = collision.x;
+  vehicle.y = collision.y;
   if (collision.hit) {
-    const inwardSpeed = car.vx * collision.normalX + car.vy * collision.normalY;
+    const inwardSpeed =
+      vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
     if (inwardSpeed < 0) {
-      car.vx -= inwardSpeed * collision.normalX;
-      car.vy -= inwardSpeed * collision.normalY;
+      vehicle.vx -= inwardSpeed * collision.normalX;
+      vehicle.vy -= inwardSpeed * collision.normalY;
     }
   }
 
-  car.speed = Math.hypot(car.vx, car.vy);
-  car.vz -= airCfg.gravity * dt;
-  car.z += car.vz * dt;
-  car.airTime += dt;
-  car.visualScale = Math.min(
+  vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
+  vehicle.vz -= airCfg.gravity * dt;
+  vehicle.z += vehicle.vz * dt;
+  vehicle.airTime += dt;
+  vehicle.visualScale = Math.min(
     1.32,
-    1 + Math.max(car.z, 0) * airCfg.visualScalePerMeter,
+    1 + Math.max(vehicle.z, 0) * airCfg.visualScalePerMeter,
   );
-  physicsRuntime.debug.vForward = forwardSpeed;
-  physicsRuntime.debug.vLateral = 0;
-  physicsRuntime.debug.z = car.z;
-  physicsRuntime.debug.vz = car.vz;
-  physicsRuntime.debug.pivotX = car.x;
-  physicsRuntime.debug.pivotY = car.y;
+  runtime.debug.vForward = forwardSpeed;
+  runtime.debug.vLateral = 0;
+  runtime.debug.z = vehicle.z;
+  runtime.debug.vz = vehicle.vz;
+  runtime.debug.pivotX = vehicle.x;
+  runtime.debug.pivotY = vehicle.y;
 
-  resolveLanding(surfaceName);
-  const effectiveSurfaceName = getVehicleSurfaceAt(car, surfaceName);
-  physicsRuntime.debug.surface = effectiveSurfaceName;
+  resolveVehicleLanding(vehicle, runtime, surfaceName, {
+    playLandingAudio,
+  });
+  const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, surfaceName);
+  runtime.debug.surface = effectiveSurfaceName;
 
-  const prevForward = physicsRuntime.prevForwardSpeed;
+  const prevForward = runtime.prevForwardSpeed;
   const longAccel =
     prevForward === null || dt <= 0 ? 0 : (forwardSpeed - prevForward) / dt;
-  physicsRuntime.prevForwardSpeed = forwardSpeed;
-  updateVehicleAudioState({
-    surfaceName: effectiveSurfaceName,
+  runtime.prevForwardSpeed = forwardSpeed;
+  return {
+    collision,
     headingForwardSpeed: forwardSpeed,
     headingLateralSpeed: 0,
     longAccel,
+    effectiveSurfaceName,
+  };
+}
+
+function integrateAirborneMotion(dt, surfaceName) {
+  const motion = integrateVehicleAirborne(
+    car,
+    physicsRuntime,
+    dt,
+    surfaceName,
+    {
+      playLandingAudio: true,
+    },
+  );
+  updateVehicleAudioState({
+    surfaceName: motion.effectiveSurfaceName,
+    headingForwardSpeed: motion.headingForwardSpeed,
+    headingLateralSpeed: 0,
+    longAccel: motion.longAccel,
   });
+}
+
+function playGroundImpactSound(collision, inwardSpeed, vehicleSpeed) {
+  const impactStrength = clamp(
+    Math.max(Math.abs(inwardSpeed), vehicleSpeed * 0.4) / 180,
+    0,
+    1,
+  );
+  if (impactStrength <= 0.08) return false;
+  if (collision.hitType === "tree") gameAudio.playTreeBump(impactStrength);
+  else if (collision.hitType === "barrel")
+    gameAudio.playBarrelBump(impactStrength);
+  else gameAudio.playWallBump(impactStrength);
+  return true;
+}
+
+function integrateVehicleGround(
+  vehicle = car,
+  runtime = physicsRuntime,
+  dt,
+  groundSurfaceName,
+  { playImpactAudio = false } = {},
+) {
+  const carCfg = physicsConfig.car;
+  const assistCfg = physicsConfig.assists;
+  const flags = physicsConfig.flags;
+  const constants = physicsConfig.constants;
+  const targetSurface =
+    physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
+  const blendAlpha = flags.SURFACE_BLENDING
+    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
+    : 1;
+  runtime.surface.lateralGripMul +=
+    (targetSurface.lateralGripMul - runtime.surface.lateralGripMul) *
+    blendAlpha;
+  runtime.surface.longDragMul +=
+    (targetSurface.longDragMul - runtime.surface.longDragMul) * blendAlpha;
+  runtime.surface.engineMul +=
+    (targetSurface.engineMul - runtime.surface.engineMul) * blendAlpha;
+  runtime.surface.coastDecelMul +=
+    (targetSurface.coastDecelMul - runtime.surface.coastDecelMul) * blendAlpha;
+
+  const forwardX = Math.cos(vehicle.angle);
+  const forwardY = Math.sin(vehicle.angle);
+  const rightX = -forwardY;
+  const rightY = forwardX;
+  let forwardSpeed = vehicle.vx * forwardX + vehicle.vy * forwardY;
+  let lateralSpeed = vehicle.vx * rightX + vehicle.vy * rightY;
+
+  if (runtime.input.throttle > 0.01) {
+    forwardSpeed +=
+      carCfg.engineAccel *
+      runtime.surface.engineMul *
+      runtime.input.throttle *
+      dt;
+  }
+  if (runtime.input.brake > 0.01) {
+    forwardSpeed -= carCfg.brakeDecel * runtime.input.brake * dt;
+  }
+  if (runtime.input.throttle <= 0.01 && runtime.input.brake <= 0.01) {
+    forwardSpeed = moveTowards(
+      forwardSpeed,
+      0,
+      carCfg.coastDecel * runtime.surface.coastDecelMul * dt,
+    );
+  }
+  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+    const handbrakeDecel =
+      assistCfg.handbrakeLongDecel * runtime.input.handbrake * dt;
+    if (forwardSpeed > 0) {
+      forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
+    } else {
+      forwardSpeed = moveTowards(
+        forwardSpeed,
+        0,
+        assistCfg.handbrakeReverseKillDecel * runtime.input.handbrake * dt,
+      );
+    }
+  }
+  forwardSpeed *= Math.exp(-carCfg.longDrag * runtime.surface.longDragMul * dt);
+
+  const maxForwardSpeed = carCfg.maxSpeed;
+  const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
+
+  const speedAbs = Math.abs(forwardSpeed);
+  const lowSpeedSteerMul =
+    carCfg.steerAtLowSpeedMul +
+    (1 - carCfg.steerAtLowSpeedMul) *
+      clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
+  const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
+    ? 1 -
+      assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
+    : 1;
+  let targetYawRate =
+    runtime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
+  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+    targetYawRate +=
+      assistCfg.handbrakeYawBoost *
+      runtime.input.handbrake *
+      runtime.input.steer;
+  }
+  runtime.steeringRate +=
+    (targetYawRate - runtime.steeringRate) *
+    clamp(carCfg.yawDamping * dt, 0, 1);
+  const oldAngle = vehicle.angle;
+  vehicle.angle += runtime.steeringRate * dt;
+
+  let effectiveLateralGrip =
+    carCfg.lateralGrip * runtime.surface.lateralGripMul;
+  const allowAutoDrift = groundSurfaceName !== "grass";
+  if (
+    flags.AUTO_DRIFT_ON_STEER &&
+    allowAutoDrift &&
+    Math.abs(runtime.input.steer) > constants.driftSteerThreshold
+  ) {
+    effectiveLateralGrip *=
+      1 - assistCfg.autoDriftGripCut * Math.abs(runtime.input.steer);
+  }
+  if (flags.DRIFT_ASSIST_RECOVERY) {
+    const steerAbs = Math.abs(runtime.input.steer);
+    if (
+      runtime.prevSteerAbs > constants.driftSteerThreshold &&
+      steerAbs <= constants.driftSteerThreshold
+    ) {
+      runtime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
+    }
+    runtime.prevSteerAbs = steerAbs;
+    if (runtime.recoveryTimer > 0) {
+      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
+      runtime.recoveryTimer = Math.max(0, runtime.recoveryTimer - dt);
+    }
+  }
+  if (
+    allowAutoDrift &&
+    runtime.input.throttle < 0.08 &&
+    speedAbs > assistCfg.throttleLiftMinSpeed
+  ) {
+    const liftBlend =
+      (1 - runtime.input.throttle) *
+      clamp(
+        (speedAbs - assistCfg.throttleLiftMinSpeed) /
+          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
+        0,
+        1,
+      );
+    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
+    lateralSpeed +=
+      runtime.input.steer *
+      speedAbs *
+      assistCfg.throttleLiftSlipBoost *
+      liftBlend *
+      dt;
+  }
+  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+    const gripMul = 1 + (assistCfg.handbrakeGrip - 1) * runtime.input.handbrake;
+    effectiveLateralGrip *= gripMul;
+    lateralSpeed +=
+      runtime.input.steer *
+      Math.max(speedAbs, 0) *
+      assistCfg.handbrakeSlipBoost *
+      runtime.input.handbrake *
+      dt;
+  }
+  if (runtime.collisionGripTimer > 0) {
+    effectiveLateralGrip *= 0.7;
+    runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
+  }
+  if (runtime.impactCooldown > 0) {
+    runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
+  }
+
+  const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
+  lateralSpeed *= 1 - lateralCorrection;
+
+  vehicle.vx =
+    Math.cos(vehicle.angle) * forwardSpeed -
+    Math.sin(vehicle.angle) * lateralSpeed;
+  vehicle.vy =
+    Math.sin(vehicle.angle) * forwardSpeed +
+    Math.cos(vehicle.angle) * lateralSpeed;
+
+  const headingForwardX = Math.cos(vehicle.angle);
+  const headingForwardY = Math.sin(vehicle.angle);
+  const pivotBlend = clamp(
+    Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1),
+    0,
+    1,
+  );
+  let pivotRatio =
+    constants.pivotAtLowSpeedRatio +
+    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
+      pivotBlend;
+  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+    pivotRatio +=
+      (constants.pivotAtLowSpeedRatio - pivotRatio) *
+      clamp(runtime.input.handbrake, 0, 1);
+  }
+  const pivotOffset = vehicle.width * (pivotRatio - 0.5);
+  const pivotShiftX =
+    Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
+  const pivotShiftY =
+    Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
+  const collision = resolveObjectCollisions(
+    vehicle.x + vehicle.vx * dt + pivotShiftX,
+    vehicle.y + vehicle.vy * dt + pivotShiftY,
+    vehicle.z || 0,
+  );
+  vehicle.x = collision.x;
+  vehicle.y = collision.y;
+  if (collision.hit) {
+    const inwardSpeed =
+      vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
+    if (
+      playImpactAudio &&
+      runtime.impactCooldown <= 0 &&
+      playGroundImpactSound(collision, inwardSpeed, vehicle.speed)
+    ) {
+      runtime.impactCooldown = 0.11;
+    }
+    if (inwardSpeed < 0) {
+      vehicle.vx -= inwardSpeed * collision.normalX;
+      vehicle.vy -= inwardSpeed * collision.normalY;
+    }
+    if (flags.ARCADE_COLLISION_PUSH) {
+      vehicle.vx *= 0.72;
+      vehicle.vy *= 0.72;
+      vehicle.vx += collision.normalX * 18;
+      vehicle.vy += collision.normalY * 18;
+      runtime.collisionGripTimer = 0.08;
+    } else {
+      vehicle.vx *= 0.55;
+      vehicle.vy *= 0.55;
+    }
+  }
+
+  const headingRightX = -headingForwardY;
+  const headingRightY = headingForwardX;
+  let rawHeadingForwardSpeed =
+    vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
+  if (
+    flags.HANDBRAKE_MODE &&
+    runtime.input.handbrake > 0.05 &&
+    rawHeadingForwardSpeed < 0
+  ) {
+    vehicle.vx -= rawHeadingForwardSpeed * headingForwardX;
+    vehicle.vy -= rawHeadingForwardSpeed * headingForwardY;
+    rawHeadingForwardSpeed = 0;
+  }
+  const maxVectorSpeed =
+    rawHeadingForwardSpeed >= 0
+      ? carCfg.maxSpeed
+      : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+  const vectorSpeed = Math.hypot(vehicle.vx, vehicle.vy);
+  if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
+    const scale = maxVectorSpeed / vectorSpeed;
+    vehicle.vx *= scale;
+    vehicle.vy *= scale;
+  }
+
+  vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
+  runtime.lastGroundedSpeed = vehicle.speed;
+  const headingForwardSpeed =
+    vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
+  const headingLateralSpeed =
+    vehicle.vx * headingRightX + vehicle.vy * headingRightY;
+  runtime.debug.surface = getVehicleSurfaceAt(vehicle, groundSurfaceName);
+  runtime.debug.vForward = headingForwardSpeed;
+  runtime.debug.vLateral = headingLateralSpeed;
+  runtime.debug.pivotX = vehicle.x + headingForwardX * pivotOffset;
+  runtime.debug.pivotY = vehicle.y + headingForwardY * pivotOffset;
+  runtime.debug.z = vehicle.z;
+  runtime.debug.vz = vehicle.vz;
+  runtime.debug.slipAngle = Math.atan2(
+    Math.abs(headingLateralSpeed),
+    Math.abs(headingForwardSpeed) + 0.0001,
+  );
+  const prevForward = runtime.prevForwardSpeed;
+  const longAccel =
+    prevForward === null || dt <= 0
+      ? 0
+      : (headingForwardSpeed - prevForward) / dt;
+  runtime.prevForwardSpeed = headingForwardSpeed;
+  const spring = findSpringTrigger(vehicle.x, vehicle.y);
+  if (spring && !vehicleIsFlying(vehicle)) {
+    launchVehicleFromSpring(vehicle, runtime);
+  }
+  const skidSurface = surfaceAt(vehicle.x, vehicle.y);
+  const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, skidSurface);
+  runtime.debug.surface = effectiveSurfaceName;
+  const wheelPoints = wheelWorldPoints(vehicle);
+  recordSkids(
+    skidSurface,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    longAccel,
+    {
+      vehicle,
+      runtime,
+    },
+  );
+  emitDrivingParticles({
+    dt,
+    vehicle,
+    runtime,
+    wheelPoints,
+    forwardX: headingForwardX,
+    forwardY: headingForwardY,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    surfaceName: skidSurface,
+  });
+  return {
+    collision,
+    headingForwardSpeed,
+    headingLateralSpeed,
+    longAccel,
+    skidSurface,
+    effectiveSurfaceName,
+  };
 }
 
 function resetAiOpponentForRace(
@@ -2734,6 +2787,16 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.desiredSpeed = 0;
     aiPhysicsRuntime.targetPoint = { x: aiCar.x, y: aiCar.y };
     aiPhysicsRuntime.debugPathPoints = [];
+    aiPhysicsRuntime.debug = {
+      slipAngle: 0,
+      surface: "asphalt",
+      vForward: 0,
+      vLateral: 0,
+      pivotX: aiCar.x,
+      pivotY: aiCar.y,
+      z: 0,
+      vz: 0,
+    };
     aiPhysicsRuntime.surface = {
       lateralGripMul: 1,
       longDragMul: 1,
@@ -3005,9 +3068,6 @@ export function getExternalHumanRivalCount() {
 export function updateRace(dt) {
   const carCfg = physicsConfig.car;
   const airCfg = physicsConfig.air;
-  const assistCfg = physicsConfig.assists;
-  const flags = physicsConfig.flags;
-  const constants = physicsConfig.constants;
   dt = Math.min(dt, carCfg.dtClamp);
 
   if (state.startSequence.goFlash > 0) {
@@ -3069,9 +3129,6 @@ export function updateRace(dt) {
     state.checkpointBlink.time = Math.max(0, state.checkpointBlink.time - dt);
   }
 
-  const targetSurface =
-    physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
-
   const throttleTarget = keys.accel ? 1 : 0;
   const brakeTarget = keys.brake ? 1 : 0;
   const steerTarget = vehicleIsFlying(car)
@@ -3123,308 +3180,20 @@ export function updateRace(dt) {
     updateAiCheckpointProgress();
     return;
   }
-
-  const blendAlpha = flags.SURFACE_BLENDING
-    ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
-    : 1;
-  physicsRuntime.surface.lateralGripMul +=
-    (targetSurface.lateralGripMul - physicsRuntime.surface.lateralGripMul) *
-    blendAlpha;
-  physicsRuntime.surface.longDragMul +=
-    (targetSurface.longDragMul - physicsRuntime.surface.longDragMul) *
-    blendAlpha;
-  physicsRuntime.surface.engineMul +=
-    (targetSurface.engineMul - physicsRuntime.surface.engineMul) * blendAlpha;
-  physicsRuntime.surface.coastDecelMul +=
-    (targetSurface.coastDecelMul - physicsRuntime.surface.coastDecelMul) *
-    blendAlpha;
-
-  const forwardX = Math.cos(car.angle);
-  const forwardY = Math.sin(car.angle);
-  const rightX = -forwardY;
-  const rightY = forwardX;
-  let forwardSpeed = car.vx * forwardX + car.vy * forwardY;
-  let lateralSpeed = car.vx * rightX + car.vy * rightY;
-
-  if (physicsRuntime.input.throttle > 0.01) {
-    forwardSpeed +=
-      carCfg.engineAccel *
-      physicsRuntime.surface.engineMul *
-      physicsRuntime.input.throttle *
-      dt;
-  }
-  if (physicsRuntime.input.brake > 0.01) {
-    forwardSpeed -= carCfg.brakeDecel * physicsRuntime.input.brake * dt;
-  }
-  if (
-    physicsRuntime.input.throttle <= 0.01 &&
-    physicsRuntime.input.brake <= 0.01
-  ) {
-    forwardSpeed = moveTowards(
-      forwardSpeed,
-      0,
-      carCfg.coastDecel * physicsRuntime.surface.coastDecelMul * dt,
-    );
-  }
-  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
-    const handbrakeDecel =
-      assistCfg.handbrakeLongDecel * physicsRuntime.input.handbrake * dt;
-    if (forwardSpeed > 0) {
-      forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
-    } else {
-      forwardSpeed = moveTowards(
-        forwardSpeed,
-        0,
-        assistCfg.handbrakeReverseKillDecel *
-          physicsRuntime.input.handbrake *
-          dt,
-      );
-    }
-  }
-  forwardSpeed *= Math.exp(
-    -carCfg.longDrag * physicsRuntime.surface.longDragMul * dt,
-  );
-
-  const maxForwardSpeed = carCfg.maxSpeed;
-  const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
-  forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
-
-  const speedAbs = Math.abs(forwardSpeed);
-  const lowSpeedSteerMul =
-    carCfg.steerAtLowSpeedMul +
-    (1 - carCfg.steerAtLowSpeedMul) *
-      clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
-  const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
-    ? 1 -
-      assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
-    : 1;
-  let targetYawRate =
-    physicsRuntime.input.steer *
-    carCfg.steerRate *
-    lowSpeedSteerMul *
-    speedSteerMul;
-  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
-    targetYawRate +=
-      assistCfg.handbrakeYawBoost *
-      physicsRuntime.input.handbrake *
-      physicsRuntime.input.steer;
-  }
-  physicsRuntime.steeringRate +=
-    (targetYawRate - physicsRuntime.steeringRate) *
-    clamp(carCfg.yawDamping * dt, 0, 1);
-  const oldAngle = car.angle;
-  car.angle += physicsRuntime.steeringRate * dt;
-
-  let effectiveLateralGrip =
-    carCfg.lateralGrip * physicsRuntime.surface.lateralGripMul;
-  const allowAutoDrift = groundSurfaceName !== "grass";
-  if (
-    flags.AUTO_DRIFT_ON_STEER &&
-    allowAutoDrift &&
-    Math.abs(physicsRuntime.input.steer) > constants.driftSteerThreshold
-  ) {
-    effectiveLateralGrip *=
-      1 - assistCfg.autoDriftGripCut * Math.abs(physicsRuntime.input.steer);
-  }
-  if (flags.DRIFT_ASSIST_RECOVERY) {
-    const steerAbs = Math.abs(physicsRuntime.input.steer);
-    if (
-      physicsRuntime.prevSteerAbs > constants.driftSteerThreshold &&
-      steerAbs <= constants.driftSteerThreshold
-    ) {
-      physicsRuntime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
-    }
-    physicsRuntime.prevSteerAbs = steerAbs;
-    if (physicsRuntime.recoveryTimer > 0) {
-      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
-      physicsRuntime.recoveryTimer = Math.max(
-        0,
-        physicsRuntime.recoveryTimer - dt,
-      );
-    }
-  }
-  if (
-    allowAutoDrift &&
-    physicsRuntime.input.throttle < 0.08 &&
-    speedAbs > assistCfg.throttleLiftMinSpeed
-  ) {
-    const liftBlend =
-      (1 - physicsRuntime.input.throttle) *
-      clamp(
-        (speedAbs - assistCfg.throttleLiftMinSpeed) /
-          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
-        0,
-        1,
-      );
-    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
-    lateralSpeed +=
-      physicsRuntime.input.steer *
-      speedAbs *
-      assistCfg.throttleLiftSlipBoost *
-      liftBlend *
-      dt;
-  }
-  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
-    const gripMul =
-      1 + (assistCfg.handbrakeGrip - 1) * physicsRuntime.input.handbrake;
-    effectiveLateralGrip *= gripMul;
-    lateralSpeed +=
-      physicsRuntime.input.steer *
-      Math.max(speedAbs, 0) *
-      assistCfg.handbrakeSlipBoost *
-      physicsRuntime.input.handbrake *
-      dt;
-  }
-  if (physicsRuntime.collisionGripTimer > 0) {
-    effectiveLateralGrip *= 0.7;
-    physicsRuntime.collisionGripTimer = Math.max(
-      0,
-      physicsRuntime.collisionGripTimer - dt,
-    );
-  }
-  if (physicsRuntime.impactCooldown > 0) {
-    physicsRuntime.impactCooldown = Math.max(
-      0,
-      physicsRuntime.impactCooldown - dt,
-    );
-  }
-
-  const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
-  lateralSpeed *= 1 - lateralCorrection;
-
-  car.vx = forwardX * forwardSpeed + rightX * lateralSpeed;
-  car.vy = forwardY * forwardSpeed + rightY * lateralSpeed;
-
-  const headingForwardX = Math.cos(car.angle);
-  const headingForwardY = Math.sin(car.angle);
-  const pivotBlend = clamp(
-    Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1),
-    0,
-    1,
-  );
-  let pivotRatio =
-    constants.pivotAtLowSpeedRatio +
-    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
-      pivotBlend;
-  if (flags.HANDBRAKE_MODE && physicsRuntime.input.handbrake > 0.05) {
-    pivotRatio +=
-      (constants.pivotAtLowSpeedRatio - pivotRatio) *
-      clamp(physicsRuntime.input.handbrake, 0, 1);
-  }
-  const pivotOffset = car.width * (pivotRatio - 0.5);
-  const pivotShiftX =
-    Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
-  const pivotShiftY =
-    Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
-  const nx = car.x + car.vx * dt + pivotShiftX;
-  const ny = car.y + car.vy * dt + pivotShiftY;
-
-  const collision = resolveObjectCollisions(nx, ny, car.z);
-  car.x = collision.x;
-  car.y = collision.y;
-  if (collision.hit) {
-    const inwardSpeed = car.vx * collision.normalX + car.vy * collision.normalY;
-    const impactStrength = clamp(
-      Math.max(Math.abs(inwardSpeed), car.speed * 0.4) / 180,
-      0,
-      1,
-    );
-    if (physicsRuntime.impactCooldown <= 0 && impactStrength > 0.08) {
-      if (collision.hitType === "tree") gameAudio.playTreeBump(impactStrength);
-      else if (collision.hitType === "barrel")
-        gameAudio.playBarrelBump(impactStrength);
-      else gameAudio.playWallBump(impactStrength);
-      physicsRuntime.impactCooldown = 0.11;
-    }
-    if (inwardSpeed < 0) {
-      car.vx -= inwardSpeed * collision.normalX;
-      car.vy -= inwardSpeed * collision.normalY;
-    }
-    if (flags.ARCADE_COLLISION_PUSH) {
-      car.vx *= 0.72;
-      car.vy *= 0.72;
-      car.vx += collision.normalX * 18;
-      car.vy += collision.normalY * 18;
-      physicsRuntime.collisionGripTimer = 0.08;
-    } else {
-      car.vx *= 0.55;
-      car.vy *= 0.55;
-    }
-  }
-
-  const headingRightX = -headingForwardY;
-  const headingRightY = headingForwardX;
-  let rawHeadingForwardSpeed =
-    car.vx * headingForwardX + car.vy * headingForwardY;
-  if (
-    flags.HANDBRAKE_MODE &&
-    physicsRuntime.input.handbrake > 0.05 &&
-    rawHeadingForwardSpeed < 0
-  ) {
-    // Remove only the backward longitudinal component, preserve lateral velocity for drift.
-    car.vx -= rawHeadingForwardSpeed * headingForwardX;
-    car.vy -= rawHeadingForwardSpeed * headingForwardY;
-    rawHeadingForwardSpeed = 0;
-  }
-  const maxVectorSpeed =
-    rawHeadingForwardSpeed >= 0
-      ? carCfg.maxSpeed
-      : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
-  const vectorSpeed = Math.hypot(car.vx, car.vy);
-  if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
-    const s = maxVectorSpeed / vectorSpeed;
-    car.vx *= s;
-    car.vy *= s;
-  }
-
-  car.speed = Math.hypot(car.vx, car.vy);
-  physicsRuntime.lastGroundedSpeed = car.speed;
-  const headingForwardSpeed =
-    car.vx * headingForwardX + car.vy * headingForwardY;
-  const headingLateralSpeed = car.vx * headingRightX + car.vy * headingRightY;
-  physicsRuntime.debug.surface = getVehicleSurfaceAt(car, groundSurfaceName);
-  physicsRuntime.debug.vForward = headingForwardSpeed;
-  physicsRuntime.debug.vLateral = headingLateralSpeed;
-  physicsRuntime.debug.pivotX = car.x + headingForwardX * pivotOffset;
-  physicsRuntime.debug.pivotY = car.y + headingForwardY * pivotOffset;
-  physicsRuntime.debug.z = car.z;
-  physicsRuntime.debug.vz = car.vz;
-  physicsRuntime.debug.slipAngle = Math.atan2(
-    Math.abs(headingLateralSpeed),
-    Math.abs(headingForwardSpeed) + 0.0001,
-  );
-  const prevForward = physicsRuntime.prevForwardSpeed;
-  const longAccel =
-    prevForward === null || dt <= 0
-      ? 0
-      : (headingForwardSpeed - prevForward) / dt;
-  physicsRuntime.prevForwardSpeed = headingForwardSpeed;
-  const spring = findSpringTrigger(car.x, car.y);
-  if (spring && !vehicleIsFlying(car)) {
-    launchFromSpring();
-  }
-  const skidSurface = surfaceAt(car.x, car.y);
-  const effectiveSurfaceName = getVehicleSurfaceAt(car, skidSurface);
-  physicsRuntime.debug.surface = effectiveSurfaceName;
-  const wheelPoints = wheelWorldPoints();
-  recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel);
-  emitDrivingParticles({
+  const motion = integrateVehicleGround(
+    car,
+    physicsRuntime,
     dt,
-    wheelPoints,
-    forwardX: headingForwardX,
-    forwardY: headingForwardY,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    surfaceName: skidSurface,
-  });
-  const skidAmount =
-    clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
-    clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
+    groundSurfaceName,
+    {
+      playImpactAudio: true,
+    },
+  );
   updateVehicleAudioState({
-    surfaceName: effectiveSurfaceName,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    longAccel,
+    surfaceName: motion.effectiveSurfaceName,
+    headingForwardSpeed: motion.headingForwardSpeed,
+    headingLateralSpeed: motion.headingLateralSpeed,
+    longAccel: motion.longAccel,
   });
 
   updateAiField(dt);
