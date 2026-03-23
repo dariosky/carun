@@ -2014,22 +2014,27 @@ function emitDrivingParticles({
     speedFactor *
     clamp((speedAbs - 35) / 85, 0, 1) *
     clamp((lateralAbs - 24) / 120, 0, 1);
+  const driftStrength =
+    clamp(runtime.driftAmount, 0, 1) *
+    clamp((Math.abs(runtime.debug.rearSlip) - 20) / 120, 0, 1) *
+    clamp((speedAbs - 32) / 95, 0, 1);
+  const rearSmokeStrength = Math.max(handbrakeStrength, driftStrength * 0.85);
 
-  if (handbrakeStrength > 0.035 && emitters.smokeCooldown <= 0) {
+  if (rearSmokeStrength > 0.035 && emitters.smokeCooldown <= 0) {
     const rearAngle = Math.atan2(-forwardY, -forwardX);
     emitHandbrakeSmoke({
       x: wheelPoints[2].x,
       y: wheelPoints[2].y,
       angle: rearAngle,
-      strength: 0.15 + handbrakeStrength * 1.9,
+      strength: 0.15 + rearSmokeStrength * 1.9,
     });
     emitHandbrakeSmoke({
       x: wheelPoints[3].x,
       y: wheelPoints[3].y,
       angle: rearAngle,
-      strength: 0.15 + handbrakeStrength * 1.9,
+      strength: 0.15 + rearSmokeStrength * 1.9,
     });
-    emitters.smokeCooldown = 0.05 - handbrakeStrength * 0.02;
+    emitters.smokeCooldown = 0.05 - rearSmokeStrength * 0.02;
   }
 
   const waterStrength =
@@ -2098,10 +2103,16 @@ function recordSkids(
     return;
   const strongAccel = longAccel > 480;
   const strongBrake = longAccel < -520;
-  const skidding = Math.abs(lateralSpeed) > 95;
+  const driftCfg = physicsConfig.drift;
+  const skidding = Math.abs(lateralSpeed) > driftCfg.rearSkidLateralThreshold;
   const handbrakeSkid = runtime.input.handbrake > 0.08 && speedAbs > 24;
+  const driftSkid =
+    runtime.driftAmount > driftCfg.visualSkidThreshold &&
+    Math.abs(runtime.debug.rearSlip) > driftCfg.rearSkidLateralThreshold &&
+    speedAbs > 30;
   const shouldDrawRoadSkids =
-    isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid);
+    isRoad &&
+    (strongAccel || strongBrake || skidding || handbrakeSkid || driftSkid);
   if (!isGrass && !isWater && !shouldDrawRoadSkids) return;
 
   const color = isGrass
@@ -2110,8 +2121,15 @@ function recordSkids(
       ? "rgba(245, 250, 255, 0.42)"
       : "rgba(20, 20, 20, 0.37)";
   const width = isGrass || isWater ? 2.7 : 2.2;
+  const wheelIndices =
+    isRoad &&
+    (driftSkid || handbrakeSkid || skidding) &&
+    !strongAccel &&
+    !strongBrake
+      ? [2, 3]
+      : [0, 1, 2, 3];
 
-  for (let i = 0; i < points.length; i++) {
+  for (const i of wheelIndices) {
     const mark = {
       x1: lastPoints[i].x,
       y1: lastPoints[i].y,
@@ -2409,6 +2427,12 @@ function playGroundImpactSound(collision, inwardSpeed, vehicleSpeed) {
   return true;
 }
 
+function pickDriftDirection(steer, lateralSpeed, previousDirection = 0) {
+  if (Math.abs(steer) > 0.08) return Math.sign(steer);
+  if (Math.abs(lateralSpeed) > 6) return Math.sign(lateralSpeed);
+  return previousDirection || 0;
+}
+
 function integrateVehicleGround(
   vehicle = car,
   runtime = physicsRuntime,
@@ -2418,6 +2442,8 @@ function integrateVehicleGround(
 ) {
   const carCfg = physicsConfig.car;
   const assistCfg = physicsConfig.assists;
+  const driftCfg = physicsConfig.drift;
+  const handbrakeCfg = physicsConfig.handbrake;
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
   const targetSurface =
@@ -2439,6 +2465,8 @@ function integrateVehicleGround(
   const forwardY = Math.sin(vehicle.angle);
   const rightX = -forwardY;
   const rightY = forwardX;
+  const previousVx = vehicle.vx;
+  const previousVy = vehicle.vy;
   let forwardSpeed = vehicle.vx * forwardX + vehicle.vy * forwardY;
   let lateralSpeed = vehicle.vx * rightX + vehicle.vy * rightY;
 
@@ -2461,14 +2489,14 @@ function integrateVehicleGround(
   }
   if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
     const handbrakeDecel =
-      assistCfg.handbrakeLongDecel * runtime.input.handbrake * dt;
+      handbrakeCfg.longDecel * runtime.input.handbrake * dt;
     if (forwardSpeed > 0) {
       forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
     } else {
       forwardSpeed = moveTowards(
         forwardSpeed,
         0,
-        assistCfg.handbrakeReverseKillDecel * runtime.input.handbrake * dt,
+        handbrakeCfg.reverseKillDecel * runtime.input.handbrake * dt,
       );
     }
   }
@@ -2487,93 +2515,336 @@ function integrateVehicleGround(
     ? 1 -
       assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
     : 1;
-  let targetYawRate =
-    runtime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
-  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-    targetYawRate +=
-      assistCfg.handbrakeYawBoost *
-      runtime.input.handbrake *
-      runtime.input.steer;
-  }
-  runtime.steeringRate +=
-    (targetYawRate - runtime.steeringRate) *
-    clamp(carCfg.yawDamping * dt, 0, 1);
-  const oldAngle = vehicle.angle;
-  vehicle.angle += runtime.steeringRate * dt;
+  const driftiness = Math.max(Number(carCfg.driftiness) || 0, 0);
+  const driftinessScale = clamp(driftiness, 0, 2);
+  const sidewaysDriftEnabled = flags.SIDEWAYS_DRIFT_ENABLED;
+  let oldAngle = vehicle.angle;
+  let rearSlipTarget = 0;
+  let yawAssist = 0;
+  const steerAbs = Math.abs(runtime.input.steer);
 
-  let effectiveLateralGrip =
-    carCfg.lateralGrip * runtime.surface.lateralGripMul;
-  const allowAutoDrift = groundSurfaceName !== "grass";
-  if (
-    flags.AUTO_DRIFT_ON_STEER &&
-    allowAutoDrift &&
-    Math.abs(runtime.input.steer) > constants.driftSteerThreshold
-  ) {
-    effectiveLateralGrip *=
-      1 - assistCfg.autoDriftGripCut * Math.abs(runtime.input.steer);
-  }
-  if (flags.DRIFT_ASSIST_RECOVERY) {
-    const steerAbs = Math.abs(runtime.input.steer);
-    if (
-      runtime.prevSteerAbs > constants.driftSteerThreshold &&
-      steerAbs <= constants.driftSteerThreshold
-    ) {
-      runtime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
-    }
-    runtime.prevSteerAbs = steerAbs;
-    if (runtime.recoveryTimer > 0) {
-      effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
-      runtime.recoveryTimer = Math.max(0, runtime.recoveryTimer - dt);
-    }
-  }
-  if (
-    allowAutoDrift &&
-    runtime.input.throttle < 0.08 &&
-    speedAbs > assistCfg.throttleLiftMinSpeed
-  ) {
-    const liftBlend =
-      (1 - runtime.input.throttle) *
-      clamp(
-        (speedAbs - assistCfg.throttleLiftMinSpeed) /
-          Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
-        0,
-        1,
+  if (sidewaysDriftEnabled) {
+    const allowAutoDrift =
+      groundSurfaceName === "asphalt" || groundSurfaceName === "curb";
+    const driftSpeedFactor = clamp(
+      (speedAbs - driftCfg.minSpeed) /
+        Math.max(driftCfg.fullEffectSpeed - driftCfg.minSpeed, 1),
+      0,
+      1,
+    );
+    const driftSteerFactor = clamp(
+      (steerAbs - driftCfg.steerThreshold) /
+        Math.max(1 - driftCfg.steerThreshold, 0.001),
+      0,
+      1,
+    );
+    const heavySteerFactor = clamp(
+      (steerAbs - driftCfg.heavySteerThreshold) /
+        Math.max(1 - driftCfg.heavySteerThreshold, 0.001),
+      0,
+      1,
+    );
+    const throttleLiftFactor =
+      allowAutoDrift &&
+      runtime.input.brake < 0.2 &&
+      runtime.input.throttle < driftCfg.throttleLiftThreshold &&
+      speedAbs > driftCfg.minSpeed
+        ? (1 - runtime.input.throttle) * driftSpeedFactor * driftSteerFactor
+        : 0;
+    const handbrakeFactor =
+      flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05
+        ? runtime.input.handbrake * Math.max(driftSpeedFactor, 0.35)
+        : 0;
+    const throttleStabilityFactor =
+      allowAutoDrift && handbrakeFactor < 0.05
+        ? runtime.input.throttle * driftSpeedFactor
+        : 0;
+    const driftDirection = pickDriftDirection(
+      runtime.input.steer,
+      lateralSpeed,
+      runtime.driftDirection,
+    );
+    let driftTarget = 0;
+    if (allowAutoDrift) {
+      if (flags.AUTO_DRIFT_ON_STEER) {
+        driftTarget = Math.max(
+          driftTarget,
+          driftSteerFactor *
+            driftSpeedFactor *
+            (0.62 + heavySteerFactor * 0.18) *
+            (1 - throttleStabilityFactor * 0.45),
+        );
+      }
+      driftTarget = Math.max(
+        driftTarget,
+        throttleLiftFactor * (0.72 + heavySteerFactor * 0.2),
       );
-    effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend;
-    lateralSpeed +=
-      runtime.input.steer *
+    }
+    driftTarget = Math.max(
+      driftTarget,
+      handbrakeFactor * (0.74 + handbrakeCfg.entryBoost),
+    );
+    driftTarget = clamp(driftTarget * driftinessScale, 0, 1);
+    if (driftTarget >= runtime.driftAmount) {
+      runtime.driftAmount = moveTowards(
+        runtime.driftAmount,
+        driftTarget,
+        driftCfg.driftEntryRate * dt,
+      );
+    } else {
+      if (driftTarget > 0.08) {
+        runtime.driftRecoveryTimer = driftCfg.driftSustainTime;
+      } else if (runtime.driftRecoveryTimer > 0) {
+        runtime.driftRecoveryTimer = Math.max(
+          0,
+          runtime.driftRecoveryTimer - dt,
+        );
+        driftTarget = Math.max(driftTarget, runtime.driftAmount * 0.85);
+      }
+      let driftExitRate =
+        driftCfg.driftExitRate / Math.max(0.6 + driftinessScale * 0.4, 0.25);
+      if (
+        driftDirection !== 0 &&
+        runtime.input.steer * driftDirection < -0.08
+      ) {
+        driftExitRate += driftCfg.countersteerRecoveryBonus;
+      }
+      runtime.driftAmount = moveTowards(
+        runtime.driftAmount,
+        driftTarget,
+        driftExitRate * dt,
+      );
+    }
+    if (runtime.driftAmount > 0.02 && driftDirection !== 0) {
+      runtime.driftDirection = driftDirection;
+    } else if (runtime.driftAmount <= 0.02) {
+      runtime.driftDirection = 0;
+      runtime.driftRecoveryTimer = 0;
+    }
+
+    let frontGripMul = 1;
+    let rearGripMul = 1;
+    if (allowAutoDrift) {
+      frontGripMul -=
+        (1 - driftCfg.frontGripFloor) * runtime.driftAmount * driftinessScale;
+      rearGripMul -=
+        (1 - driftCfg.rearGripFloor) * runtime.driftAmount * driftinessScale;
+      rearGripMul -=
+        driftCfg.rearGripHeavySteerCut * heavySteerFactor * driftinessScale;
+      rearGripMul -=
+        driftCfg.rearGripLiftBonusCut * throttleLiftFactor * driftinessScale;
+      rearGripMul += throttleStabilityFactor * 0.08;
+    }
+    if (flags.AUTO_DRIFT_ON_STEER && allowAutoDrift) {
+      rearGripMul -=
+        assistCfg.autoDriftGripCut * 0.45 * steerAbs * driftinessScale;
+    }
+    if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+      frontGripMul -=
+        driftCfg.frontGripHandbrakeCut * handbrakeFactor * driftinessScale;
+      rearGripMul -=
+        driftCfg.rearGripHandbrakeCut * handbrakeFactor * driftinessScale;
+      frontGripMul *=
+        1 + (handbrakeCfg.frontGripMul - 1) * runtime.input.handbrake;
+      rearGripMul *=
+        1 + (handbrakeCfg.rearGripMul - 1) * runtime.input.handbrake;
+    }
+    if (flags.DRIFT_ASSIST_RECOVERY) {
+      if (
+        runtime.prevSteerAbs > constants.driftSteerThreshold &&
+        steerAbs <= constants.driftSteerThreshold
+      ) {
+        runtime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
+      }
+      runtime.prevSteerAbs = steerAbs;
+      if (runtime.recoveryTimer > 0) {
+        frontGripMul *= 1 + assistCfg.driftAssistRecoveryBoost;
+        rearGripMul *= 1 + assistCfg.driftAssistRecoveryBoost;
+        runtime.recoveryTimer = Math.max(0, runtime.recoveryTimer - dt);
+      }
+    }
+    frontGripMul = clamp(frontGripMul, 0.45, 1.25);
+    rearGripMul = clamp(rearGripMul, 0.18, 1.2);
+    let effectiveFrontGrip =
+      carCfg.lateralGrip * runtime.surface.lateralGripMul * frontGripMul;
+    let effectiveRearGrip =
+      carCfg.lateralGrip * runtime.surface.lateralGripMul * rearGripMul;
+    rearSlipTarget =
+      runtime.driftDirection *
       speedAbs *
-      assistCfg.throttleLiftSlipBoost *
-      liftBlend *
-      dt;
-  }
-  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-    const gripMul = 1 + (assistCfg.handbrakeGrip - 1) * runtime.input.handbrake;
-    effectiveLateralGrip *= gripMul;
-    lateralSpeed +=
+      runtime.driftAmount *
+      (driftCfg.steerSlipBoost * driftSteerFactor +
+        driftCfg.liftSlipBoost * throttleLiftFactor +
+        handbrakeCfg.slipBoost * handbrakeFactor * 0.8) *
+      driftinessScale;
+    lateralSpeed += (rearSlipTarget - lateralSpeed) * clamp(1.9 * dt, 0, 0.28);
+
+    let targetYawRate =
       runtime.input.steer *
-      Math.max(speedAbs, 0) *
-      assistCfg.handbrakeSlipBoost *
-      runtime.input.handbrake *
-      dt;
-  }
-  if (runtime.collisionGripTimer > 0) {
-    effectiveLateralGrip *= 0.7;
-    runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
-  }
-  if (runtime.impactCooldown > 0) {
-    runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
-  }
+      carCfg.steerRate *
+      lowSpeedSteerMul *
+      speedSteerMul *
+      (1 + runtime.driftAmount * driftCfg.yawRateDriftBoost);
+    if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+      targetYawRate +=
+        handbrakeCfg.yawBoost *
+        driftinessScale *
+        runtime.input.handbrake *
+        runtime.input.steer;
+    }
+    const lateralSlipRatio =
+      speedAbs > 10
+        ? clamp(Math.abs(lateralSpeed) / Math.max(speedAbs, 1), 0, 1)
+        : 0;
+    yawAssist =
+      runtime.driftDirection *
+      driftSpeedFactor *
+      runtime.driftAmount *
+      (driftCfg.rearYawAssist + lateralSlipRatio * driftCfg.yawAssistFromSlip) *
+      driftinessScale;
+    runtime.steeringRate +=
+      (targetYawRate + yawAssist - runtime.steeringRate) *
+      clamp(carCfg.yawDamping * dt, 0, 1);
+    oldAngle = vehicle.angle;
+    vehicle.angle += runtime.steeringRate * dt;
 
-  const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
-  lateralSpeed *= 1 - lateralCorrection;
+    if (
+      runtime.driftDirection !== 0 &&
+      runtime.input.steer * runtime.driftDirection < -0.08
+    ) {
+      effectiveFrontGrip *= 1 + driftCfg.countersteerRecoveryBonus * 0.18;
+      effectiveRearGrip *= 1 + driftCfg.countersteerRecoveryBonus * 0.11;
+    }
+    if (runtime.collisionGripTimer > 0) {
+      effectiveFrontGrip *= 0.7;
+      effectiveRearGrip *= 0.7;
+      runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
+    }
+    if (runtime.impactCooldown > 0) {
+      runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
+    }
 
-  vehicle.vx =
-    Math.cos(vehicle.angle) * forwardSpeed -
-    Math.sin(vehicle.angle) * lateralSpeed;
-  vehicle.vy =
-    Math.sin(vehicle.angle) * forwardSpeed +
-    Math.cos(vehicle.angle) * lateralSpeed;
+    const effectiveLateralGrip =
+      effectiveFrontGrip * 0.38 + effectiveRearGrip * 0.62;
+    const lateralCorrection = clamp(
+      effectiveLateralGrip *
+        dt *
+        (1 - driftCfg.lateralRetention * runtime.driftAmount * driftinessScale),
+      0,
+      1,
+    );
+    lateralSpeed *= 1 - lateralCorrection;
+
+    const alignedVx =
+      Math.cos(vehicle.angle) * forwardSpeed -
+      Math.sin(vehicle.angle) * lateralSpeed;
+    const alignedVy =
+      Math.sin(vehicle.angle) * forwardSpeed +
+      Math.cos(vehicle.angle) * lateralSpeed;
+    const inertiaCarry = clamp(
+      driftCfg.inertiaCarry * runtime.driftAmount * driftinessScale +
+        handbrakeFactor * 0.08 * driftinessScale,
+      0,
+      0.78,
+    );
+    vehicle.vx = previousVx * inertiaCarry + alignedVx * (1 - inertiaCarry);
+    vehicle.vy = previousVy * inertiaCarry + alignedVy * (1 - inertiaCarry);
+  } else {
+    runtime.driftAmount = 0;
+    runtime.driftDirection = 0;
+    runtime.driftRecoveryTimer = 0;
+
+    let targetYawRate =
+      runtime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
+    if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+      targetYawRate +=
+        assistCfg.handbrakeYawBoost *
+        driftinessScale *
+        runtime.input.handbrake *
+        runtime.input.steer;
+    }
+    runtime.steeringRate +=
+      (targetYawRate - runtime.steeringRate) *
+      clamp(carCfg.yawDamping * dt, 0, 1);
+    oldAngle = vehicle.angle;
+    vehicle.angle += runtime.steeringRate * dt;
+
+    let effectiveLateralGrip =
+      carCfg.lateralGrip * runtime.surface.lateralGripMul;
+    const allowLegacyAutoDrift = groundSurfaceName !== "grass";
+    if (
+      flags.AUTO_DRIFT_ON_STEER &&
+      allowLegacyAutoDrift &&
+      steerAbs > constants.driftSteerThreshold
+    ) {
+      effectiveLateralGrip *=
+        1 - assistCfg.autoDriftGripCut * steerAbs * driftinessScale;
+    }
+    if (flags.DRIFT_ASSIST_RECOVERY) {
+      if (
+        runtime.prevSteerAbs > constants.driftSteerThreshold &&
+        steerAbs <= constants.driftSteerThreshold
+      ) {
+        runtime.recoveryTimer = assistCfg.driftAssistRecoveryTime;
+      }
+      runtime.prevSteerAbs = steerAbs;
+      if (runtime.recoveryTimer > 0) {
+        effectiveLateralGrip *= 1 + assistCfg.driftAssistRecoveryBoost;
+        runtime.recoveryTimer = Math.max(0, runtime.recoveryTimer - dt);
+      }
+    }
+    if (
+      allowLegacyAutoDrift &&
+      runtime.input.throttle < 0.08 &&
+      speedAbs > assistCfg.throttleLiftMinSpeed
+    ) {
+      const liftBlend =
+        (1 - runtime.input.throttle) *
+        clamp(
+          (speedAbs - assistCfg.throttleLiftMinSpeed) /
+            Math.max(carCfg.maxSpeed - assistCfg.throttleLiftMinSpeed, 1),
+          0,
+          1,
+        );
+      effectiveLateralGrip *=
+        1 - assistCfg.throttleLiftGripCut * liftBlend * driftinessScale;
+      lateralSpeed +=
+        runtime.input.steer *
+        speedAbs *
+        assistCfg.throttleLiftSlipBoost *
+        driftinessScale *
+        liftBlend *
+        dt;
+    }
+    if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
+      const gripMul =
+        1 + (assistCfg.handbrakeGrip - 1) * runtime.input.handbrake;
+      effectiveLateralGrip *= gripMul;
+      lateralSpeed +=
+        runtime.input.steer *
+        Math.max(speedAbs, 0) *
+        assistCfg.handbrakeSlipBoost *
+        driftinessScale *
+        runtime.input.handbrake *
+        dt;
+    }
+    if (runtime.collisionGripTimer > 0) {
+      effectiveLateralGrip *= 0.7;
+      runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
+    }
+    if (runtime.impactCooldown > 0) {
+      runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
+    }
+
+    const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
+    lateralSpeed *= 1 - lateralCorrection;
+    vehicle.vx =
+      Math.cos(vehicle.angle) * forwardSpeed -
+      Math.sin(vehicle.angle) * lateralSpeed;
+    vehicle.vy =
+      Math.sin(vehicle.angle) * forwardSpeed +
+      Math.cos(vehicle.angle) * lateralSpeed;
+  }
 
   const headingForwardX = Math.cos(vehicle.angle);
   const headingForwardY = Math.sin(vehicle.angle);
@@ -2666,6 +2937,8 @@ function integrateVehicleGround(
   runtime.debug.pivotY = vehicle.y + headingForwardY * pivotOffset;
   runtime.debug.z = vehicle.z;
   runtime.debug.vz = vehicle.vz;
+  runtime.debug.rearSlip = rearSlipTarget;
+  runtime.debug.yawAssist = yawAssist;
   runtime.debug.slipAngle = Math.atan2(
     Math.abs(headingLateralSpeed),
     Math.abs(headingForwardSpeed) + 0.0001,
@@ -2755,6 +3028,9 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.input.steer = 0;
     aiPhysicsRuntime.input.handbrake = 0;
     aiPhysicsRuntime.steeringRate = 0;
+    aiPhysicsRuntime.driftAmount = 0;
+    aiPhysicsRuntime.driftDirection = 0;
+    aiPhysicsRuntime.driftRecoveryTimer = 0;
     aiPhysicsRuntime.recoveryTimer = 0;
     aiPhysicsRuntime.collisionGripTimer = 0;
     aiPhysicsRuntime.impactCooldown = 0;
@@ -2789,6 +3065,8 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.debugPathPoints = [];
     aiPhysicsRuntime.debug = {
       slipAngle: 0,
+      rearSlip: 0,
+      yawAssist: 0,
       surface: "asphalt",
       vForward: 0,
       vLateral: 0,
@@ -2860,6 +3138,9 @@ export function resetRace() {
   physicsRuntime.input.steer = 0;
   physicsRuntime.input.handbrake = 0;
   physicsRuntime.steeringRate = 0;
+  physicsRuntime.driftAmount = 0;
+  physicsRuntime.driftDirection = 0;
+  physicsRuntime.driftRecoveryTimer = 0;
   physicsRuntime.recoveryTimer = 0;
   physicsRuntime.collisionGripTimer = 0;
   physicsRuntime.impactCooldown = 0;
@@ -2875,6 +3156,8 @@ export function resetRace() {
   };
   physicsRuntime.debug.pivotX = car.x;
   physicsRuntime.debug.pivotY = car.y;
+  physicsRuntime.debug.rearSlip = 0;
+  physicsRuntime.debug.yawAssist = 0;
   physicsRuntime.debug.z = 0;
   physicsRuntime.debug.vz = 0;
   physicsRuntime.wheelLastPoints = null;

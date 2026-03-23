@@ -69,6 +69,7 @@ test("settings render layout uses longest rendered row label", () => {
   state.editingName = false;
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
   physicsConfig.flags.AI_OPPONENT_COUNT = 3;
+  physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED = true;
   physicsConfig.flags.DEBUG_MODE = true;
 
   const layout = getSettingsRenderLayout((text) => text.length * 10);
@@ -77,6 +78,7 @@ test("settings render layout uses longest rendered row label", () => {
     "PLAYER COLOR",
     "MENU MUSIC",
     "AI OPPONENTS",
+    "SIDEWAYS DRIFT",
     "DEBUG MODE",
     "LOGOUT",
     "BACK",
@@ -94,6 +96,7 @@ test("settings render layout shows AI count even when AI are disabled", () => {
   state.playerColor = "mint";
   physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
   physicsConfig.flags.AI_OPPONENT_COUNT = 4;
+  physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED = false;
 
   const layout = getSettingsRenderLayout((text) => text.length * 10);
   assert.deepEqual(layout.settingsItems, [
@@ -101,11 +104,13 @@ test("settings render layout shows AI count even when AI are disabled", () => {
     "PLAYER COLOR",
     "MENU MUSIC",
     "AI OPPONENTS",
+    "SIDEWAYS DRIFT",
     "DEBUG MODE",
     "BACK",
   ]);
   assert.equal(layout.rowLabels[1], "PLAYER COLOR: MINT");
   assert.equal(layout.rowLabels[3], "AI OPPONENTS: 4 (AI OFF)");
+  assert.equal(layout.rowLabels[4], "SIDEWAYS DRIFT: OFF");
 });
 
 test("settings header model defines centered title", () => {

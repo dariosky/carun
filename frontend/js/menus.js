@@ -23,6 +23,7 @@ import {
   saveTrackPresetToDb,
   saveMenuMusicEnabled,
   savePlayerColor,
+  saveSidewaysDriftEnabled,
   setTrackPresetMetadata,
   physicsConfig,
   sanitizePlayerName,
@@ -797,6 +798,9 @@ export function getSettingsRenderLayout(measureTextWidth) {
       const aiOffSuffix =
         physicsConfig.flags.AI_OPPONENTS_ENABLED === false ? " (AI OFF)" : "";
       return `${item}: ${count}${aiOffSuffix}`;
+    }
+    if (item === "SIDEWAYS DRIFT") {
+      return `${item}: ${physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED ? "ON" : "OFF"}`;
     }
     if (item === "DEBUG MODE") {
       return `${item}: ${physicsConfig.flags.DEBUG_MODE ? "ON" : "OFF"}`;
@@ -1924,6 +1928,12 @@ function toggleAiOpponents() {
   saveAiOpponentsEnabled(physicsConfig.flags.AI_OPPONENTS_ENABLED);
 }
 
+function toggleSidewaysDrift() {
+  physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED =
+    !physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED;
+  saveSidewaysDriftEnabled(physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED);
+}
+
 function setAiOpponentCount(nextCount) {
   physicsConfig.flags.AI_OPPONENT_COUNT = sanitizeAiOpponentCount(nextCount);
   saveAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT);
@@ -2271,6 +2281,10 @@ function activateSelection() {
     }
     if (selectedSetting === "AI OPPONENTS") {
       cycleAiOpponentCount();
+      return;
+    }
+    if (selectedSetting === "SIDEWAYS DRIFT") {
+      toggleSidewaysDrift();
       return;
     }
     if (selectedSetting === "DEBUG MODE") {
@@ -3030,6 +3044,8 @@ function onKeyDown(e) {
       stepPlayerColor(key === "arrowleft" ? -1 : 1);
     } else if (selected === "AI OPPONENTS") {
       stepAiOpponentCount(key === "arrowleft" ? -1 : 1);
+    } else if (selected === "SIDEWAYS DRIFT") {
+      toggleSidewaysDrift();
     } else if (selected === "DEBUG MODE") {
       toggleDebugMode();
     }

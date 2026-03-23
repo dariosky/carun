@@ -21,6 +21,7 @@ const MENU_MUSIC_STORAGE_KEY = "carun.menuMusicEnabled";
 const AI_OPPONENTS_STORAGE_KEY = "carun.aiOpponentsEnabled";
 const AI_OPPONENT_COUNT_STORAGE_KEY = "carun.aiOpponentCount";
 const PLAYER_COLOR_STORAGE_KEY = "carun.playerColor";
+const SIDEWAYS_DRIFT_STORAGE_KEY = "carun.sidewaysDriftEnabled";
 const OBJECT_DEFAULTS = {
   tree: { height: 1.5, r: 24, angle: 0 },
   barrel: { height: 1, r: 12, angle: 0 },
@@ -202,6 +203,28 @@ export function saveAiOpponentCount(count) {
   }
 }
 
+export function loadSidewaysDriftEnabled(defaultValue = true) {
+  try {
+    const raw = localStorage.getItem(SIDEWAYS_DRIFT_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+  return defaultValue;
+}
+
+export function saveSidewaysDriftEnabled(enabled) {
+  try {
+    localStorage.setItem(
+      SIDEWAYS_DRIFT_STORAGE_KEY,
+      enabled ? "true" : "false",
+    );
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
 export function getMenuItems(authenticated) {
   return authenticated
     ? ["RACE", "SETTINGS"]
@@ -258,6 +281,7 @@ export function getSettingsItems(authenticated) {
         "PLAYER COLOR",
         "MENU MUSIC",
         "AI OPPONENTS",
+        "SIDEWAYS DRIFT",
         "DEBUG MODE",
         "LOGOUT",
         "BACK",
@@ -267,6 +291,7 @@ export function getSettingsItems(authenticated) {
         "PLAYER COLOR",
         "MENU MUSIC",
         "AI OPPONENTS",
+        "SIDEWAYS DRIFT",
         "DEBUG MODE",
         "BACK",
       ];
@@ -1656,6 +1681,7 @@ export const physicsConfig = {
     steerRate: 3.6,
     steerAtLowSpeedMul: 0.35,
     yawDamping: 8.0,
+    driftiness: 1,
     reverseMaxSpeedMul: 0.32,
     inputSmoothing: 0.2,
     dtClamp: 0.033,
@@ -1692,6 +1718,41 @@ export const physicsConfig = {
     handbrakeLongDecel: 1400,
     handbrakeSlipBoost: 0.42,
     handbrakeReverseKillDecel: 1900,
+  },
+  drift: {
+    minSpeed: 92,
+    fullEffectSpeed: 235,
+    steerThreshold: 0.34,
+    heavySteerThreshold: 0.7,
+    throttleLiftThreshold: 0.08,
+    frontGripFloor: 0.8,
+    rearGripFloor: 0.44,
+    rearGripLiftBonusCut: 0.16,
+    rearGripHeavySteerCut: 0.16,
+    rearGripHandbrakeCut: 0.28,
+    frontGripHandbrakeCut: 0.08,
+    steerSlipBoost: 0.28,
+    liftSlipBoost: 0.42,
+    rearYawAssist: 1.35,
+    yawAssistFromSlip: 0.85,
+    yawRateDriftBoost: 0.32,
+    driftEntryRate: 7.5,
+    driftExitRate: 2.8,
+    driftSustainTime: 0.18,
+    countersteerRecoveryBonus: 2.1,
+    inertiaCarry: 1,
+    lateralRetention: 0.88,
+    visualSkidThreshold: 0.22,
+    rearSkidLateralThreshold: 56,
+  },
+  handbrake: {
+    entryBoost: 0.4,
+    yawBoost: 1.45,
+    rearGripMul: 0.48,
+    frontGripMul: 0.9,
+    longDecel: 650,
+    reverseKillDecel: 1900,
+    slipBoost: 0.62,
   },
   ai: {
     navProgressSamples: 96,
@@ -1815,6 +1876,7 @@ export const physicsConfig = {
     AUTO_DRIFT_ON_STEER: true,
     DRIFT_ASSIST_RECOVERY: false,
     HANDBRAKE_MODE: true,
+    SIDEWAYS_DRIFT_ENABLED: loadSidewaysDriftEnabled(true),
     SPEED_SENSITIVE_STEERING: true,
     SURFACE_BLENDING: true,
     AI_OPPONENTS_ENABLED: loadAiOpponentsEnabled(false),

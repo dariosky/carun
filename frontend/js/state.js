@@ -231,6 +231,9 @@ function createPhysicsRuntimeState() {
   return {
     input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
     steeringRate: 0,
+    driftAmount: 0,
+    driftDirection: 0,
+    driftRecoveryTimer: 0,
     recoveryTimer: 0,
     collisionGripTimer: 0,
     impactCooldown: 0,
@@ -246,6 +249,8 @@ function createPhysicsRuntimeState() {
     },
     debug: {
       slipAngle: 0,
+      rearSlip: 0,
+      yawAssist: 0,
       surface: "asphalt",
       vForward: 0,
       vLateral: 0,
@@ -268,6 +273,9 @@ function createAiPhysicsRuntimeState() {
   return {
     input: { throttle: 0, brake: 0, steer: 0, handbrake: 0 },
     steeringRate: 0,
+    driftAmount: 0,
+    driftDirection: 0,
+    driftRecoveryTimer: 0,
     recoveryTimer: 0,
     collisionGripTimer: 0,
     impactCooldown: 0,
@@ -301,6 +309,8 @@ function createAiPhysicsRuntimeState() {
     debugPathPoints: [],
     debug: {
       slipAngle: 0,
+      rearSlip: 0,
+      yawAssist: 0,
       surface: "asphalt",
       vForward: 0,
       vLateral: 0,

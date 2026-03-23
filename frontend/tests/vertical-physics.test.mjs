@@ -244,6 +244,41 @@ function makeSpringShortcutScenario(kind = "wall") {
   return { trackData, objects };
 }
 
+function preparePlayerMotion({
+  speed = 0,
+  throttle = false,
+  brake = false,
+  left = false,
+  right = false,
+  handbrake = false,
+} = {}) {
+  disableAiOpponents();
+  resetRace();
+  state.startSequence.active = false;
+  worldObjects.length = 0;
+  skidMarks.length = 0;
+  keys.accel = throttle;
+  keys.brake = brake;
+  keys.left = left;
+  keys.right = right;
+  keys.handbrake = handbrake;
+  car.vx = Math.cos(car.angle) * speed;
+  car.vy = Math.sin(car.angle) * speed;
+  car.speed = speed;
+  physicsRuntime.driftAmount = 0;
+  physicsRuntime.driftDirection = 0;
+  physicsRuntime.driftRecoveryTimer = 0;
+  physicsRuntime.wheelLastPoints = null;
+  physicsRuntime.prevForwardSpeed = null;
+}
+
+function absoluteAngleDelta(from, to) {
+  let delta = to - from;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  return Math.abs(delta);
+}
+
 test("legacy world objects gain default heights and wall defaults", () => {
   const imported = importTrackPresetData({
     id: "vertical-legacy",
@@ -1438,6 +1473,97 @@ test("ai uses the same grass slowdown and skid pipeline as the player", () => {
   assert.ok(aiPhysicsRuntime.surface.longDragMul > 1);
   assert.ok(aiCar.speed < initialSpeed);
   assert.ok(skidMarks.length > 0);
+});
+
+test("heavy steering at speed builds player drift state and rear slip", () => {
+  preparePlayerMotion({ speed: 230, right: true, throttle: true });
+  const initialAngle = car.angle;
+
+  for (let i = 0; i < 18; i++) {
+    updateRace(0.016);
+  }
+  const travelAngle = Math.atan2(car.vy, car.vx);
+
+  assert.ok(physicsRuntime.driftAmount > 0.35);
+  assert.ok(Math.abs(physicsRuntime.debug.rearSlip) > 20);
+  assert.ok(absoluteAngleDelta(travelAngle, car.angle) > 0.12);
+  assert.ok(Math.abs(car.angle - initialAngle) > 0.12);
+});
+
+test("lift-off corner entry can still initiate drift without handbrake", () => {
+  preparePlayerMotion({ speed: 245, right: true });
+  for (let i = 0; i < 18; i++) {
+    updateRace(0.016);
+  }
+
+  assert.ok(physicsRuntime.driftAmount > 0.18);
+  assert.ok(Math.abs(physicsRuntime.debug.rearSlip) > 6);
+  assert.equal(keys.handbrake, false);
+});
+
+test("handbrake drift rotates harder, slows the car, and creates skids", () => {
+  preparePlayerMotion({ speed: 220, right: true });
+  const baselineAngle = car.angle;
+  for (let i = 0; i < 14; i++) {
+    updateRace(0.016);
+  }
+  const noHandbrakeAngleDelta = Math.abs(car.angle - baselineAngle);
+  const noHandbrakeTravelDelta = absoluteAngleDelta(
+    Math.atan2(car.vy, car.vx),
+    car.angle,
+  );
+  const noHandbrakeSpeed = car.speed;
+
+  preparePlayerMotion({ speed: 220, right: true, handbrake: true });
+  const handbrakeAngle = car.angle;
+  for (let i = 0; i < 14; i++) {
+    updateRace(0.016);
+  }
+
+  assert.ok(
+    Math.abs(car.angle - handbrakeAngle) > noHandbrakeAngleDelta + 0.04,
+  );
+  assert.ok(
+    absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle) >
+      noHandbrakeTravelDelta + 0.06,
+  );
+  assert.ok(car.speed < noHandbrakeSpeed - 10);
+  assert.ok(skidMarks.length > 0);
+});
+
+test("drift recovery is gradual after steering release", () => {
+  preparePlayerMotion({ speed: 235, right: true });
+  for (let i = 0; i < 16; i++) {
+    updateRace(0.016);
+  }
+  const engagedDrift = physicsRuntime.driftAmount;
+
+  keys.right = false;
+  updateRace(0.016);
+  const immediateRecovery = physicsRuntime.driftAmount;
+
+  for (let i = 0; i < 10; i++) {
+    updateRace(0.016);
+  }
+
+  assert.ok(engagedDrift > 0.18);
+  assert.ok(immediateRecovery > 0.04);
+  assert.ok(immediateRecovery < engagedDrift);
+  assert.ok(physicsRuntime.driftAmount < immediateRecovery);
+});
+
+test("straight-line driving stays stable and does not build drift state", () => {
+  preparePlayerMotion({ speed: 220 });
+  const initialAngle = car.angle;
+
+  for (let i = 0; i < 30; i++) {
+    updateRace(0.016);
+  }
+
+  assert.ok(physicsRuntime.driftAmount < 0.03);
+  assert.ok(Math.abs(physicsRuntime.debug.vLateral) < 6);
+  assert.ok(absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle) < 0.03);
+  assert.ok(Math.abs(car.angle - initialAngle) < 0.01);
 });
 
 test("ai does not reverse-recover just for touching shortcut grass near its planned path", () => {
