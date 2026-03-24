@@ -299,3 +299,47 @@ test("editor toolbar exposes a pan toggle and track zoom can clamp to 25 percent
 
   removeTrackPresetById(imported.id, { removePersisted: false });
 });
+
+test("editor toolbar exposes oil placement and preserves imported oil blobs", () => {
+  const imported = importTrackPresetData({
+    id: "editor-oil-layout",
+    name: "EDITOR OIL",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [
+      {
+        type: "oil",
+        x: 520,
+        y: 310,
+        rx: 84,
+        ry: 36,
+        angle: Math.PI / 8,
+        seed: 0.35,
+      },
+    ],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex(
+    (track) => track.id === imported.id,
+  );
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  const layout = getEditorToolbarLayout();
+  assert.ok(layout.objectToolButtons.some((button) => button.id === "oil"));
+
+  const preset = getTrackPreset(trackIndex);
+  assert.equal(preset.worldObjects[0]?.type, "oil");
+  assert.equal(preset.worldObjects[0]?.rx, 84);
+  assert.equal(preset.worldObjects[0]?.ry, 36);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});

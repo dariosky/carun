@@ -28,6 +28,7 @@ const OBJECT_DEFAULTS = {
   spring: { height: 0.4, r: 16, angle: 0 },
   wall: { height: 1, width: 18, length: 90, angle: 0 },
   pond: { angle: 0 },
+  oil: { angle: 0 },
 };
 
 export function sanitizePlayerName(raw) {
@@ -386,7 +387,7 @@ function cloneWorldObject(obj) {
     return base;
   }
 
-  if (type === "pond") {
+  if (type === "pond" || type === "oil") {
     base.rx = Number.isFinite(obj?.rx) ? Number(obj.rx) : 78;
     base.ry = Number.isFinite(obj?.ry) ? Number(obj.ry) : 44;
     base.seed = Number.isFinite(obj?.seed) ? Number(obj.seed) : 0;
@@ -1871,6 +1872,12 @@ export const physicsConfig = {
       engineMul: 0.22,
       coastDecelMul: 2.8,
     },
+    oil: {
+      lateralGripMul: 0.95,
+      longDragMul: 1.0,
+      engineMul: 1.0,
+      coastDecelMul: 1.0,
+    },
   },
   flags: {
     AUTO_DRIFT_ON_STEER: true,
@@ -1886,6 +1893,10 @@ export const physicsConfig = {
   },
   constants: {
     surfaceBlendTime: 0.1,
+    oilCarryDuration: 3,
+    oilSteerThreshold: 0.03,
+    oilGripFloor: 0.02,
+    oilInertiaCarry: 0.985,
     driftSteerThreshold: 0.08,
     lowSpeedSteerAt: 120,
     pivotAtLowSpeedRatio: 0.5,

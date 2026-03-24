@@ -240,6 +240,8 @@ function createPhysicsRuntimeState() {
     lastGroundedSpeed: 0,
     landingBouncePending: false,
     landingCooldown: 0,
+    oilCarry: 0,
+    oilCarryTime: 0,
     prevSteerAbs: 0,
     surface: {
       lateralGripMul: 1,
@@ -283,6 +285,8 @@ function createAiPhysicsRuntimeState() {
     lastGroundedSpeed: 0,
     landingBouncePending: false,
     landingCooldown: 0,
+    oilCarry: 0,
+    oilCarryTime: 0,
     mode: "race",
     recoveryMode: "none",
     targetLaneOffset: 0,

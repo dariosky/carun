@@ -594,6 +594,7 @@ function nodeSurfacePenalty(surfaceName) {
   if (surfaceName === "curb") return aiCfg.edgeCurbPenalty;
   if (surfaceName === "grass") return aiCfg.edgeGrassPenalty;
   if (surfaceName === "water") return aiCfg.edgeWaterPenalty;
+  if (surfaceName === "oil") return aiCfg.edgeWaterPenalty;
   return 0;
 }
 
@@ -788,7 +789,11 @@ function simulateSpringJumpArc(
     if (groundCollision.hit) obstacleBypassed = true;
 
     const midGroundSurface = surfaceAtForTrack(nextX, nextY, trackDef, objects);
-    if (midGroundSurface === "grass" || midGroundSurface === "water") {
+    if (
+      midGroundSurface === "grass" ||
+      midGroundSurface === "water" ||
+      midGroundSurface === "oil"
+    ) {
       penaltySurfaceDistance += Math.hypot(nextX - x, nextY - y);
     }
 
@@ -2193,8 +2198,24 @@ export function pondSlowdownAt(x, y, objects = worldObjects) {
   return false;
 }
 
+export function oilSlipAt(x, y, objects = worldObjects) {
+  for (const obj of objects) {
+    if (obj.type !== "oil") continue;
+    const dx = x - obj.x;
+    const dy = y - obj.y;
+    const rotation = obj.angle || 0;
+    const localX = dx * Math.cos(rotation) + dy * Math.sin(rotation);
+    const localY = -dx * Math.sin(rotation) + dy * Math.cos(rotation);
+    const angle = Math.atan2(localY, localX);
+    const dist = Math.hypot(localX, localY);
+    if (dist < blobRadius(obj.rx, obj.ry, angle, obj.seed || 0)) return true;
+  }
+  return false;
+}
+
 export function surfaceAt(x, y) {
   if (pondSlowdownAt(x, y)) return "water";
+  if (oilSlipAt(x, y)) return "oil";
   const surface = getSurface(x, y);
   if (surface === "grass" || surface === "innerGrass") return "grass";
   if (surface === "curb") return "curb";
@@ -2208,6 +2229,7 @@ export function surfaceAtForTrack(
   objects = worldObjects,
 ) {
   if (pondSlowdownAt(x, y, objects)) return "water";
+  if (oilSlipAt(x, y, objects)) return "oil";
   const surface = getSurface(x, y, trackDef);
   if (surface === "grass" || surface === "innerGrass") return "grass";
   if (surface === "curb") return "curb";
@@ -2252,9 +2274,10 @@ export function normalizeWorldObject(obj) {
         height: Number.isFinite(obj.height) ? Number(obj.height) : 2.5,
       };
     case "pond":
+    case "oil":
       return {
         ...obj,
-        type: "pond",
+        type: obj.type,
         angle,
         rx: Number.isFinite(obj.rx) ? Number(obj.rx) : 78,
         ry: Number.isFinite(obj.ry) ? Number(obj.ry) : 44,

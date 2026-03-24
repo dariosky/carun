@@ -154,6 +154,49 @@ function getVehicleSurfaceAt(
   return vehicleIsFlying(vehicle) ? "flying" : groundSurfaceName;
 }
 
+function isPenaltySurface(surfaceName) {
+  return (
+    surfaceName === "grass" || surfaceName === "water" || surfaceName === "oil"
+  );
+}
+
+function updateOilCarry(runtime, groundSurfaceName, dt) {
+  const duration = Math.max(
+    physicsConfig.constants.oilCarryDuration || 3,
+    0.01,
+  );
+  if (groundSurfaceName === "oil") {
+    runtime.oilCarry = 1;
+    runtime.oilCarryTime = duration;
+    return runtime.oilCarry;
+  }
+  if (groundSurfaceName === "water" || groundSurfaceName === "grass") {
+    runtime.oilCarry = 0;
+    runtime.oilCarryTime = 0;
+    return 0;
+  }
+  if (runtime.oilCarryTime > 0) {
+    runtime.oilCarryTime = Math.max(0, runtime.oilCarryTime - dt);
+    runtime.oilCarry = clamp(runtime.oilCarryTime / duration, 0, 1);
+  } else {
+    runtime.oilCarry = 0;
+  }
+  return runtime.oilCarry;
+}
+
+function getOilSteerSlipStrength(runtime, groundSurfaceName, steerAbs) {
+  const constants = physicsConfig.constants;
+  const carryStrength =
+    groundSurfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
+  if (carryStrength <= 0) return 0;
+  const steerBlend = clamp(
+    (steerAbs - (constants.oilSteerThreshold || 0.03)) / 0.12,
+    0,
+    1,
+  );
+  return carryStrength * steerBlend;
+}
+
 function distanceToSegment(px, py, ax, ay, bx, by) {
   const abx = bx - ax;
   const aby = by - ay;
@@ -1128,7 +1171,7 @@ function aiSightlineBlocked(
     if (!isFlying && resolveObjectCollisions(x, y, 0).hit) return true;
     if (!isFlying && !ignoreGroundPenalties) {
       const surface = surfaceAt(x, y);
-      if (surface === "grass" || surface === "water") {
+      if (isPenaltySurface(surface)) {
         penaltySurfaceCount += 1;
         if (penaltySurfaceCount >= penaltySurfaceThreshold) return true;
       }
@@ -1217,7 +1260,7 @@ function buildAiTargetPreview(graph) {
     const midX = fromX + segDx * 0.5;
     const midY = fromY + segDy * 0.5;
     const midSurface = surfaceAt(midX, midY);
-    const isPenalty = midSurface === "grass" || midSurface === "water";
+    const isPenalty = isPenaltySurface(midSurface);
     const springBypass =
       fromNode.nearSpring || vehicleIsFlying(aiCar) || jumpSegment;
     const segTravel = Math.min(remainingDistance, segLen);
@@ -1773,7 +1816,7 @@ function updateAiProgressHealth(dt, collision) {
   aiPhysicsRuntime.progress = nextProgress;
 
   const currentSurface = surfaceAt(aiCar.x, aiCar.y);
-  const isOffRoad = currentSurface === "grass" || currentSurface === "water";
+  const isOffRoad = isPenaltySurface(currentSurface);
   const isFlying = vehicleIsFlying(aiCar);
 
   if (
@@ -2097,9 +2140,20 @@ function recordSkids(
 
   const isGrass = surfaceName === "grass";
   const isWater = surfaceName === "water";
+  const isOil = surfaceName === "oil";
   const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
   const speedAbs = Math.abs(forwardSpeed);
-  if (!isGrass && !isWater && speedAbs < 8 && Math.abs(lateralSpeed) < 8)
+  const oilyStrength =
+    surfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
+  const oilyMarksActive = oilyStrength > 0.02 && speedAbs > 6;
+  if (
+    !isGrass &&
+    !isWater &&
+    !isOil &&
+    !oilyMarksActive &&
+    speedAbs < 8 &&
+    Math.abs(lateralSpeed) < 8
+  )
     return;
   const strongAccel = longAccel > 480;
   const strongBrake = longAccel < -520;
@@ -2113,15 +2167,25 @@ function recordSkids(
   const shouldDrawRoadSkids =
     isRoad &&
     (strongAccel || strongBrake || skidding || handbrakeSkid || driftSkid);
-  if (!isGrass && !isWater && !shouldDrawRoadSkids) return;
+  if (
+    !isGrass &&
+    !isWater &&
+    !isOil &&
+    !oilyMarksActive &&
+    !shouldDrawRoadSkids
+  )
+    return;
 
-  const color = isGrass
-    ? "rgba(112, 74, 44, 0.40)"
-    : isWater
-      ? "rgba(245, 250, 255, 0.42)"
-      : "rgba(20, 20, 20, 0.37)";
-  const width = isGrass || isWater ? 2.7 : 2.2;
+  const color = oilyMarksActive
+    ? "rgba(6, 6, 6, 0.92)"
+    : isGrass
+      ? "rgba(112, 74, 44, 0.40)"
+      : isWater
+        ? "rgba(245, 250, 255, 0.42)"
+        : "rgba(20, 20, 20, 0.37)";
+  const width = isGrass || isWater || isOil || oilyMarksActive ? 2.7 : 2.2;
   const wheelIndices =
+    !oilyMarksActive &&
     isRoad &&
     (driftSkid || handbrakeSkid || skidding) &&
     !strongAccel &&
@@ -2332,6 +2396,7 @@ function integrateVehicleAirborne(
 ) {
   const airCfg = physicsConfig.air;
   const carCfg = physicsConfig.car;
+  updateOilCarry(runtime, surfaceName, dt);
   const headingX = Math.cos(vehicle.angle);
   const headingY = Math.sin(vehicle.angle);
   const headingForwardSpeed = vehicle.vx * headingX + vehicle.vy * headingY;
@@ -2446,6 +2511,7 @@ function integrateVehicleGround(
   const handbrakeCfg = physicsConfig.handbrake;
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
+  updateOilCarry(runtime, groundSurfaceName, dt);
   const targetSurface =
     physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
   const blendAlpha = flags.SURFACE_BLENDING
@@ -2522,6 +2588,12 @@ function integrateVehicleGround(
   let rearSlipTarget = 0;
   let yawAssist = 0;
   const steerAbs = Math.abs(runtime.input.steer);
+  const oilSteerSlip = getOilSteerSlipStrength(
+    runtime,
+    groundSurfaceName,
+    steerAbs,
+  );
+  const oilGripFloor = clamp(constants.oilGripFloor || 0.02, 0.001, 1);
 
   if (sidewaysDriftEnabled) {
     const allowAutoDrift =
@@ -2669,6 +2741,11 @@ function integrateVehicleGround(
       carCfg.lateralGrip * runtime.surface.lateralGripMul * frontGripMul;
     let effectiveRearGrip =
       carCfg.lateralGrip * runtime.surface.lateralGripMul * rearGripMul;
+    if (oilSteerSlip > 0) {
+      const oilGripMul = 1 - oilSteerSlip * (1 - oilGripFloor);
+      effectiveFrontGrip *= oilGripMul;
+      effectiveRearGrip *= oilGripMul;
+    }
     rearSlipTarget =
       runtime.driftDirection *
       speedAbs *
@@ -2741,11 +2818,19 @@ function integrateVehicleGround(
     const alignedVy =
       Math.sin(vehicle.angle) * forwardSpeed +
       Math.cos(vehicle.angle) * lateralSpeed;
-    const inertiaCarry = clamp(
+    const baseInertiaCarry = clamp(
       driftCfg.inertiaCarry * runtime.driftAmount * driftinessScale +
         handbrakeFactor * 0.08 * driftinessScale,
       0,
       0.78,
+    );
+    const inertiaCarry = clamp(
+      baseInertiaCarry +
+        oilSteerSlip *
+          (Math.max(constants.oilInertiaCarry || 0.985, baseInertiaCarry) -
+            baseInertiaCarry),
+      0,
+      Math.max(0.78, constants.oilInertiaCarry || 0.985),
     );
     vehicle.vx = previousVx * inertiaCarry + alignedVx * (1 - inertiaCarry);
     vehicle.vy = previousVy * inertiaCarry + alignedVy * (1 - inertiaCarry);
@@ -2771,7 +2856,8 @@ function integrateVehicleGround(
 
     let effectiveLateralGrip =
       carCfg.lateralGrip * runtime.surface.lateralGripMul;
-    const allowLegacyAutoDrift = groundSurfaceName !== "grass";
+    const allowLegacyAutoDrift =
+      groundSurfaceName !== "grass" && groundSurfaceName !== "oil";
     if (
       flags.AUTO_DRIFT_ON_STEER &&
       allowLegacyAutoDrift &&
@@ -2835,15 +2921,25 @@ function integrateVehicleGround(
     if (runtime.impactCooldown > 0) {
       runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
     }
+    if (oilSteerSlip > 0) {
+      effectiveLateralGrip *= 1 - oilSteerSlip * (1 - oilGripFloor);
+    }
 
     const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
     lateralSpeed *= 1 - lateralCorrection;
-    vehicle.vx =
+    const alignedVx =
       Math.cos(vehicle.angle) * forwardSpeed -
       Math.sin(vehicle.angle) * lateralSpeed;
-    vehicle.vy =
+    const alignedVy =
       Math.sin(vehicle.angle) * forwardSpeed +
       Math.cos(vehicle.angle) * lateralSpeed;
+    const inertiaCarry = clamp(
+      oilSteerSlip * (constants.oilInertiaCarry || 0.985),
+      0,
+      constants.oilInertiaCarry || 0.985,
+    );
+    vehicle.vx = previousVx * inertiaCarry + alignedVx * (1 - inertiaCarry);
+    vehicle.vy = previousVy * inertiaCarry + alignedVy * (1 - inertiaCarry);
   }
 
   const headingForwardX = Math.cos(vehicle.angle);
@@ -3038,6 +3134,8 @@ function resetAiOpponentForRace(
     aiPhysicsRuntime.lastGroundedSpeed = 0;
     aiPhysicsRuntime.landingBouncePending = false;
     aiPhysicsRuntime.landingCooldown = 0;
+    aiPhysicsRuntime.oilCarry = 0;
+    aiPhysicsRuntime.oilCarryTime = 0;
     aiPhysicsRuntime.mode = "race";
     aiPhysicsRuntime.recoveryMode = "none";
     aiPhysicsRuntime.targetLaneOffset =
@@ -3147,6 +3245,8 @@ export function resetRace() {
   physicsRuntime.lastGroundedSpeed = 0;
   physicsRuntime.landingBouncePending = false;
   physicsRuntime.landingCooldown = 0;
+  physicsRuntime.oilCarry = 0;
+  physicsRuntime.oilCarryTime = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = {
     lateralGripMul: 1,

@@ -78,6 +78,7 @@ import {
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const EDITOR_OBJECT_PLACE_TOOLS = [
   { id: "water", label: "Water", icon: "≈", shortcut: "W" },
+  { id: "oil", label: "Oil", icon: "●", shortcut: "O" },
   { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
   { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
   { id: "spring", label: "Spring", icon: "✹", shortcut: "" },
@@ -683,6 +684,8 @@ function editorToolbarActionLabel(actionId) {
       return "Delete";
     case "water":
       return "Water";
+    case "oil":
+      return "Oil";
     case "barrel":
       return "Barrel";
     case "tree":
@@ -1297,6 +1300,29 @@ function placeEditorObject(type) {
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
+  if (type === "oil") {
+    const oil = {
+      type: "oil",
+      x,
+      y,
+      rx: 74,
+      ry: 38,
+      seed: Math.random() * 2 - 1,
+      angle: 0,
+    };
+    preset.worldObjects.push(oil);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
   if (type === "barrel") {
     const barrel = { type: "barrel", x, y, r: 12, angle: 0, height: 1 };
     preset.worldObjects.push(barrel);
@@ -1605,7 +1631,7 @@ function adjustSelectedObjectSize(direction) {
   if (!target) return;
   const object = preset.worldObjects[target.objectIndex];
   if (!object) return;
-  if (object.type === "pond") {
+  if (object.type === "pond" || object.type === "oil") {
     object.rx = Math.max(28, Math.min(180, object.rx + direction * 8));
     object.ry = Math.max(16, Math.min(110, object.ry + direction * 5));
   }
@@ -1755,6 +1781,7 @@ function adjustEditorSmoothing(direction) {
 function performEditorToolbarAction(actionId) {
   if (actionId === "objectDelete") deleteSelectedEditorTarget("object");
   if (actionId === "water") toggleEditorTool("pond");
+  if (actionId === "oil") toggleEditorTool("oil");
   if (actionId === "barrel") toggleEditorTool("barrel");
   if (actionId === "tree") toggleEditorTool("tree");
   if (actionId === "spring") toggleEditorTool("spring");
@@ -2870,6 +2897,11 @@ function onKeyDown(e) {
     if (key === "w") {
       if (e.repeat) return;
       toggleEditorTool("pond");
+      return;
+    }
+    if (key === "o") {
+      if (e.repeat) return;
+      toggleEditorTool("oil");
       return;
     }
     if (key === "b") {

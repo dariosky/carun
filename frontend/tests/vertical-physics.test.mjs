@@ -191,7 +191,7 @@ function makeIntersectionTrackData() {
 }
 
 function getPathSurfaceExposure(graph, pathNodeIds, samplesPerSegment = 10) {
-  const counts = { grass: 0, water: 0 };
+  const counts = { grass: 0, water: 0, oil: 0 };
   for (let index = 0; index < pathNodeIds.length - 1; index++) {
     const fromNode = graph.nodes[pathNodeIds[index]];
     const toNode = graph.nodes[pathNodeIds[index + 1]];
@@ -201,7 +201,8 @@ function getPathSurfaceExposure(graph, pathNodeIds, samplesPerSegment = 10) {
       const x = fromNode.x + (toNode.x - fromNode.x) * t;
       const y = fromNode.y + (toNode.y - fromNode.y) * t;
       const surface = surfaceAt(x, y);
-      if (surface === "grass" || surface === "water") counts[surface] += 1;
+      if (surface === "grass" || surface === "water" || surface === "oil")
+        counts[surface] += 1;
     }
   }
   return counts;
@@ -290,6 +291,7 @@ test("legacy world objects gain default heights and wall defaults", () => {
       { type: "barrel", x: 140, y: 120, r: 12 },
       { type: "spring", x: 180, y: 120, r: 16 },
       { type: "wall", x: 220, y: 120 },
+      { type: "oil", x: 260, y: 120 },
     ],
     centerlineStrokes: [],
     editStack: [],
@@ -300,11 +302,13 @@ test("legacy world objects gain default heights and wall defaults", () => {
   const barrel = getObjectByType(preset.worldObjects, "barrel");
   const spring = getObjectByType(preset.worldObjects, "spring");
   const wall = getObjectByType(preset.worldObjects, "wall");
+  const oil = getObjectByType(preset.worldObjects, "oil");
 
   assert.ok(tree);
   assert.ok(barrel);
   assert.ok(spring);
   assert.ok(wall);
+  assert.ok(oil);
 
   assert.ok(Number.isFinite(tree.height) && tree.height > 0);
   assert.ok(Number.isFinite(barrel.height) && barrel.height > 0);
@@ -312,6 +316,8 @@ test("legacy world objects gain default heights and wall defaults", () => {
   assert.ok(Number.isFinite(wall.height) && wall.height > 0);
   assert.equal(wall.width, 18);
   assert.equal(wall.length, 90);
+  assert.equal(oil.rx, 78);
+  assert.equal(oil.ry, 44);
 
   removeTrackPresetById(imported.id);
 });
@@ -1314,7 +1320,7 @@ test("checkpoint path planning avoids off-road shortcuts when a dry route exists
     const path = planTrackNavPath(graph, node.id, goalNodeIds);
     if (path.length <= 10) continue;
     const exposure = getPathSurfaceExposure(graph, path);
-    const totalExposure = exposure.grass + exposure.water;
+    const totalExposure = exposure.grass + exposure.water + exposure.oil;
     if (!worstExposure || totalExposure > worstExposure.totalExposure) {
       worstExposure = { nodeId: node.id, exposure, totalExposure, path };
     }
@@ -1384,6 +1390,66 @@ test("track navigation graph keeps water nodes available as expensive shortcuts"
 
     assert.ok(waterNodeCount > 0);
     assert.ok(connectedWaterNodeCount > 0);
+  } finally {
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex(
+      (option) => option.id === originalTrackId,
+    );
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
+  }
+});
+
+test("track navigation graph keeps oil nodes available as expensive shortcuts", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const trackData = makeTrackData();
+  const oilFrame = trackFrameAtAngle(Math.PI * 0.32, trackData);
+  const imported = importTrackPresetData({
+    id: "vertical-oil-shortcut",
+    name: "VERTICAL OIL SHORTCUT",
+    track: trackData,
+    checkpoints: [
+      { angle: 0 },
+      { angle: Math.PI * 0.5 },
+      { angle: Math.PI },
+      { angle: Math.PI * 1.5 },
+    ],
+    worldObjects: [
+      {
+        type: "oil",
+        x: oilFrame.point.x,
+        y: oilFrame.point.y,
+        rx: 58,
+        ry: 42,
+        angle: 0,
+        seed: -0.15,
+      },
+    ],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+
+  try {
+    const trackIndex = trackOptions.findIndex(
+      (option) => option.id === imported.id,
+    );
+    state.selectedTrackIndex = trackIndex;
+    applyTrackPreset(trackIndex);
+    const graph = getTrackNavigationGraph();
+    const oilNodeCount = graph.nodes.filter(
+      (node) => node.surface === "oil",
+    ).length;
+    const connectedOilNodeCount = graph.nodes.filter(
+      (node) =>
+        node.surface === "oil" &&
+        ((graph.edges[node.id] || []).length > 0 ||
+          graph.edges.some((edges) =>
+            edges.some((edge) => edge.to === node.id),
+          )),
+    ).length;
+
+    assert.ok(oilNodeCount > 0);
+    assert.ok(connectedOilNodeCount > 0);
   } finally {
     removeTrackPresetById(imported.id);
     const restoreIndex = trackOptions.findIndex(
@@ -1564,6 +1630,132 @@ test("straight-line driving stays stable and does not build drift state", () => 
   assert.ok(Math.abs(physicsRuntime.debug.vLateral) < 6);
   assert.ok(absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle) < 0.03);
   assert.ok(Math.abs(car.angle - initialAngle) < 0.01);
+});
+
+test("oil surface keeps straight travel but resists steering bite", () => {
+  preparePlayerMotion({ speed: 190, right: true });
+  for (let i = 0; i < 14; i++) {
+    updateRace(0.016);
+  }
+  const asphaltBodyTurn = absoluteAngleDelta(car.angle, Math.PI);
+  const asphaltTravelTurn = absoluteAngleDelta(
+    Math.atan2(car.vy, car.vx),
+    Math.PI,
+  );
+  const asphaltSlip = absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle);
+
+  preparePlayerMotion({ speed: 190, right: true });
+  worldObjects.push({
+    type: "oil",
+    x: car.x,
+    y: car.y,
+    rx: 140,
+    ry: 92,
+    angle: car.angle,
+    seed: 0.15,
+  });
+  assert.equal(surfaceAt(car.x, car.y), "oil");
+
+  for (let i = 0; i < 14; i++) {
+    updateRace(0.016);
+  }
+
+  const oilBodyTurn = absoluteAngleDelta(car.angle, Math.PI);
+  const oilTravelTurn = absoluteAngleDelta(Math.atan2(car.vy, car.vx), Math.PI);
+  const oilSlip = absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle);
+
+  assert.ok(oilBodyTurn > 0.08);
+  assert.ok(oilSlip > asphaltSlip + 0.14);
+  assert.ok(oilTravelTurn < asphaltTravelTurn - 0.04);
+});
+
+test("oil carry persists off the patch, decays over time, and leaves black marks", () => {
+  preparePlayerMotion({ speed: 175 });
+  worldObjects.push({
+    type: "oil",
+    x: car.x,
+    y: car.y,
+    rx: 96,
+    ry: 72,
+    angle: 0,
+    seed: -0.2,
+  });
+
+  updateRace(0.016);
+  assert.ok(physicsRuntime.oilCarry > 0.99);
+
+  worldObjects.length = 0;
+  const marksBeforeExit = skidMarks.length;
+  updateRace(0.016);
+
+  assert.ok(physicsRuntime.oilCarry < 1);
+  assert.ok(physicsRuntime.oilCarry > 0.95);
+  assert.ok(
+    skidMarks
+      .slice(marksBeforeExit)
+      .some((mark) => mark.color === "rgba(6, 6, 6, 0.92)"),
+  );
+
+  for (let i = 0; i < 190; i++) {
+    updateRace(0.016);
+  }
+
+  assert.ok(physicsRuntime.oilCarry < 0.02);
+});
+
+test("water and grass clear oily wheels immediately", () => {
+  preparePlayerMotion({ speed: 160 });
+  worldObjects.push({
+    type: "oil",
+    x: car.x,
+    y: car.y,
+    rx: 88,
+    ry: 68,
+    angle: 0,
+    seed: 0.12,
+  });
+
+  updateRace(0.016);
+  assert.ok(physicsRuntime.oilCarry > 0.99);
+
+  worldObjects.length = 0;
+  worldObjects.push({
+    type: "pond",
+    x: car.x,
+    y: car.y,
+    rx: 90,
+    ry: 70,
+    angle: 0,
+    seed: -0.1,
+  });
+  updateRace(0.016);
+  assert.equal(surfaceAt(car.x, car.y), "water");
+  assert.equal(physicsRuntime.oilCarry, 0);
+  assert.equal(physicsRuntime.oilCarryTime, 0);
+
+  worldObjects.length = 0;
+  preparePlayerMotion({ speed: 160 });
+  worldObjects.push({
+    type: "oil",
+    x: car.x,
+    y: car.y,
+    rx: 88,
+    ry: 68,
+    angle: 0,
+    seed: 0.18,
+  });
+  updateRace(0.016);
+  assert.ok(physicsRuntime.oilCarry > 0.99);
+
+  worldObjects.length = 0;
+  const frame = trackFrameAtAngle(Math.PI * 0.2);
+  const grassOffset = frame.roadWidth * 0.72;
+  car.x = frame.point.x + frame.normal.x * grassOffset;
+  car.y = frame.point.y + frame.normal.y * grassOffset;
+  updateRace(0.016);
+  assert.equal(surfaceAt(car.x, car.y), "grass");
+  assert.equal(physicsRuntime.oilCarry, 0);
+  assert.equal(physicsRuntime.oilCarryTime, 0);
 });
 
 test("ai does not reverse-recover just for touching shortcut grass near its planned path", () => {

@@ -83,6 +83,9 @@ const POND_RENDER_SCALE = 2;
 const POND_RENDER_PADDING = 10;
 const POND_FILL_COLOR = "#7aa1c2";
 const POND_BORDER_COLOR = "#8de2ff";
+const OIL_BORDER_WIDTH = 3;
+const OIL_FILL_COLOR = "#121212";
+const OIL_BORDER_COLOR = "#49422a";
 
 function aiOpponentsEnabled() {
   return physicsConfig.flags.AI_OPPONENTS_ENABLED !== false;
@@ -120,6 +123,7 @@ let pixelNoiseOverlay = null;
 let cachedTrackBoundaries = null;
 let cachedTrackSignature = null;
 const mergedPondRenderCache = new WeakMap();
+const mergedOilRenderCache = new WeakMap();
 const previewTrackDataCache = new Map();
 const centerlineLengthCache = new WeakMap();
 
@@ -156,33 +160,33 @@ function tracePath(context, points) {
   context.closePath();
 }
 
-function getPondPathPoints(pond) {
-  const angle = pond.angle || 0;
+function getBlobPathPoints(blob) {
+  const angle = blob.angle || 0;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return sampleClosedPath((a) => {
-    const radius = blobRadius(pond.rx, pond.ry, a, pond.seed || 0);
+    const radius = blobRadius(blob.rx, blob.ry, a, blob.seed || 0);
     const localX = Math.cos(a) * radius;
     const localY = Math.sin(a) * radius;
     return {
-      x: pond.x + localX * cos - localY * sin,
-      y: pond.y + localX * sin + localY * cos,
+      x: blob.x + localX * cos - localY * sin,
+      y: blob.y + localX * sin + localY * cos,
     };
   }, POND_PATH_SEGMENTS);
 }
 
-function getPondRenderSignature(ponds) {
-  if (!ponds.length) return "";
-  return ponds
-    .map((pond) =>
-      [pond.x, pond.y, pond.rx, pond.ry, pond.seed || 0, pond.angle || 0]
+function getBlobRenderSignature(blobs) {
+  if (!blobs.length) return "";
+  return blobs
+    .map((blob) =>
+      [blob.x, blob.y, blob.rx, blob.ry, blob.seed || 0, blob.angle || 0]
         .map((value) => Number(value).toFixed(3))
         .join(":"),
     )
     .join("|");
 }
 
-function getPondOutlineOffsets(radiusPx) {
+function getBlobOutlineOffsets(radiusPx) {
   const offsets = [];
   const limit = Math.max(1, Math.round(radiusPx));
   for (let y = -limit; y <= limit; y++) {
@@ -194,23 +198,26 @@ function getPondOutlineOffsets(radiusPx) {
   return offsets;
 }
 
-function buildMergedPondRender(objects) {
+function buildMergedBlobRender(
+  objects,
+  { type, fillColor, borderColor, borderWidth, cache },
+) {
   if (!Array.isArray(objects)) return null;
-  const ponds = objects
+  const blobs = objects
     .map(normalizeWorldObject)
-    .filter((obj) => obj?.type === "pond");
-  if (!ponds.length) return null;
+    .filter((obj) => obj?.type === type);
+  if (!blobs.length) return null;
 
-  const signature = getPondRenderSignature(ponds);
-  const cached = mergedPondRenderCache.get(objects);
+  const signature = getBlobRenderSignature(blobs);
+  const cached = cache.get(objects);
   if (cached?.signature === signature) return cached.render;
 
-  const pondPaths = ponds.map(getPondPathPoints);
+  const blobPaths = blobs.map(getBlobPathPoints);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const path of pondPaths) {
+  for (const path of blobPaths) {
     for (const point of path) {
       if (point.x < minX) minX = point.x;
       if (point.y < minY) minY = point.y;
@@ -241,7 +248,7 @@ function buildMergedPondRender(objects) {
     context.save();
     context.scale(POND_RENDER_SCALE, POND_RENDER_SCALE);
     context.translate(-minX, -minY);
-    for (const path of pondPaths) {
+    for (const path of blobPaths) {
       context.beginPath();
       tracePath(context, path);
       context.fill();
@@ -250,17 +257,15 @@ function buildMergedPondRender(objects) {
   };
 
   maskCtx.clearRect(0, 0, pixelWidth, pixelHeight);
-  maskCtx.fillStyle = POND_BORDER_COLOR;
+  maskCtx.fillStyle = borderColor;
   drawMergedPaths(maskCtx);
 
   fillCtx.clearRect(0, 0, pixelWidth, pixelHeight);
-  fillCtx.fillStyle = POND_FILL_COLOR;
+  fillCtx.fillStyle = fillColor;
   drawMergedPaths(fillCtx);
 
   resultCtx.clearRect(0, 0, pixelWidth, pixelHeight);
-  const outlineOffsets = getPondOutlineOffsets(
-    POND_BORDER_WIDTH * POND_RENDER_SCALE,
-  );
+  const outlineOffsets = getBlobOutlineOffsets(borderWidth * POND_RENDER_SCALE);
   for (const offset of outlineOffsets) {
     resultCtx.drawImage(maskCanvas, offset.x, offset.y);
   }
@@ -270,12 +275,37 @@ function buildMergedPondRender(objects) {
   resultCtx.drawImage(fillCanvas, 0, 0);
 
   const render = { canvas: resultCanvas, minX, minY, width, height };
-  mergedPondRenderCache.set(objects, { signature, render });
+  cache.set(objects, { signature, render });
   return render;
 }
 
 function drawMergedPonds(objects) {
-  const render = buildMergedPondRender(objects);
+  const render = buildMergedBlobRender(objects, {
+    type: "pond",
+    fillColor: POND_FILL_COLOR,
+    borderColor: POND_BORDER_COLOR,
+    borderWidth: POND_BORDER_WIDTH,
+    cache: mergedPondRenderCache,
+  });
+  if (!render) return false;
+  ctx.drawImage(
+    render.canvas,
+    render.minX,
+    render.minY,
+    render.width,
+    render.height,
+  );
+  return true;
+}
+
+function drawMergedOilPatches(objects) {
+  const render = buildMergedBlobRender(objects, {
+    type: "oil",
+    fillColor: OIL_FILL_COLOR,
+    borderColor: OIL_BORDER_COLOR,
+    borderWidth: OIL_BORDER_WIDTH,
+    cache: mergedOilRenderCache,
+  });
   if (!render) return false;
   ctx.drawImage(
     render.canvas,
@@ -439,7 +469,7 @@ function getPreviewBounds(preset, boundaries, curbs) {
       expandBounds(bounds, center.x + halfLength, center.y + halfWidth);
       continue;
     }
-    if (obj.type === "pond") {
+    if (obj.type === "pond" || obj.type === "oil") {
       const radius =
         Math.max(Number(obj.rx) || 0, Number(obj.ry) || 0) * worldScale;
       const center = transformPointByWorldScale(obj, trackDef);
@@ -476,6 +506,7 @@ function drawDecor(objects = worldObjects) {
       ? state.editor.latestEditTarget.objectIndex
       : -1;
   drawMergedPonds(objects);
+  drawMergedOilPatches(objects);
   for (const [index, obj] of objects.entries()) {
     const normalized = normalizeWorldObject(obj);
     if (!normalized) continue;
@@ -545,9 +576,21 @@ function drawDecor(objects = worldObjects) {
       if (shouldFlash) {
         ctx.strokeStyle = "#ffe167";
         ctx.lineWidth = 4;
-        const waterPath = getPondPathPoints(normalized);
+        const waterPath = getBlobPathPoints(normalized);
         ctx.beginPath();
         tracePath(ctx, waterPath);
+        ctx.stroke();
+      }
+      continue;
+    }
+
+    if (normalized.type === "oil") {
+      if (shouldFlash) {
+        ctx.strokeStyle = "#ffe167";
+        ctx.lineWidth = 4;
+        const oilPath = getBlobPathPoints(normalized);
+        ctx.beginPath();
+        tracePath(ctx, oilPath);
         ctx.stroke();
       }
       continue;
@@ -1888,7 +1931,7 @@ function selectedObjectValueLabel(preset) {
   if (target.kind === "object") {
     const object = preset.worldObjects?.[target.objectIndex];
     if (!object) return "--";
-    if (object.type === "pond")
+    if (object.type === "pond" || object.type === "oil")
       return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
     if (object.type === "wall")
       return `${Math.round(object.length)}x${Math.round(object.width)}`;
@@ -1903,15 +1946,17 @@ function selectedObjectLabel(preset) {
   const iconForType = (type) =>
     type === "pond"
       ? "≈"
-      : type === "barrel"
-        ? "◉"
-        : type === "tree"
-          ? "♣"
-          : type === "spring"
-            ? "✹"
-            : type === "wall"
-              ? "▭"
-              : "•";
+      : type === "oil"
+        ? "●"
+        : type === "barrel"
+          ? "◉"
+          : type === "tree"
+            ? "♣"
+            : type === "spring"
+              ? "✹"
+              : type === "wall"
+                ? "▭"
+                : "•";
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "object" || !objects[target.objectIndex]) {
     const last = objects[objects.length - 1];
@@ -1988,7 +2033,9 @@ function drawEditorToolbar() {
         : "ROAD"
       : state.editor.activeTool === "pond"
         ? "WATER"
-        : state.editor.activeTool.toUpperCase();
+        : state.editor.activeTool === "oil"
+          ? "OIL"
+          : state.editor.activeTool.toUpperCase();
   const toolbarHeaderLabel = state.editor.toolbar.hoverLabel || activeToolLabel;
 
   ctx.save();
@@ -2048,6 +2095,7 @@ function drawEditorToolbar() {
   for (const row of layout.objectToolButtons) {
     const active =
       (row.id === "water" && state.editor.activeTool === "pond") ||
+      (row.id === "oil" && state.editor.activeTool === "oil") ||
       (row.id === "barrel" && state.editor.activeTool === "barrel") ||
       (row.id === "tree" && state.editor.activeTool === "tree") ||
       (row.id === "spring" && state.editor.activeTool === "spring") ||
