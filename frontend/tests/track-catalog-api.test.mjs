@@ -71,6 +71,8 @@ test("track selector render model windows large catalogs and exposes admin actio
       isPublished: i !== 2,
       canDelete: false,
       fromDb: true,
+      bestLapMs: i === 4 ? 40_000 : null,
+      bestLapDisplayName: i === 4 ? "LUNA" : null,
       track: makeTrackData(),
       checkpoints: [],
       worldObjects: [],
@@ -93,6 +95,7 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.totalCount, trackOptions.length);
   assert.equal(model.selectedTrackCanPublish, true);
   assert.equal(model.selectedTrackCanRename, true);
+  assert.equal(model.selectedTrackCanClearRecords, true);
   assert.equal(model.selectedTrackCanDelete, false);
 
   const selector2Index = trackOptions.findIndex(

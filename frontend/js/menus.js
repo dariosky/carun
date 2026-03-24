@@ -320,8 +320,21 @@ export function getEditorTopBarLayout() {
   return { save, curbs, back, race, build };
 }
 
-async function clearEditorTrackRecords() {
-  const preset = getTrackPreset(state.editor.trackIndex);
+function trackHasRecords(preset) {
+  return (
+    Number.isFinite(preset?.bestLapMs) || Number.isFinite(preset?.bestRaceMs)
+  );
+}
+
+function canClearTrackRecordsPreset(preset) {
+  if (!preset || !trackHasRecords(preset)) return false;
+  if (!preset.fromDb) return true;
+  if (state.auth.isAdmin) return true;
+  return Boolean(state.auth.userId && preset.ownerUserId === state.auth.userId);
+}
+
+async function clearTrackRecordsAtIndex(trackIndex) {
+  const preset = getTrackPreset(trackIndex);
   if (!preset) return null;
   const metadata = preset.fromDb
     ? await clearTrackRecords(preset.id)
@@ -355,7 +368,7 @@ async function clearEditorTrackRecords() {
     },
   );
   if (!updatedPreset) return null;
-  saveTrackPreset(state.editor.trackIndex);
+  saveTrackPreset(trackIndex);
   return updatedPreset;
 }
 
@@ -930,6 +943,10 @@ function selectedTrackCanRename() {
   return Boolean(state.auth.userId && preset.ownerUserId === state.auth.userId);
 }
 
+function selectedTrackCanClearRecords() {
+  return canClearTrackRecordsPreset(selectedTrackPreset());
+}
+
 export function getTrackSelectRenderModel() {
   const totalCount = trackOptions.length;
   const rows = TRACK_GRID_ROWS;
@@ -972,6 +989,7 @@ export function getTrackSelectRenderModel() {
     selectedTrackCanDelete: selectedTrackCanDelete(),
     selectedTrackCanPublish: selectedTrackCanPublish(),
     selectedTrackCanRename: selectedTrackCanRename(),
+    selectedTrackCanClearRecords: selectedTrackCanClearRecords(),
     selectedTrackIsPublished: Boolean(selectedTrack?.isPublished),
     isTournament: state.gameMode === "tournament",
     tournamentSelected: state.tournament.selectedTrackIndices,
@@ -1859,13 +1877,18 @@ function promptSaveEditorTrack() {
   });
 }
 
-export function promptClearEditorTrackRecords() {
-  const preset = getTrackPreset(state.editor.trackIndex);
+export function promptClearTrackRecords(trackIndex) {
+  const preset = getTrackPreset(trackIndex);
   if (!preset) return false;
-  const hasRecords =
-    Number.isFinite(preset.bestLapMs) || Number.isFinite(preset.bestRaceMs);
-  if (!hasRecords) {
+  if (!trackHasRecords(preset)) {
     showSnackbar("No records to clear", { seconds: 1.6, kind: "error" });
+    return false;
+  }
+  if (!canClearTrackRecordsPreset(preset)) {
+    showSnackbar("Only the track owner or an admin can clear records", {
+      seconds: 2,
+      kind: "error",
+    });
     return false;
   }
   openConfirmModal({
@@ -1877,7 +1900,7 @@ export function promptClearEditorTrackRecords() {
     onConfirm: async () => {
       let updatedPreset = null;
       try {
-        updatedPreset = await clearEditorTrackRecords();
+        updatedPreset = await clearTrackRecordsAtIndex(trackIndex);
       } catch (error) {
         showSnackbar(
           error instanceof Error ? error.message : "Could not clear records",
@@ -1896,6 +1919,14 @@ export function promptClearEditorTrackRecords() {
     },
   });
   return true;
+}
+
+export function promptClearEditorTrackRecords() {
+  return promptClearTrackRecords(state.editor.trackIndex);
+}
+
+export function promptClearSelectedTrackRecords() {
+  return promptClearTrackRecords(state.trackSelectIndex);
 }
 
 function toggleDebugMode() {
@@ -2730,6 +2761,17 @@ function onKeyDown(e) {
   }
 
   if (
+    key === "x" &&
+    state.mode === "trackSelect" &&
+    state.trackSelectIndex >= 0 &&
+    state.trackSelectIndex < trackOptions.length
+  ) {
+    if (e.repeat) return;
+    promptClearSelectedTrackRecords();
+    return;
+  }
+
+  if (
     key === "e" &&
     state.mode === "trackSelect" &&
     state.trackSelectIndex >= 0 &&
@@ -2838,11 +2880,6 @@ function onKeyDown(e) {
     if (key === "l") {
       if (e.repeat) return;
       toggleEditorTool("wall");
-      return;
-    }
-    if (key === "x") {
-      if (e.repeat) return;
-      promptClearEditorTrackRecords();
       return;
     }
     if (key === "h") {

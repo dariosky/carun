@@ -3186,6 +3186,7 @@ function drawTrackSelection() {
       );
     }
     if (physicsConfig.flags.DEBUG_MODE) helpLines.push("E Edit");
+    if (model.selectedTrackCanClearRecords) helpLines.push("X Clear Records");
     if (model.selectedTrackCanRename) helpLines.push("R Rename");
     if (helpLines.length > 0) {
       sy += 8;

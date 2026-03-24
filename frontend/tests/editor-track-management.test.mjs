@@ -17,8 +17,12 @@ const {
   trackOptions,
 } = await import("../js/parameters.js");
 const { getTrackWorldScale } = await import("../js/track.js");
-const { enterEditor, getEditorToolbarLayout, promptClearEditorTrackRecords } =
-  await import("../js/menus.js");
+const {
+  enterEditor,
+  getEditorToolbarLayout,
+  promptClearEditorTrackRecords,
+  promptClearSelectedTrackRecords,
+} = await import("../js/menus.js");
 
 test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke order", () => {
   const imported = importTrackPresetData({
@@ -203,6 +207,65 @@ test("editor clear-records command calls API for DB-backed tracks", async () => 
     globalThis.fetch = originalFetch;
     state.auth.userId = null;
     state.auth.isAdmin = false;
+  }
+});
+
+test("track selector clear-records command opens confirmation and clears stored best times", async () => {
+  const writes = [];
+  const originalSetItem = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = (key, value) => {
+    writes.push({ key, value });
+  };
+
+  try {
+    const imported = importTrackPresetData({
+      id: "clear-records-track-select",
+      name: "TRACK SELECT CLEAR",
+      source: "user",
+      ownerUserId: "user-1",
+      isPublished: false,
+      canDelete: false,
+      fromDb: false,
+      bestLapMs: 39_500,
+      bestLapDisplayName: "LUNA",
+      bestRaceMs: 128_900,
+      bestRaceDisplayName: "MARIO",
+      track: makeTrackData(),
+      checkpoints: [],
+      worldObjects: [],
+      centerlineStrokes: [],
+      editStack: [],
+    });
+    assert.ok(imported);
+
+    const trackIndex = trackOptions.findIndex(
+      (track) => track.id === imported.id,
+    );
+    assert.ok(trackIndex >= 0);
+
+    state.mode = "trackSelect";
+    state.trackSelectIndex = trackIndex;
+
+    assert.equal(promptClearSelectedTrackRecords(), true);
+    assert.equal(state.modal.open, true);
+    assert.equal(state.modal.title, "Clear Records");
+    assert.equal(state.modal.confirmLabel, "Clear");
+    assert.equal(typeof state.modal.onConfirm, "function");
+
+    await state.modal.onConfirm();
+
+    const updated = getTrackPreset(trackIndex);
+    assert.equal(updated.bestLapMs, null);
+    assert.equal(updated.bestLapDisplayName, null);
+    assert.equal(updated.bestRaceMs, null);
+    assert.equal(updated.bestRaceDisplayName, null);
+    assert.ok(writes.length > 0);
+    assert.match(writes[writes.length - 1].value, /"bestLapMs":null/);
+    assert.match(writes[writes.length - 1].value, /"bestRaceMs":null/);
+
+    removeTrackPresetById(imported.id, { removePersisted: false });
+  } finally {
+    globalThis.localStorage.setItem = originalSetItem;
   }
 });
 
