@@ -110,14 +110,7 @@ export function emitFinishConfetti({ bestLap = false, bestRace = false } = {}) {
 const screenParticles = [];
 
 export function emitScreenConfetti({ x, y } = {}) {
-  const palette = [
-    "#ffe066",
-    "#ffb703",
-    "#ff5d8f",
-    "#57ccff",
-    "#ffffff",
-    "#6af0a8",
-  ];
+  const palette = ["#ffe066", "#ffb703", "#ff5d8f", "#57ccff", "#ffffff", "#6af0a8"];
   for (let i = 0; i < 3; i++) {
     const burstX = x + (i - 1) * 120;
     for (let j = 0; j < 32; j++) {
@@ -173,12 +166,7 @@ export function drawScreenParticles(ctx) {
     ctx.rotate(p.rotation);
     ctx.fillStyle = p.color;
     if (p.kind === "confetti") {
-      ctx.fillRect(
-        -p.size * 0.5,
-        -p.size * p.aspect * 0.5,
-        p.size,
-        p.size * p.aspect,
-      );
+      ctx.fillRect(-p.size * 0.5, -p.size * p.aspect * 0.5, p.size, p.size * p.aspect);
     } else {
       ctx.beginPath();
       ctx.arc(0, 0, p.size * 0.5, 0, Math.PI * 2);
@@ -203,11 +191,7 @@ export function emitHandbrakeSmoke({ x, y, angle = 0, strength = 1 } = {}) {
     lifeMax: 0.62,
     sizeMin: 6,
     sizeMax: 14,
-    colors: [
-      "rgba(236, 241, 247, 0.72)",
-      "rgba(208, 217, 228, 0.62)",
-      "rgba(176, 188, 202, 0.48)",
-    ],
+    colors: ["rgba(236, 241, 247, 0.72)", "rgba(208, 217, 228, 0.62)", "rgba(176, 188, 202, 0.48)"],
     drag: 2.6,
     gravity: -10,
     spread: Math.PI * 0.9,
@@ -234,11 +218,7 @@ export function emitWaterSpray({
     lifeMax: 0.48,
     sizeMin: 3,
     sizeMax: 8,
-    colors: [
-      "rgba(245, 251, 255, 0.92)",
-      "rgba(184, 224, 248, 0.78)",
-      "rgba(130, 189, 230, 0.68)",
-    ],
+    colors: ["rgba(245, 251, 255, 0.92)", "rgba(184, 224, 248, 0.78)", "rgba(130, 189, 230, 0.68)"],
     drag: 3.1,
     gravity: 42,
     inheritVx,
@@ -268,11 +248,7 @@ export function emitGrassDust({
     lifeMax: 0.72,
     sizeMin: 8,
     sizeMax: 18,
-    colors: [
-      "rgba(142, 102, 62, 0.52)",
-      "rgba(126, 87, 52, 0.46)",
-      "rgba(171, 130, 82, 0.40)",
-    ],
+    colors: ["rgba(142, 102, 62, 0.52)", "rgba(126, 87, 52, 0.46)", "rgba(171, 130, 82, 0.40)"],
     drag: 2.1,
     gravity: -4,
     inheritVx,
@@ -296,12 +272,7 @@ export function drawParticles(ctx, { layer = null } = {}) {
     ctx.rotate(p.rotation);
     ctx.fillStyle = p.color;
     if (p.kind === "confetti") {
-      ctx.fillRect(
-        -p.size * 0.5,
-        -p.size * p.aspect * 0.5,
-        p.size,
-        p.size * p.aspect,
-      );
+      ctx.fillRect(-p.size * 0.5, -p.size * p.aspect * 0.5, p.size, p.size * p.aspect);
     } else if (p.kind === "smoke") {
       ctx.beginPath();
       ctx.arc(0, 0, p.size * 0.5, 0, Math.PI * 2);

@@ -49,11 +49,7 @@ import {
   getTrackSelectRenderModel,
   getTournamentStandingsData,
 } from "./menus.js";
-import {
-  getFinishCelebrationStandings,
-  getRacePosition,
-  getRaceStandings,
-} from "./physics.js";
+import { getFinishCelebrationStandings, getRacePosition, getRaceStandings } from "./physics.js";
 import { tournamentRoomActive } from "./tournament-room.js";
 import { formatTime } from "./utils.js";
 import {
@@ -128,8 +124,7 @@ const previewTrackDataCache = new Map();
 const centerlineLengthCache = new WeakMap();
 
 function createTextureCanvas(width, height) {
-  if (typeof OffscreenCanvas !== "undefined")
-    return new OffscreenCanvas(width, height);
+  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
   const canvasEl = document.createElement("canvas");
   canvasEl.width = width;
   canvasEl.height = height;
@@ -198,14 +193,9 @@ function getBlobOutlineOffsets(radiusPx) {
   return offsets;
 }
 
-function buildMergedBlobRender(
-  objects,
-  { type, fillColor, borderColor, borderWidth, cache },
-) {
+function buildMergedBlobRender(objects, { type, fillColor, borderColor, borderWidth, cache }) {
   if (!Array.isArray(objects)) return null;
-  const blobs = objects
-    .map(normalizeWorldObject)
-    .filter((obj) => obj?.type === type);
+  const blobs = objects.map(normalizeWorldObject).filter((obj) => obj?.type === type);
   if (!blobs.length) return null;
 
   const signature = getBlobRenderSignature(blobs);
@@ -288,13 +278,7 @@ function drawMergedPonds(objects) {
     cache: mergedPondRenderCache,
   });
   if (!render) return false;
-  ctx.drawImage(
-    render.canvas,
-    render.minX,
-    render.minY,
-    render.width,
-    render.height,
-  );
+  ctx.drawImage(render.canvas, render.minX, render.minY, render.width, render.height);
   return true;
 }
 
@@ -307,13 +291,7 @@ function drawMergedOilPatches(objects) {
     cache: mergedOilRenderCache,
   });
   if (!render) return false;
-  ctx.drawImage(
-    render.canvas,
-    render.minX,
-    render.minY,
-    render.width,
-    render.height,
-  );
+  ctx.drawImage(render.canvas, render.minX, render.minY, render.width, render.height);
   return true;
 }
 
@@ -339,9 +317,7 @@ function trackSignature(trackDef, segments) {
       ? trackDef.centerlineWidthProfile.length
       : 0,
     centerlineLoopRef: trackDef.centerlineLoop,
-    centerlineLoopLength: trackDef.centerlineLoop
-      ? trackDef.centerlineLoop.length
-      : 0,
+    centerlineLoopLength: trackDef.centerlineLoop ? trackDef.centerlineLoop.length : 0,
   };
 }
 
@@ -373,8 +349,7 @@ function getTrackBoundariesCached(trackDef, segments) {
 function getPreviewTrackData(preset) {
   const cached = previewTrackDataCache.get(preset.id);
   const signature = trackSignature(preset.track, TRACK_SEGMENTS);
-  if (cached && sameTrackSignature(cached.signature, signature))
-    return cached.data;
+  if (cached && sameTrackSignature(cached.signature, signature)) return cached.data;
 
   const data = {
     boundaries: trackBoundaryPaths(preset.track, TRACK_SEGMENTS),
@@ -470,8 +445,7 @@ function getPreviewBounds(preset, boundaries, curbs) {
       continue;
     }
     if (obj.type === "pond" || obj.type === "oil") {
-      const radius =
-        Math.max(Number(obj.rx) || 0, Number(obj.ry) || 0) * worldScale;
+      const radius = Math.max(Number(obj.rx) || 0, Number(obj.ry) || 0) * worldScale;
       const center = transformPointByWorldScale(obj, trackDef);
       expandBounds(bounds, center.x - radius, center.y - radius);
       expandBounds(bounds, center.x + radius, center.y + radius);
@@ -551,9 +525,7 @@ function drawDecor(objects = worldObjects) {
       ctx.fillStyle = "#3dcf60";
       const highlight = sampleClosedPath((a) => {
         const radius =
-          normalized.r *
-          0.4 *
-          (1 + 0.12 * Math.sin(a * 4 + normalized.x * 0.08 + angle));
+          normalized.r * 0.4 * (1 + 0.12 * Math.sin(a * 4 + normalized.x * 0.08 + angle));
         return {
           x: -8 + Math.cos(a) * radius,
           y: -6 + Math.sin(a) * radius - lift,
@@ -662,13 +634,7 @@ function drawDecor(objects = worldObjects) {
       ctx.stroke();
       ctx.fillStyle = "#ff6d3d";
       ctx.beginPath();
-      ctx.roundRect(
-        -normalized.r * 0.9,
-        normalized.r * 0.38,
-        normalized.r * 1.8,
-        8,
-        4,
-      );
+      ctx.roundRect(-normalized.r * 0.9, normalized.r * 0.38, normalized.r * 1.8, 8, 4);
       ctx.fill();
       if (shouldFlash) {
         ctx.strokeStyle = "#ffe167";
@@ -703,12 +669,7 @@ function drawDecor(objects = worldObjects) {
       ctx.translate(normalized.x, normalized.y + 8);
       ctx.rotate(normalized.angle);
       ctx.fillStyle = "rgba(18, 20, 24, 0.2)";
-      ctx.fillRect(
-        -halfLength,
-        -halfWidth,
-        normalized.length,
-        normalized.width,
-      );
+      ctx.fillRect(-halfLength, -halfWidth, normalized.length, normalized.width);
       ctx.restore();
       ctx.save();
       ctx.translate(normalized.x, normalized.y);
@@ -769,11 +730,7 @@ function drawSkidMarks() {
   ctx.restore();
 }
 
-function drawVertexAsterisks(
-  points,
-  size = 3.2,
-  color = "rgba(255, 245, 120, 0.95)",
-) {
+function drawVertexAsterisks(points, size = 3.2, color = "rgba(255, 245, 120, 0.95)") {
   if (!Array.isArray(points) || !points.length) return;
   const d = size * 0.72;
   ctx.save();
@@ -873,12 +830,7 @@ function drawStartLine(trackDef = track) {
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
       ctx.fillStyle = (c + r) % 2 ? "#ffffff" : "#111111";
-      ctx.fillRect(
-        -span * 0.5 + c * cellW,
-        -thickness * 0.5 + r * cellH,
-        cellW,
-        cellH,
-      );
+      ctx.fillRect(-span * 0.5 + c * cellW, -thickness * 0.5 + r * cellH, cellW, cellH);
     }
   }
 
@@ -888,29 +840,19 @@ function drawStartLine(trackDef = track) {
   ctx.restore();
 }
 
-function drawTrackSurface(
-  trackDef,
-  boundaries,
-  segments,
-  showCurbs,
-  objects = worldObjects,
-) {
+function drawTrackSurface(trackDef, boundaries, segments, showCurbs, objects = worldObjects) {
   const outerPath = boundaries.outer;
   const innerPath = boundaries.inner;
   if (!outerPath.length || !innerPath.length) return;
   const worldScale = Math.max(getTrackWorldScale(trackDef), 0.01);
-  const asphaltPadding = Math.ceil(
-    Math.max(WIDTH, HEIGHT) / worldScale + CURB_MAX_WIDTH * 2,
-  );
+  const asphaltPadding = Math.ceil(Math.max(WIDTH, HEIGHT) / worldScale + CURB_MAX_WIDTH * 2);
   const asphaltBounds = getPathBounds(outerPath, asphaltPadding);
 
   ctx.save();
   ctx.beginPath();
   const centerCount = boundaries.center?.length || 0;
   const alignedCounts =
-    centerCount > 0 &&
-    centerCount === outerPath.length &&
-    centerCount === innerPath.length;
+    centerCount > 0 && centerCount === outerPath.length && centerCount === innerPath.length;
   if (alignedCounts) {
     for (let i = 0; i < centerCount; i++) {
       const next = (i + 1) % centerCount;
@@ -933,28 +875,12 @@ function drawTrackSurface(
     const drawCurbSegment = (segment, defaultSign) => {
       const pts = segment.points || segment;
       const sign = segment.outwardSign ?? defaultSign;
-      const stripeScale = Number.isFinite(segment.stripeScale)
-        ? segment.stripeScale
-        : 1;
-      const scaledMinWidth = Math.max(
-        CURB_MIN_WIDTH,
-        CURB_MIN_WIDTH * stripeScale,
-      );
-      const scaledMaxWidth = Math.max(
-        scaledMinWidth + 1,
-        CURB_MAX_WIDTH * stripeScale,
-      );
+      const stripeScale = Number.isFinite(segment.stripeScale) ? segment.stripeScale : 1;
+      const scaledMinWidth = Math.max(CURB_MIN_WIDTH, CURB_MIN_WIDTH * stripeScale);
+      const scaledMaxWidth = Math.max(scaledMinWidth + 1, CURB_MAX_WIDTH * stripeScale);
       if (segment.renderStyle === "dotted") {
         const widthCaps = buildCurbWidthCaps(pts, sign, trackDef, objects);
-        if (
-          shouldRenderExplicitGuideSegment(
-            pts,
-            sign,
-            trackDef,
-            objects,
-            widthCaps,
-          )
-        ) {
+        if (shouldRenderExplicitGuideSegment(pts, sign, trackDef, objects, widthCaps)) {
           drawDottedCurbGuide(pts);
         }
         return;
@@ -982,13 +908,7 @@ function drawTrackSurface(
         }
         return;
       }
-      drawStripedCurb(
-        pts,
-        sign,
-        scaledMinWidth,
-        scaledMaxWidth,
-        CURB_STRIPE_LENGTH,
-      );
+      drawStripedCurb(pts, sign, scaledMinWidth, scaledMaxWidth, CURB_STRIPE_LENGTH);
     };
     segments.outer.forEach((segment) => drawCurbSegment(segment, -1));
     segments.inner.forEach((segment) => drawCurbSegment(segment, 1));
@@ -1006,9 +926,7 @@ function splitCurbRenderRuns(
   const minCurbRunArcLength = CURB_STRIPE_LENGTH * 1.5;
   const minGuideRunArcLength = CURB_STRIPE_LENGTH * 2;
   const classes = points.map((_, index) => {
-    const cap = Array.isArray(widthCaps)
-      ? (widthCaps[index] ?? CURB_MAX_WIDTH)
-      : CURB_MAX_WIDTH;
+    const cap = Array.isArray(widthCaps) ? (widthCaps[index] ?? CURB_MAX_WIDTH) : CURB_MAX_WIDTH;
     if (cap > CURB_MIN_WIDTH * 0.25) return "curb";
     const probe = curbOuterProbePoint(points, index, sideSign, CURB_MAX_WIDTH);
     const surface = surfaceAtForTrack(probe.x, probe.y, trackDef, objects);
@@ -1019,18 +937,12 @@ function splitCurbRenderRuns(
   const runs = [];
   let currentKind = classes[0];
   let currentPoints = [points[0]];
-  let currentCaps = [
-    Array.isArray(widthCaps)
-      ? (widthCaps[0] ?? CURB_MAX_WIDTH)
-      : CURB_MAX_WIDTH,
-  ];
+  let currentCaps = [Array.isArray(widthCaps) ? (widthCaps[0] ?? CURB_MAX_WIDTH) : CURB_MAX_WIDTH];
 
   for (let i = 1; i < points.length; i++) {
     const point = points[i];
     const nextKind = classes[i];
-    const nextCap = Array.isArray(widthCaps)
-      ? (widthCaps[i] ?? CURB_MAX_WIDTH)
-      : CURB_MAX_WIDTH;
+    const nextCap = Array.isArray(widthCaps) ? (widthCaps[i] ?? CURB_MAX_WIDTH) : CURB_MAX_WIDTH;
     if (nextKind === currentKind) {
       currentPoints.push(point);
       currentCaps.push(nextCap);
@@ -1048,9 +960,7 @@ function splitCurbRenderRuns(
     currentKind = nextKind;
     currentPoints = [points[i - 1], point];
     currentCaps = [
-      Array.isArray(widthCaps)
-        ? (widthCaps[i - 1] ?? CURB_MAX_WIDTH)
-        : CURB_MAX_WIDTH,
+      Array.isArray(widthCaps) ? (widthCaps[i - 1] ?? CURB_MAX_WIDTH) : CURB_MAX_WIDTH,
       nextCap,
     ];
   }
@@ -1065,12 +975,7 @@ function splitCurbRenderRuns(
   return runs;
 }
 
-function shouldRenderCurbSubsection(
-  run,
-  sideSign,
-  trackDef = track,
-  objects = worldObjects,
-) {
+function shouldRenderCurbSubsection(run, sideSign, trackDef = track, objects = worldObjects) {
   const points = run?.points;
   if (!Array.isArray(points) || points.length < 2) return false;
   let curbHits = 0;
@@ -1153,12 +1058,7 @@ export function measureCurbSupportWidth(
       for (let refine = 0; refine < 8; refine++) {
         const mid = (lo + hi) * 0.5;
         const midProbe = curbOuterProbePoint(points, index, sideSign, mid);
-        const midSurface = surfaceAtForTrack(
-          midProbe.x,
-          midProbe.y,
-          trackDef,
-          objects,
-        );
+        const midSurface = surfaceAtForTrack(midProbe.x, midProbe.y, trackDef, objects);
         if (midSurface === "grass") lo = mid;
         else hi = mid;
       }
@@ -1171,12 +1071,7 @@ export function measureCurbSupportWidth(
   return sawGrassGap ? CURB_MAX_WIDTH : 0;
 }
 
-function buildCurbWidthCaps(
-  points,
-  sideSign,
-  trackDef = track,
-  objects = worldObjects,
-) {
+function buildCurbWidthCaps(points, sideSign, trackDef = track, objects = worldObjects) {
   if (!Array.isArray(points) || !points.length) return null;
   const caps = points.map((_, index) =>
     measureCurbSupportWidth(points, index, sideSign, trackDef, objects),
@@ -1192,8 +1087,7 @@ function buildCurbWidthCaps(
 }
 
 function smoothCurbRunClasses(points, classes, minArcLength) {
-  if (!Array.isArray(points) || points.length < 2 || !Array.isArray(classes))
-    return;
+  if (!Array.isArray(points) || points.length < 2 || !Array.isArray(classes)) return;
   let start = 0;
   while (start < classes.length) {
     let end = start + 1;
@@ -1204,10 +1098,7 @@ function smoothCurbRunClasses(points, classes, minArcLength) {
       let arcLen = 0;
       for (let i = start; i < end; i++) {
         const prevIndex = Math.max(0, i - 1);
-        arcLen += Math.hypot(
-          points[i].x - points[prevIndex].x,
-          points[i].y - points[prevIndex].y,
-        );
+        arcLen += Math.hypot(points[i].x - points[prevIndex].x, points[i].y - points[prevIndex].y);
       }
       if (arcLen < minArcLength) {
         for (let i = start; i < end; i++) classes[i] = previousKind;
@@ -1248,10 +1139,7 @@ function finalizeCurbRenderRun(points, widthCaps, kind, minRunArcLength) {
   if (!Array.isArray(points) || points.length < 2) return null;
   let arcLen = 0;
   for (let i = 1; i < points.length; i++) {
-    arcLen += Math.hypot(
-      points[i].x - points[i - 1].x,
-      points[i].y - points[i - 1].y,
-    );
+    arcLen += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
   if (arcLen < minRunArcLength) return null;
   return { kind, points, widthCaps };
@@ -1295,14 +1183,8 @@ function drawEditorHiddenCurbOverlay(segments) {
     });
   };
 
-  drawRuns(segments.outer || [], [
-    "rgba(160, 92, 255, 0.95)",
-    "rgba(72, 120, 255, 0.95)",
-  ]);
-  drawRuns(segments.inner || [], [
-    "rgba(208, 92, 255, 0.95)",
-    "rgba(66, 188, 255, 0.95)",
-  ]);
+  drawRuns(segments.outer || [], ["rgba(160, 92, 255, 0.95)", "rgba(72, 120, 255, 0.95)"]);
+  drawRuns(segments.inner || [], ["rgba(208, 92, 255, 0.95)", "rgba(66, 188, 255, 0.95)"]);
 }
 
 function drawTrack() {
@@ -1335,10 +1217,7 @@ function getRaceOrder() {
 
 function getBestLapTime(lapTimes) {
   if (!Array.isArray(lapTimes) || !lapTimes.length) return null;
-  return lapTimes.reduce(
-    (best, value) => (value < best ? value : best),
-    lapTimes[0],
-  );
+  return lapTimes.reduce((best, value) => (value < best ? value : best), lapTimes[0]);
 }
 
 function traceKartOutlinePath() {
@@ -1356,16 +1235,11 @@ function traceKartOutlinePath() {
   ctx.closePath();
 }
 
-function drawVehicle(
-  vehicle,
-  { accent = "#d22525", blink = false, label = "" } = {},
-) {
+function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } = {}) {
   const blinkActive = blink && state.checkpointBlink.time > 0;
   let blinkT = 0;
   if (blinkActive) {
-    blinkT =
-      state.checkpointBlink.time /
-      Math.max(state.checkpointBlink.duration, 0.0001);
+    blinkT = state.checkpointBlink.time / Math.max(state.checkpointBlink.duration, 0.0001);
   }
 
   const airCfg = physicsConfig.air;
@@ -1406,13 +1280,7 @@ function drawVehicle(
   if (kartSpriteReady) {
     const spriteWidth = 30;
     const spriteLength = 56;
-    ctx.drawImage(
-      kartSprite,
-      -spriteWidth * 0.5,
-      -spriteLength * 0.5,
-      spriteWidth,
-      spriteLength,
-    );
+    ctx.drawImage(kartSprite, -spriteWidth * 0.5, -spriteLength * 0.5, spriteWidth, spriteLength);
     ctx.fillStyle = accent;
     ctx.globalAlpha = 0.92;
     ctx.fillRect(-8, -24, 16, 7);
@@ -1517,10 +1385,7 @@ function drawDebugVectors() {
         ctx.beginPath();
         ctx.moveTo(runtime.debugPathPoints[0].x, runtime.debugPathPoints[0].y);
         for (let i = 1; i < runtime.debugPathPoints.length; i++) {
-          ctx.lineTo(
-            runtime.debugPathPoints[i].x,
-            runtime.debugPathPoints[i].y,
-          );
+          ctx.lineTo(runtime.debugPathPoints[i].x, runtime.debugPathPoints[i].y);
         }
         ctx.stroke();
       }
@@ -1548,11 +1413,7 @@ function drawDebugVectors() {
   ctx.fillRect(panelX, panelY, panelW, panelH);
   ctx.fillStyle = "#e9f0ff";
   ctx.font = "15px Verdana";
-  ctx.fillText(
-    `SURFACE AT: ${physicsRuntime.debug.surface.toUpperCase()}`,
-    lineX,
-    firstLineY,
-  );
+  ctx.fillText(`SURFACE AT: ${physicsRuntime.debug.surface.toUpperCase()}`, lineX, firstLineY);
   ctx.fillText(
     `SLIP: ${(physicsRuntime.debug.slipAngle * 57.2958).toFixed(1)} DEG`,
     lineX,
@@ -1619,12 +1480,7 @@ function drawStartSequenceOverlay() {
     const plateH = 112;
 
     ctx.save();
-    const plateGradient = ctx.createLinearGradient(
-      plateX,
-      plateY,
-      plateX,
-      plateY + plateH,
-    );
+    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
     plateGradient.addColorStop(0, "#707985");
     plateGradient.addColorStop(1, "#2b3138");
     ctx.fillStyle = plateGradient;
@@ -1675,12 +1531,7 @@ function drawStartSequenceOverlay() {
     const plateY = cy - 18;
     const plateW = 292;
     const plateH = 112;
-    const plateGradient = ctx.createLinearGradient(
-      plateX,
-      plateY,
-      plateX,
-      plateY + plateH,
-    );
+    const plateGradient = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
     plateGradient.addColorStop(0, "#707985");
     plateGradient.addColorStop(1, "#2b3138");
     ctx.globalAlpha = Math.min(1, a + 0.2);
@@ -1776,19 +1627,10 @@ function drawTitleBar() {
     : state.raceTime - lapData.currentLapStart;
   const fastestIndex =
     lapData.lapTimes.length > 0
-      ? lapData.lapTimes.reduce(
-          (bestIdx, t, idx, arr) => (t < arr[bestIdx] ? idx : bestIdx),
-          0,
-        )
+      ? lapData.lapTimes.reduce((bestIdx, t, idx, arr) => (t < arr[bestIdx] ? idx : bestIdx), 0)
       : -1;
 
-  drawHudPanel(
-    x,
-    top,
-    playerPanelWidth,
-    panelHeight,
-    `${playerAccentColor()}66`,
-  );
+  drawHudPanel(x, top, playerPanelWidth, panelHeight, `${playerAccentColor()}66`);
   ctx.fillStyle = playerAccentColor();
   ctx.font = "bold 17px Verdana";
   ctx.fillText(state.playerName, x + 12, 25);
@@ -1801,13 +1643,7 @@ function drawTitleBar() {
   );
 
   const lapPanelX = x + playerPanelWidth + panelGap;
-  drawHudPanel(
-    lapPanelX,
-    top,
-    lapPanelWidth,
-    panelHeight,
-    "rgba(255, 225, 103, 0.28)",
-  );
+  drawHudPanel(lapPanelX, top, lapPanelWidth, panelHeight, "rgba(255, 225, 103, 0.28)");
   ctx.font = "bold 10px Verdana";
   for (let i = 0; i < lapData.maxLaps; i++) {
     const isCurrent = !state.finished && i === lapData.lapTimes.length;
@@ -1817,22 +1653,15 @@ function drawTitleBar() {
     else if (isCompleted && i === fastestIndex) ctx.fillStyle = "#ffe167";
     else if (isCompleted) ctx.fillStyle = "#8b98a7";
     else ctx.fillStyle = "rgba(180, 194, 208, 0.45)";
-    const label =
-      value !== undefined
-        ? `L${i + 1} ${formatTime(value)}`
-        : `L${i + 1} --:--.---`;
+    const label = value !== undefined ? `L${i + 1} ${formatTime(value)}` : `L${i + 1} --:--.---`;
     ctx.fillText(label, lapPanelX + 10, 21 + i * 11);
   }
 
   if (aiOpponentsEnabled()) {
-    const aiStandings = getRaceStandings().filter((entry) =>
-      String(entry.id).startsWith("ai-"),
-    );
+    const aiStandings = getRaceStandings().filter((entry) => String(entry.id).startsWith("ai-"));
     let aiX = WIDTH - rightPad - aiAreaWidth;
     aiStandings.forEach((entry) => {
-      const index = activeAiCars.findIndex(
-        (vehicle) => vehicle.id === entry.id,
-      );
+      const index = activeAiCars.findIndex((vehicle) => vehicle.id === entry.id);
       if (index < 0) return;
       const vehicle = activeAiCars[index];
       const aiLapData = activeAiLapDataList[index];
@@ -1857,11 +1686,7 @@ function drawTitleBar() {
       ctx.restore();
       ctx.fillStyle = "#b9ccdc";
       ctx.font = "bold 9px Verdana";
-      ctx.fillText(
-        `BEST ${bestLap ? formatTime(bestLap) : "--:--.---"}`,
-        aiX + 8,
-        46,
-      );
+      ctx.fillText(`BEST ${bestLap ? formatTime(bestLap) : "--:--.---"}`, aiX + 8, 46);
       aiX += aiTileWidth + panelGap;
     });
   }
@@ -1933,8 +1758,7 @@ function selectedObjectValueLabel(preset) {
     if (!object) return "--";
     if (object.type === "pond" || object.type === "oil")
       return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
-    if (object.type === "wall")
-      return `${Math.round(object.length)}x${Math.round(object.width)}`;
+    if (object.type === "wall") return `${Math.round(object.length)}x${Math.round(object.width)}`;
     if (Number.isFinite(object.r)) return `${Math.round(object.r)}`;
   }
   return "--";
@@ -1979,10 +1803,7 @@ function selectedCheckpointLabel(preset) {
   const checkpointsList = preset.checkpoints || [];
   if (!checkpointsList.length) return "CheckPoint --";
   const target = state.editor.latestEditTarget;
-  if (
-    target?.kind !== "checkpoint" ||
-    !checkpointsList[target.checkpointIndex]
-  ) {
+  if (target?.kind !== "checkpoint" || !checkpointsList[target.checkpointIndex]) {
     return `CheckPoint ${checkpointsList.length}/${checkpointsList.length}`;
   }
   return `CheckPoint ${target.checkpointIndex + 1}/${checkpointsList.length}`;
@@ -1992,8 +1813,7 @@ function selectedRoadWidthLabel(preset) {
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "stroke") return "--";
   const stroke = preset.centerlineStrokes?.[target.strokeIndex];
-  if (Number.isFinite(stroke?.[0]?.halfWidth))
-    return `${Math.round(stroke[0].halfWidth * 2)} px`;
+  if (Number.isFinite(stroke?.[0]?.halfWidth)) return `${Math.round(stroke[0].halfWidth * 2)} px`;
   return "--";
 }
 
@@ -2021,9 +1841,7 @@ function drawEditorToolbar() {
   const roadLabel = selectedRoadLabel(preset);
   const checkpointLabel = selectedCheckpointLabel(preset);
   const roadWidth = selectedRoadWidthLabel(preset);
-  const smoothingText = centerlineSmoothingLabel(
-    preset.track.centerlineSmoothingMode,
-  );
+  const smoothingText = centerlineSmoothingLabel(preset.track.centerlineSmoothingMode);
   const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
   const activeToolLabel = state.editor.panMode
     ? "PAN"
@@ -2041,13 +1859,7 @@ function drawEditorToolbar() {
   ctx.save();
   ctx.fillStyle = "rgba(6, 14, 20, 0.86)";
   ctx.beginPath();
-  ctx.roundRect(
-    layout.panel.x,
-    layout.panel.y,
-    layout.panel.width,
-    layout.panel.height,
-    10,
-  );
+  ctx.roundRect(layout.panel.x, layout.panel.y, layout.panel.width, layout.panel.height, 10);
   ctx.fill();
   ctx.strokeStyle = "rgba(184, 215, 232, 0.26)";
   ctx.lineWidth = 2;
@@ -2202,11 +2014,7 @@ function drawEditorToolbar() {
 
   ctx.fillStyle = "#f0f8ff";
   ctx.textAlign = "left";
-  ctx.fillText(
-    "Smooth",
-    layout.roadSmoothLabel.x,
-    layout.roadSmoothLabel.y + 18,
-  );
+  ctx.fillText("Smooth", layout.roadSmoothLabel.x, layout.roadSmoothLabel.y + 18);
   drawToolbarButton(layout.roadSmoothPrev, "‹");
   drawToolbarButton(layout.roadSmoothNext, "›");
   ctx.fillStyle = "#d7ebf7";
@@ -2233,20 +2041,14 @@ function drawEditorToolbar() {
   drawToolbarButton(layout.panToggle, "", { active: state.editor.panMode });
   ctx.fillStyle = "#dff7ff";
   ctx.font = "bold 16px Verdana";
-  ctx.fillText(
-    "🖐",
-    layout.panToggle.x + layout.panToggle.width * 0.5,
-    layout.panToggle.y + 18,
-  );
+  ctx.fillText("🖐", layout.panToggle.x + layout.panToggle.width * 0.5, layout.panToggle.y + 18);
   ctx.restore();
 }
 
 function drawFinishOverlay() {
   if (!state.finished || state.mode !== "racing") return;
   const viewportCenterY = TOP_BAR_HEIGHT + (HEIGHT - TOP_BAR_HEIGHT) * 0.5;
-  const total =
-    state.finishCelebration.totalTime ||
-    lapData.lapTimes.reduce((a, b) => a + b, 0);
+  const total = state.finishCelebration.totalTime || lapData.lapTimes.reduce((a, b) => a + b, 0);
   const bestLap =
     state.finishCelebration.bestLapTime ||
     (lapData.lapTimes.length ? Math.min(...lapData.lapTimes) : 0);
@@ -2265,8 +2067,7 @@ function drawFinishOverlay() {
   const stackTimeX = panelX + panelW - 132;
   const stackGapX = panelX + panelW - 24;
   const stackNameMaxW = stackTimeX - stackNameX - 18;
-  const playerPosition =
-    state.raceStandings.playerFinishOrder || getRacePosition();
+  const playerPosition = state.raceStandings.playerFinishOrder || getRacePosition();
 
   ctx.fillStyle = "rgba(12, 22, 18, 0.88)";
   ctx.fillRect(panelX, panelY, panelW, panelH);
@@ -2325,11 +2126,7 @@ function drawFinishOverlay() {
     if (detailText) {
       ctx.fillStyle = row.rewarded ? "#fff1a8" : "#c5d0dc";
       ctx.font = "11px Verdana";
-      ctx.fillText(
-        fitTextToWidth(detailText, leftDetailMaxW),
-        leftColX,
-        row.y + 18,
-      );
+      ctx.fillText(fitTextToWidth(detailText, leftDetailMaxW), leftColX, row.y + 18);
     }
 
     if (!row.rewarded) continue;
@@ -2362,11 +2159,7 @@ function drawFinishOverlay() {
       ctx.fillStyle = "#f3f8ff";
       ctx.fillText(formatTime(entry.finishTime), stackTimeX, rowY);
       ctx.fillStyle = entry.gapMs > 0 ? "#ffe167" : "#6af0a8";
-      ctx.fillText(
-        entry.gapMs > 0 ? `+${formatTime(entry.gapMs / 1000)}` : "--",
-        stackGapX,
-        rowY,
-      );
+      ctx.fillText(entry.gapMs > 0 ? `+${formatTime(entry.gapMs / 1000)}` : "--", stackGapX, rowY);
       ctx.textAlign = "left";
     });
   }
@@ -2438,8 +2231,7 @@ function drawPauseOverlay() {
     ctx.fillStyle = "#f0f4fb";
     ctx.font = "bold 24px Verdana";
     const pausedBy =
-      typeof state.tournamentRoom.pausedBy === "string" &&
-      state.tournamentRoom.pausedBy
+      typeof state.tournamentRoom.pausedBy === "string" && state.tournamentRoom.pausedBy
         ? `${state.tournamentRoom.pausedBy.toUpperCase()} PAUSED THE RACE`
         : "RACE PAUSED FOR EVERYONE";
     const pausedByWidth = ctx.measureText(pausedBy).width;
@@ -2462,8 +2254,7 @@ function drawPauseOverlay() {
 
     ctx.fillStyle = "#f0f4fb";
     ctx.font = "18px Verdana";
-    const helpText =
-      "W/S OR UP/DOWN: SELECT  ENTER: CONFIRM  P OR ESC: TOGGLE PAUSE";
+    const helpText = "W/S OR UP/DOWN: SELECT  ENTER: CONFIRM  P OR ESC: TOGGLE PAUSE";
     const helpWidth = ctx.measureText(helpText).width;
     ctx.fillText(helpText, x + (panelW - helpWidth) * 0.5, y + 248);
     return;
@@ -2645,11 +2436,7 @@ function drawTournamentLobby() {
 
   ctx.fillStyle = "#d7e6f3";
   ctx.font = "18px Verdana";
-  ctx.fillText(
-    `STATUS ${String(room.status || "idle").toUpperCase()}`,
-    56,
-    titleY + 30,
-  );
+  ctx.fillText(`STATUS ${String(room.status || "idle").toUpperCase()}`, 56, titleY + 30);
 
   const cardX = 56;
   const cardY = titleY + 50;
@@ -2661,20 +2448,13 @@ function drawTournamentLobby() {
   slots.forEach((slot, index) => {
     const y = cardY + index * (rowH + rowGap);
     const selected = state.tournamentLobbyIndex === index;
-    ctx.fillStyle = selected
-      ? "rgba(61, 126, 199, 0.42)"
-      : "rgba(10, 18, 28, 0.46)";
+    ctx.fillStyle = selected ? "rgba(61, 126, 199, 0.42)" : "rgba(10, 18, 28, 0.46)";
     ctx.fillRect(cardX, y, cardW, rowH);
     ctx.strokeStyle = selected ? "#ffffff" : "rgba(149, 181, 204, 0.65)";
     ctx.lineWidth = selected ? 3 : 2;
     ctx.strokeRect(cardX, y, cardW, rowH);
 
-    const accent =
-      slot.kind === "human"
-        ? slot.is_host
-          ? "#ffe167"
-          : "#7ee2ff"
-        : "#9cc8a3";
+    const accent = slot.kind === "human" ? (slot.is_host ? "#ffe167" : "#7ee2ff") : "#9cc8a3";
     const slotColor = getCarColorHex(slot.color);
     ctx.fillStyle = accent;
     ctx.font = "bold 12px Verdana";
@@ -2691,11 +2471,7 @@ function drawTournamentLobby() {
 
     ctx.fillStyle = "#f4fbff";
     ctx.font = "bold 20px Verdana";
-    ctx.fillText(
-      slot.display_name || "PLAYER",
-      colorChipX + colorChipSize + 12,
-      y + 39,
-    );
+    ctx.fillText(slot.display_name || "PLAYER", colorChipX + colorChipSize + 12, y + 39);
 
     ctx.fillStyle = "#b9ccdc";
     ctx.font = "15px Verdana";
@@ -2715,8 +2491,7 @@ function drawTournamentLobby() {
 
   const buttonY = HEIGHT - 94;
   const shareSelected = state.tournamentLobbyIndex === slots.length;
-  const startSelected =
-    room.isHost && state.tournamentLobbyIndex === slots.length + 1;
+  const startSelected = room.isHost && state.tournamentLobbyIndex === slots.length + 1;
 
   const shareX = 56;
   const shareW = 190;
@@ -2807,19 +2582,10 @@ function drawMenu() {
   if (appLogoReady) {
     const maxLogoWidth = 320;
     const maxLogoHeight = 130;
-    const ratio = Math.min(
-      maxLogoWidth / appLogo.width,
-      maxLogoHeight / appLogo.height,
-    );
+    const ratio = Math.min(maxLogoWidth / appLogo.width, maxLogoHeight / appLogo.height);
     const drawWidth = appLogo.width * ratio;
     const drawHeight = appLogo.height * ratio;
-    ctx.drawImage(
-      appLogo,
-      WIDTH * 0.5 - drawWidth * 0.5,
-      22,
-      drawWidth,
-      drawHeight,
-    );
+    ctx.drawImage(appLogo, WIDTH * 0.5 - drawWidth * 0.5, 22, drawWidth, drawHeight);
   }
 
   ctx.fillStyle = "#ffd25e";
@@ -2838,8 +2604,9 @@ function drawMenu() {
   }
 
   ctx.font = "bold 42px Verdana";
-  const { menuItems, selectedMenuIndex, highlightWidth } =
-    getMainMenuRenderModel((text) => ctx.measureText(text).width);
+  const { menuItems, selectedMenuIndex, highlightWidth } = getMainMenuRenderModel(
+    (text) => ctx.measureText(text).width,
+  );
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   menuItems.forEach((item, idx) => {
     const y = 386 + idx * 74;
@@ -2895,11 +2662,7 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   ctx.fillStyle = "#2e8c42";
   ctx.fillRect(innerX, innerY, innerSize, innerSize);
 
-  const { minX, minY, maxX, maxY } = getPreviewBounds(
-    preset,
-    boundaries,
-    curbs,
-  );
+  const { minX, minY, maxX, maxY } = getPreviewBounds(preset, boundaries, curbs);
 
   const centerX = (minX + maxX) * 0.5;
   const centerY = (minY + maxY) * 0.5;
@@ -2914,13 +2677,7 @@ function drawTrackPreviewCard(x, y, size, selected, preset) {
   ctx.scale(scale, scale);
   ctx.translate(-centerX, -centerY);
   applyWorldScaleTransform(trackDef);
-  drawTrackSurface(
-    trackDef,
-    boundaries,
-    curbs,
-    true,
-    preset.worldObjects || [],
-  );
+  drawTrackSurface(trackDef, boundaries, curbs, true, preset.worldObjects || []);
   drawDecor(preset.worldObjects || []);
   drawRoadDetails(trackDef);
   drawStartLine(trackDef);
@@ -2940,8 +2697,9 @@ function drawLoginProviders() {
   ctx.fillText("LOGIN", WIDTH * 0.5 - 132, 220);
 
   ctx.font = "bold 38px Verdana";
-  const { loginItems, selectedLoginIndex, highlightWidth } =
-    getLoginProviderRenderModel((text) => ctx.measureText(text).width);
+  const { loginItems, selectedLoginIndex, highlightWidth } = getLoginProviderRenderModel(
+    (text) => ctx.measureText(text).width,
+  );
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   const textX = WIDTH * 0.5;
   const iconX = highlightX + 26;
@@ -2985,11 +2743,7 @@ function drawTrackSelection() {
   ctx.font = "bold 36px Verdana";
   const titleText = model.isTournament ? "SELECT TRACKS" : "SELECT TRACK";
   const titleWidth = ctx.measureText(titleText).width;
-  ctx.fillText(
-    titleText,
-    WIDTH * 0.35 - titleWidth * 0.5,
-    BREADCRUMB_BAR_HEIGHT + 38,
-  );
+  ctx.fillText(titleText, WIDTH * 0.35 - titleWidth * 0.5, BREADCRUMB_BAR_HEIGHT + 38);
 
   // Grid area
   const gridTop = BREADCRUMB_BAR_HEIGHT + 56;
@@ -3005,24 +2759,14 @@ function drawTrackSelection() {
     const cardY = gridTop + cell.row * (cardSize + labelH + gap);
     const selected = state.trackSelectIndex === cell.trackIndex;
 
-    drawTrackPreviewCard(
-      cardX,
-      cardY,
-      cardSize,
-      selected,
-      getTrackPreset(cell.trackIndex),
-    );
+    drawTrackPreviewCard(cardX, cardY, cardSize, selected, getTrackPreset(cell.trackIndex));
 
     // Track name label
     ctx.fillStyle = selected ? "#ffffff" : "#9db6c7";
     ctx.font = "bold 13px Verdana";
     const label = cell.option.name;
     const labelWidth = ctx.measureText(label).width;
-    ctx.fillText(
-      label,
-      cardX + cardSize * 0.5 - labelWidth * 0.5,
-      cardY + cardSize + 16,
-    );
+    ctx.fillText(label, cardX + cardSize * 0.5 - labelWidth * 0.5, cardY + cardSize + 16);
 
     // Private badge
     if (!cell.option.isPublished) {
@@ -3055,11 +2799,7 @@ function drawTrackSelection() {
   if (model.showLeftHint) {
     ctx.fillStyle = "#ffd25e";
     ctx.font = "bold 34px Verdana";
-    ctx.fillText(
-      "\u2039",
-      startX - 30,
-      gridTop + rows * (cardSize + labelH + gap) * 0.5,
-    );
+    ctx.fillText("\u2039", startX - 30, gridTop + rows * (cardSize + labelH + gap) * 0.5);
   }
   if (model.showRightHint) {
     ctx.fillStyle = "#ffd25e";
@@ -3080,9 +2820,7 @@ function drawTrackSelection() {
     const startSelected = state.trackSelectIndex === startTournamentIdx;
     const selectedCount = model.tournamentSelected.size;
     const startLabel =
-      selectedCount > 0
-        ? `START TOURNAMENT (${selectedCount})`
-        : "START TOURNAMENT";
+      selectedCount > 0 ? `START TOURNAMENT (${selectedCount})` : "START TOURNAMENT";
     ctx.font = "bold 28px Verdana";
     const startBtnW = ctx.measureText(startLabel).width + 40;
     const startBtnX = 40;
@@ -3118,10 +2856,7 @@ function drawTrackSelection() {
   const detailPanelW = 300;
   const detailPanelH = rows * (cardSize + labelH + gap) - gap;
 
-  if (
-    state.trackSelectIndex >= 0 &&
-    state.trackSelectIndex < trackOptions.length
-  ) {
+  if (state.trackSelectIndex >= 0 && state.trackSelectIndex < trackOptions.length) {
     const selectedPreset = getTrackPreset(state.trackSelectIndex);
     const selectedOption = trackOptions[state.trackSelectIndex];
     const ownerName = selectedOption?.ownerDisplayName || "N/A";
@@ -3138,10 +2873,7 @@ function drawTrackSelection() {
 
     let centerlineLength = centerlineLengthCache.get(selectedPreset.track);
     if (!Number.isFinite(centerlineLength)) {
-      const boundaries = trackBoundaryPaths(
-        selectedPreset.track,
-        TRACK_SEGMENTS,
-      );
+      const boundaries = trackBoundaryPaths(selectedPreset.track, TRACK_SEGMENTS);
       const points = boundaries.center || [];
       let total = 0;
       for (let i = 0; i < points.length; i++) {
@@ -3192,10 +2924,7 @@ function drawTrackSelection() {
         MIN_AI_OPPONENT_COUNT,
         Math.min(
           MAX_AI_OPPONENT_COUNT,
-          Math.round(
-            Number(physicsConfig.flags.AI_OPPONENT_COUNT) ||
-              DEFAULT_AI_OPPONENT_COUNT,
-          ),
+          Math.round(Number(physicsConfig.flags.AI_OPPONENT_COUNT) || DEFAULT_AI_OPPONENT_COUNT),
         ),
       );
       const aiLabel = aiOpponentsEnabled()
@@ -3226,12 +2955,9 @@ function drawTrackSelection() {
             : "";
       return /mac/i.test(platform) ? "⌫" : "DEL";
     })();
-    if (model.selectedTrackCanDelete)
-      helpLines.push(`${deleteKeyLabel} Delete`);
+    if (model.selectedTrackCanDelete) helpLines.push(`${deleteKeyLabel} Delete`);
     if (model.selectedTrackCanPublish) {
-      helpLines.push(
-        model.selectedTrackIsPublished ? "P Unpublish" : "P Publish",
-      );
+      helpLines.push(model.selectedTrackIsPublished ? "P Unpublish" : "P Publish");
     }
     if (physicsConfig.flags.DEBUG_MODE) helpLines.push("E Edit");
     if (model.selectedTrackCanClearRecords) helpLines.push("X Clear Records");
@@ -3272,11 +2998,7 @@ function drawEditorOverlay() {
     ? preset.track.centerlineLoop
     : [];
   if (state.editor.showCurbs && smoothedLoop.length >= 2) {
-    drawStroke(
-      [...smoothedLoop, smoothedLoop[0]],
-      "rgba(92, 255, 124, 0.95)",
-      3,
-    );
+    drawStroke([...smoothedLoop, smoothedLoop[0]], "rgba(92, 255, 124, 0.95)", 3);
   }
   drawStroke(connectedLoop, "rgba(96, 248, 255, 0.78)", 2);
   const flash = state.editor.selectionFlash;
@@ -3289,21 +3011,14 @@ function drawEditorOverlay() {
       ? state.editor.latestEditTarget.checkpointIndex
       : -1;
   for (const [index, stroke] of strokes.entries()) {
-    const baseColor =
-      index % 2 === 0
-        ? "rgba(255, 163, 72, 0.92)"
-        : "rgba(120, 228, 255, 0.92)";
+    const baseColor = index % 2 === 0 ? "rgba(255, 163, 72, 0.92)" : "rgba(120, 228, 255, 0.92)";
     const shouldFlash =
       selectedStrokeIndex === index &&
       flash.kind === "stroke" &&
       flash.index === index &&
       flash.time > 0 &&
       Math.floor(flash.time / 0.08) % 2 === 0;
-    drawStroke(
-      stroke,
-      shouldFlash ? "rgba(255, 225, 103, 0.98)" : baseColor,
-      4,
-    );
+    drawStroke(stroke, shouldFlash ? "rgba(255, 225, 103, 0.98)" : baseColor, 4);
   }
   for (const [index, checkpoint] of checkpointsList.entries()) {
     const frame = checkpointFrame(checkpoint, preset.track);
@@ -3387,11 +3102,7 @@ function drawSettings() {
   const settingsHeader = getSettingsHeaderRenderModel();
   ctx.save();
   ctx.textAlign = settingsHeader.textAlign;
-  ctx.fillText(
-    settingsHeader.text,
-    WIDTH * settingsHeader.xRatio,
-    settingsHeader.y,
-  );
+  ctx.fillText(settingsHeader.text, WIDTH * settingsHeader.xRatio, settingsHeader.y);
   ctx.restore();
 
   const menuTagline = activeMenuTagline();
@@ -3406,14 +3117,8 @@ function drawSettings() {
   }
 
   ctx.font = "bold 35px Verdana";
-  const {
-    settingsItems,
-    selectedSettingsIndex,
-    rowLabels,
-    rowGap,
-    startY,
-    highlightWidth,
-  } = getSettingsRenderLayout((text) => ctx.measureText(text).width);
+  const { settingsItems, selectedSettingsIndex, rowLabels, rowGap, startY, highlightWidth } =
+    getSettingsRenderLayout((text) => ctx.measureText(text).width);
   const highlightX = WIDTH * 0.5 - highlightWidth * 0.5;
   const textX = highlightX + 30;
   settingsItems.forEach((_, idx) => {
@@ -3510,13 +3215,7 @@ function drawModal() {
 
   ctx.fillStyle = "#c7d8e8";
   ctx.font = "24px Verdana";
-  const infoLines = drawWrappedText(
-    state.modal.message || "",
-    x + 34,
-    y + 108,
-    panelW - 68,
-    34,
-  );
+  const infoLines = drawWrappedText(state.modal.message || "", x + 34, y + 108, panelW - 68, 34);
 
   let contentBottomY = y + 108 + infoLines * 34;
   if (state.modal.mode === "input") {
@@ -3548,14 +3247,8 @@ function drawModal() {
   const buttonPadX = 22;
   const minButtonW = 96;
   ctx.font = "bold 24px Verdana";
-  const cancelW = Math.max(
-    minButtonW,
-    ctx.measureText(cancelLabel).width + buttonPadX * 2,
-  );
-  const confirmW = Math.max(
-    minButtonW,
-    ctx.measureText(confirmLabel).width + buttonPadX * 2,
-  );
+  const cancelW = Math.max(minButtonW, ctx.measureText(cancelLabel).width + buttonPadX * 2);
+  const confirmW = Math.max(minButtonW, ctx.measureText(confirmLabel).width + buttonPadX * 2);
   const rightEdge = x + panelW - 34;
   const yesX = rightEdge - confirmW;
   const noX = yesX - buttonGap - cancelW;
@@ -3573,11 +3266,7 @@ function drawModal() {
     buttonY + 33,
   );
 
-  const confirmFill = state.modal.danger
-    ? yesSelected
-      ? "#c32727"
-      : "#2f7e45"
-    : "#2f7e45";
+  const confirmFill = state.modal.danger ? (yesSelected ? "#c32727" : "#2f7e45") : "#2f7e45";
   const confirmStroke = state.modal.danger
     ? yesSelected
       ? "#ffffff"

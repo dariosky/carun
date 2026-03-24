@@ -72,19 +72,13 @@ export class ImpactSynth {
     const time = now(this.context);
     const duration =
       (AUDIO_TUNING.impact.durationMin +
-        hit *
-          (AUDIO_TUNING.impact.durationMax - AUDIO_TUNING.impact.durationMin)) *
+        hit * (AUDIO_TUNING.impact.durationMax - AUDIO_TUNING.impact.durationMin)) *
       durationMul;
 
     const osc = makeOscillator(this.context, type, baseHz * (1 + hit * 0.8));
     const oscGain = createGain(this.context, 0);
     const noise = createNoiseSource(this.context);
-    const noiseFilter = createFilter(
-      this.context,
-      "bandpass",
-      noiseFreq + hit * 420,
-      noiseQ,
-    );
+    const noiseFilter = createFilter(this.context, "bandpass", noiseFreq + hit * 420, noiseQ);
     const noiseMix = createGain(this.context, 0);
     const mix = createGain(this.context, 1);
     const master = createGain(this.context, 1);
@@ -98,17 +92,11 @@ export class ImpactSynth {
     master.connect(this.output);
 
     oscGain.gain.setValueAtTime(0.0001, time);
-    oscGain.gain.linearRampToValueAtTime(
-      toneGain * (0.55 + hit * 0.75),
-      time + 0.006,
-    );
+    oscGain.gain.linearRampToValueAtTime(toneGain * (0.55 + hit * 0.75), time + 0.006);
     oscGain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
 
     noiseMix.gain.setValueAtTime(0.0001, time);
-    noiseMix.gain.linearRampToValueAtTime(
-      noiseGain * (0.45 + hit * 0.8),
-      time + 0.004,
-    );
+    noiseMix.gain.linearRampToValueAtTime(noiseGain * (0.45 + hit * 0.8), time + 0.004);
     noiseMix.gain.exponentialRampToValueAtTime(0.0001, time + duration * 0.72);
 
     master.gain.setValueAtTime(0.0001, time);
@@ -116,10 +104,7 @@ export class ImpactSynth {
     master.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.02);
 
     osc.frequency.setValueAtTime(baseHz * (1 + hit * 0.8), time);
-    osc.frequency.exponentialRampToValueAtTime(
-      baseHz * pitchDrop,
-      time + duration * 0.7,
-    );
+    osc.frequency.exponentialRampToValueAtTime(baseHz * pitchDrop, time + duration * 0.7);
 
     osc.start(time);
     noise.start(time);

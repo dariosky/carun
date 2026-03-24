@@ -1,10 +1,5 @@
 import { startGameLoop } from "./game-loop.js";
-import {
-  enterEditor,
-  initInputHandlers,
-  pauseActiveRace,
-  syncTrackSelectWindow,
-} from "./menus.js";
+import { enterEditor, initInputHandlers, pauseActiveRace, syncTrackSelectWindow } from "./menus.js";
 import {
   applyTrackPreset,
   loadSharedTrackFromApi,
@@ -23,10 +18,7 @@ import { fetchAuthMe } from "./api.js";
 import { initAudio, syncMenuMusicForMode } from "./audio.js";
 import { gameAudio } from "./game-audio.js";
 import { updateParticles, updateScreenParticles } from "./particles.js";
-import {
-  loadTournamentRoomFromPath,
-  tickTournamentRoom,
-} from "./tournament-room.js";
+import { loadTournamentRoomFromPath, tickTournamentRoom } from "./tournament-room.js";
 
 function decodePathSegment(value) {
   if (typeof value !== "string" || !value) return "";
@@ -105,30 +97,22 @@ await loadVisibleTracksFromApi({
   currentUserIsAdmin: state.auth.isAdmin,
 });
 const currentUrl = new URL(window.location.href);
-const trackEditMatch = currentUrl.pathname.match(
-  /^\/tracks\/edit\/([^/]+)\/?$/,
-);
+const trackEditMatch = currentUrl.pathname.match(/^\/tracks\/edit\/([^/]+)\/?$/);
 const editTrackIdFromPath = decodePathSegment(trackEditMatch?.[1] || "");
 const raceTrackMatch = currentUrl.pathname.match(/^\/tracks\/([^/]+)\/?$/);
-const tournamentRoomMatch = currentUrl.pathname.match(
-  /^\/tournament\/([^/]+)\/?$/,
-);
+const tournamentRoomMatch = currentUrl.pathname.match(/^\/tournament\/([^/]+)\/?$/);
 const raceTrackIdFromPath =
-  !editTrackIdFromPath && raceTrackMatch?.[1]
-    ? decodePathSegment(raceTrackMatch[1])
-    : "";
+  !editTrackIdFromPath && raceTrackMatch?.[1] ? decodePathSegment(raceTrackMatch[1]) : "";
 const tournamentRoomIdFromPath =
   !editTrackIdFromPath && !raceTrackIdFromPath && tournamentRoomMatch?.[1]
     ? decodePathSegment(tournamentRoomMatch[1])
     : "";
-const trackSelectFromPath =
-  currentUrl.pathname === "/tracks" || currentUrl.pathname === "/tracks/";
+const trackSelectFromPath = currentUrl.pathname === "/tracks" || currentUrl.pathname === "/tracks/";
 const settingsFromPath =
   currentUrl.pathname === "/settings" || currentUrl.pathname === "/settings/";
 const shareFromUrl = currentUrl.searchParams.get("share");
 const trackFromUrl = currentUrl.searchParams.get("track");
-const requestedTrackId =
-  editTrackIdFromPath || raceTrackIdFromPath || trackFromUrl || "";
+const requestedTrackId = editTrackIdFromPath || raceTrackIdFromPath || trackFromUrl || "";
 if (shareFromUrl) {
   try {
     await loadSharedTrackFromApi(shareFromUrl, {
@@ -168,8 +152,7 @@ if (editTrackIdFromPath) {
   try {
     await loadTournamentRoomFromPath(tournamentRoomIdFromPath);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Tournament room not found";
+    const message = error instanceof Error ? error.message : "Tournament room not found";
     showSnackbar(message, { seconds: 2.2, kind: "error" });
     state.mode = "trackSelect";
   }

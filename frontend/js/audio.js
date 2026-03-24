@@ -79,10 +79,7 @@ async function startMenuMusic({ immediate = false } = {}) {
     return;
   }
   audio.muted = false;
-  fadeMenuMusicTo(
-    MENU_MUSIC_VOLUME,
-    immediate ? 0 : MENU_MUSIC_FADE_IN_SECONDS,
-  );
+  fadeMenuMusicTo(MENU_MUSIC_VOLUME, immediate ? 0 : MENU_MUSIC_FADE_IN_SECONDS);
 }
 
 function stopMenuMusic({ immediate = false } = {}) {

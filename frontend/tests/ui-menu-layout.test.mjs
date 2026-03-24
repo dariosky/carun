@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  makeTrackData,
-  setupFrontendTestEnv,
-} from "./helpers/frontend-test-env.mjs";
+import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
@@ -22,11 +19,7 @@ test("main menu model switches items by auth state", () => {
   state.auth.authenticated = false;
   state.menuIndex = 1;
   const loggedOut = getMainMenuRenderModel((text) => text.length * 10);
-  assert.deepEqual(loggedOut.menuItems, [
-    "LOGIN",
-    "RACE ANONYMOUSLY",
-    "SETTINGS",
-  ]);
+  assert.deepEqual(loggedOut.menuItems, ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"]);
   assert.equal(loggedOut.selectedMenuIndex, 1);
 
   state.auth.authenticated = true;
@@ -50,16 +43,9 @@ test("main menu highlight width grows for longest label", () => {
 test("login providers model exposes provider options and selected row", () => {
   state.loginProviderIndex = 1;
   const model = getLoginProviderRenderModel((text) => text.length * 10);
-  assert.deepEqual(model.loginItems, [
-    "LOGIN WITH GOOGLE",
-    "LOGIN WITH FACEBOOK",
-    "BACK",
-  ]);
+  assert.deepEqual(model.loginItems, ["LOGIN WITH GOOGLE", "LOGIN WITH FACEBOOK", "BACK"]);
   assert.equal(model.selectedLoginIndex, 1);
-  assert.equal(
-    model.highlightWidth,
-    Math.max(540, "LOGIN WITH FACEBOOK".length * 10 + 120),
-  );
+  assert.equal(model.highlightWidth, Math.max(540, "LOGIN WITH FACEBOOK".length * 10 + 120));
 });
 
 test("settings render layout uses longest rendered row label", () => {

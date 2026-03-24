@@ -252,10 +252,7 @@ function walkContour(splitLoop, turnSign) {
       if ((edgeUsed.get(eKey) || 0) > 0) continue;
 
       // Signed angle from reference to edge direction, in (-π, π].
-      let angle = Math.atan2(
-        refDx * e.dy - refDy * e.dx,
-        refDx * e.dx + refDy * e.dy,
-      );
+      let angle = Math.atan2(refDx * e.dy - refDy * e.dx, refDx * e.dx + refDy * e.dy);
       if (angle <= -Math.PI) angle += 2 * Math.PI;
 
       // turnSign=+1 → maximise angle (leftmost / most CCW)
@@ -282,9 +279,7 @@ function walkContour(splitLoop, turnSign) {
     if (current === startNode) break;
   }
 
-  return contour.length >= 3
-    ? contour
-    : splitLoop.map((p) => ({ x: p.x, y: p.y }));
+  return contour.length >= 3 ? contour : splitLoop.map((p) => ({ x: p.x, y: p.y }));
 }
 
 /**

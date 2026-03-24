@@ -36,13 +36,7 @@ import {
   normalizeCenterlineSmoothingMode,
   TOURNAMENT_POINTS,
 } from "./parameters.js";
-import {
-  assignRandomAiRoster,
-  getActiveAiCars,
-  keys,
-  setCurbSegments,
-  state,
-} from "./state.js";
+import { assignRandomAiRoster, getActiveAiCars, keys, setCurbSegments, state } from "./state.js";
 import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments, surfaceAt, trackProgressAtPoint } from "./track.js";
@@ -97,10 +91,7 @@ const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
 const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
 
 function clampWorldScale(value) {
-  return Math.max(
-    EDITOR_MIN_WORLD_SCALE,
-    Math.min(EDITOR_MAX_WORLD_SCALE, value),
-  );
+  return Math.max(EDITOR_MIN_WORLD_SCALE, Math.min(EDITOR_MAX_WORLD_SCALE, value));
 }
 
 function setEditorPanMode(enabled) {
@@ -138,32 +129,21 @@ function saveEditorToolbarPosition() {
 function clampEditorToolbarPosition() {
   const toolbar = state.editor.toolbar;
   const layout = getEditorToolbarLayout();
-  toolbar.x = Math.max(
-    10,
-    Math.min(toolbar.x, canvas.width - layout.panel.width - 10),
-  );
+  toolbar.x = Math.max(10, Math.min(toolbar.x, canvas.width - layout.panel.width - 10));
   toolbar.y = Math.max(
     10,
-    Math.min(
-      toolbar.y,
-      canvas.height - EDITOR_TOP_BAR_HEIGHT - layout.panel.height - 10,
-    ),
+    Math.min(toolbar.y, canvas.height - EDITOR_TOP_BAR_HEIGHT - layout.panel.height - 10),
   );
 }
 
 function pointInRect(x, y, rect) {
   return (
-    rect &&
-    x >= rect.x &&
-    x <= rect.x + rect.width &&
-    y >= rect.y &&
-    y <= rect.y + rect.height
+    rect && x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
   );
 }
 
 function getDefaultStrokeHalfWidth(preset) {
-  const latestStroke =
-    preset?.centerlineStrokes?.[preset.centerlineStrokes.length - 1];
+  const latestStroke = preset?.centerlineStrokes?.[preset.centerlineStrokes.length - 1];
   const latestPoint = latestStroke?.[latestStroke.length - 1];
   if (Number.isFinite(latestPoint?.halfWidth)) return latestPoint.halfWidth;
   return Number.isFinite(preset?.track?.centerlineHalfWidth)
@@ -182,20 +162,14 @@ function syncLatestEditorTarget(preset) {
       };
       return;
     }
-    if (
-      entry.kind === "stroke" &&
-      preset.centerlineStrokes[entry.strokeIndex]
-    ) {
+    if (entry.kind === "stroke" && preset.centerlineStrokes[entry.strokeIndex]) {
       state.editor.latestEditTarget = {
         kind: "stroke",
         strokeIndex: entry.strokeIndex,
       };
       return;
     }
-    if (
-      entry.kind === "checkpoint" &&
-      preset.checkpoints?.[entry.checkpointIndex]
-    ) {
+    if (entry.kind === "checkpoint" && preset.checkpoints?.[entry.checkpointIndex]) {
       state.editor.latestEditTarget = {
         kind: "checkpoint",
         checkpointIndex: entry.checkpointIndex,
@@ -229,9 +203,7 @@ function normalizeCheckpointProgress(progress) {
 }
 
 function startProgressForTrack(trackDef) {
-  return normalizeCheckpointProgress(
-    (Number(trackDef?.startAngle) || 0) / (Math.PI * 2),
-  );
+  return normalizeCheckpointProgress((Number(trackDef?.startAngle) || 0) / (Math.PI * 2));
 }
 
 function checkpointOrderDelta(progress, startProgress) {
@@ -242,8 +214,7 @@ function findCheckpointInsertIndex(checkpointsList, progress, trackDef) {
   const startProgress = startProgressForTrack(trackDef);
   const targetDelta = checkpointOrderDelta(progress, startProgress);
   const insertIndex = checkpointsList.findIndex(
-    (checkpoint) =>
-      checkpointOrderDelta(checkpoint.progress, startProgress) > targetDelta,
+    (checkpoint) => checkpointOrderDelta(checkpoint.progress, startProgress) > targetDelta,
   );
   return insertIndex >= 0 ? insertIndex : checkpointsList.length;
 }
@@ -251,20 +222,16 @@ function findCheckpointInsertIndex(checkpointsList, progress, trackDef) {
 function checkpointNearStart(progress, trackDef) {
   const startProgress = startProgressForTrack(trackDef);
   return (
-    checkpointOrderDelta(progress, startProgress) <
-      EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
-    checkpointOrderDelta(startProgress, progress) <
-      EDITOR_CHECKPOINT_PROGRESS_TOLERANCE
+    checkpointOrderDelta(progress, startProgress) < EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
+    checkpointOrderDelta(startProgress, progress) < EDITOR_CHECKPOINT_PROGRESS_TOLERANCE
   );
 }
 
 function findCheckpointIndexNearProgress(checkpointsList, progress) {
   return checkpointsList.findIndex(
     (checkpoint) =>
-      checkpointOrderDelta(checkpoint.progress, progress) <
-        EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
-      checkpointOrderDelta(progress, checkpoint.progress) <
-        EDITOR_CHECKPOINT_PROGRESS_TOLERANCE,
+      checkpointOrderDelta(checkpoint.progress, progress) < EDITOR_CHECKPOINT_PROGRESS_TOLERANCE ||
+      checkpointOrderDelta(progress, checkpoint.progress) < EDITOR_CHECKPOINT_PROGRESS_TOLERANCE,
   );
 }
 
@@ -322,9 +289,7 @@ export function getEditorTopBarLayout() {
 }
 
 function trackHasRecords(preset) {
-  return (
-    Number.isFinite(preset?.bestLapMs) || Number.isFinite(preset?.bestRaceMs)
-  );
+  return Number.isFinite(preset?.bestLapMs) || Number.isFinite(preset?.bestRaceMs);
 }
 
 function canClearTrackRecordsPreset(preset) {
@@ -348,16 +313,10 @@ async function clearTrackRecordsAtIndex(trackIndex) {
   const updatedPreset = setTrackPresetMetadata(
     preset.id,
     {
-      bestLapMs: Number.isFinite(metadata.best_lap_ms)
-        ? Number(metadata.best_lap_ms)
-        : null,
+      bestLapMs: Number.isFinite(metadata.best_lap_ms) ? Number(metadata.best_lap_ms) : null,
       bestLapDisplayName:
-        typeof metadata.best_lap_display_name === "string"
-          ? metadata.best_lap_display_name
-          : null,
-      bestRaceMs: Number.isFinite(metadata.best_race_ms)
-        ? Number(metadata.best_race_ms)
-        : null,
+        typeof metadata.best_lap_display_name === "string" ? metadata.best_lap_display_name : null,
+      bestRaceMs: Number.isFinite(metadata.best_race_ms) ? Number(metadata.best_race_ms) : null,
       bestRaceDisplayName:
         typeof metadata.best_race_display_name === "string"
           ? metadata.best_race_display_name
@@ -395,8 +354,7 @@ export function getEditorToolbarLayout() {
   };
   const objectToolRowY = objectHeader.y + objectHeader.height + 4;
   const objectToolButtonGap = 10;
-  const objectToolButtonWidth =
-    (panel.width - 24 - objectToolButtonGap * 2) / 3;
+  const objectToolButtonWidth = (panel.width - 24 - objectToolButtonGap * 2) / 3;
   const objectToolButtons = EDITOR_OBJECT_PLACE_TOOLS.map((tool, index) => {
     const row = Math.floor(index / 3);
     const col = index % 3;
@@ -626,45 +584,31 @@ function editorToolbarActionAt(x, y) {
     return { type: "action", id: layout.objectDeleteButton.id };
   if (pointInRect(x, y, layout.objectSizeDown))
     return { type: "action", id: layout.objectSizeDown.id };
-  if (pointInRect(x, y, layout.objectSizeUp))
-    return { type: "action", id: layout.objectSizeUp.id };
+  if (pointInRect(x, y, layout.objectSizeUp)) return { type: "action", id: layout.objectSizeUp.id };
   if (pointInRect(x, y, layout.rotateLeftButton))
     return { type: "action", id: layout.rotateLeftButton.id };
   if (pointInRect(x, y, layout.rotateRightButton))
     return { type: "action", id: layout.rotateRightButton.id };
-  if (pointInRect(x, y, layout.objectPrev))
-    return { type: "action", id: "objectPrev" };
-  if (pointInRect(x, y, layout.objectNext))
-    return { type: "action", id: "objectNext" };
-  if (pointInRect(x, y, layout.roadPrev))
-    return { type: "action", id: "roadPrev" };
-  if (pointInRect(x, y, layout.roadNext))
-    return { type: "action", id: "roadNext" };
-  if (pointInRect(x, y, layout.roadValue))
-    return { type: "action", id: layout.roadValue.id };
-  if (pointInRect(x, y, layout.checkpointPrev))
-    return { type: "action", id: "checkpointPrev" };
-  if (pointInRect(x, y, layout.checkpointNext))
-    return { type: "action", id: "checkpointNext" };
+  if (pointInRect(x, y, layout.objectPrev)) return { type: "action", id: "objectPrev" };
+  if (pointInRect(x, y, layout.objectNext)) return { type: "action", id: "objectNext" };
+  if (pointInRect(x, y, layout.roadPrev)) return { type: "action", id: "roadPrev" };
+  if (pointInRect(x, y, layout.roadNext)) return { type: "action", id: "roadNext" };
+  if (pointInRect(x, y, layout.roadValue)) return { type: "action", id: layout.roadValue.id };
+  if (pointInRect(x, y, layout.checkpointPrev)) return { type: "action", id: "checkpointPrev" };
+  if (pointInRect(x, y, layout.checkpointNext)) return { type: "action", id: "checkpointNext" };
   if (pointInRect(x, y, layout.checkpointValue))
     return { type: "action", id: layout.checkpointValue.id };
   if (pointInRect(x, y, layout.roadDeleteButton))
     return { type: "action", id: layout.roadDeleteButton.id };
   if (pointInRect(x, y, layout.checkpointDeleteButton))
     return { type: "action", id: layout.checkpointDeleteButton.id };
-  if (pointInRect(x, y, layout.roadSizeDown))
-    return { type: "action", id: layout.roadSizeDown.id };
-  if (pointInRect(x, y, layout.roadSizeUp))
-    return { type: "action", id: layout.roadSizeUp.id };
-  if (pointInRect(x, y, layout.roadSmoothPrev))
-    return { type: "action", id: "roadSmoothPrev" };
-  if (pointInRect(x, y, layout.roadSmoothNext))
-    return { type: "action", id: "roadSmoothNext" };
-  if (pointInRect(x, y, layout.zoomOut))
-    return { type: "action", id: "zoomOut" };
+  if (pointInRect(x, y, layout.roadSizeDown)) return { type: "action", id: layout.roadSizeDown.id };
+  if (pointInRect(x, y, layout.roadSizeUp)) return { type: "action", id: layout.roadSizeUp.id };
+  if (pointInRect(x, y, layout.roadSmoothPrev)) return { type: "action", id: "roadSmoothPrev" };
+  if (pointInRect(x, y, layout.roadSmoothNext)) return { type: "action", id: "roadSmoothNext" };
+  if (pointInRect(x, y, layout.zoomOut)) return { type: "action", id: "zoomOut" };
   if (pointInRect(x, y, layout.zoomIn)) return { type: "action", id: "zoomIn" };
-  if (pointInRect(x, y, layout.panToggle))
-    return { type: "action", id: layout.panToggle.id };
+  if (pointInRect(x, y, layout.panToggle)) return { type: "action", id: layout.panToggle.id };
   return { type: "panel" };
 }
 
@@ -761,10 +705,7 @@ function currentLoginProviderItems() {
 
 export function getMainMenuRenderModel(measureTextWidth) {
   const menuItems = currentMenuItems();
-  const selectedMenuIndex = Math.max(
-    0,
-    Math.min(state.menuIndex, menuItems.length - 1),
-  );
+  const selectedMenuIndex = Math.max(0, Math.min(state.menuIndex, menuItems.length - 1));
   let maxMenuLabelWidth = 0;
   for (const item of menuItems) {
     maxMenuLabelWidth = Math.max(maxMenuLabelWidth, measureTextWidth(item));
@@ -775,10 +716,7 @@ export function getMainMenuRenderModel(measureTextWidth) {
 
 export function getLoginProviderRenderModel(measureTextWidth) {
   const loginItems = currentLoginProviderItems();
-  const selectedLoginIndex = Math.max(
-    0,
-    Math.min(state.loginProviderIndex, loginItems.length - 1),
-  );
+  const selectedLoginIndex = Math.max(0, Math.min(state.loginProviderIndex, loginItems.length - 1));
   let maxLabelWidth = 0;
   for (const item of loginItems) {
     maxLabelWidth = Math.max(maxLabelWidth, measureTextWidth(item));
@@ -808,11 +746,8 @@ export function getSettingsRenderLayout(measureTextWidth) {
       return `${item}: ${isMenuMusicEnabled() ? "ON" : "OFF"}`;
     }
     if (item === "AI OPPONENTS") {
-      const count = sanitizeAiOpponentCount(
-        physicsConfig.flags.AI_OPPONENT_COUNT,
-      );
-      const aiOffSuffix =
-        physicsConfig.flags.AI_OPPONENTS_ENABLED === false ? " (AI OFF)" : "";
+      const count = sanitizeAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT);
+      const aiOffSuffix = physicsConfig.flags.AI_OPPONENTS_ENABLED === false ? " (AI OFF)" : "";
       return `${item}: ${count}${aiOffSuffix}`;
     }
     if (item === "SIDEWAYS DRIFT") {
@@ -851,10 +786,7 @@ export function getSettingsHeaderRenderModel() {
 
 export function getGameModeRenderModel(measureTextWidth) {
   const items = getGameModeItems();
-  const selectedIndex = Math.max(
-    0,
-    Math.min(state.gameModeIndex, items.length - 1),
-  );
+  const selectedIndex = Math.max(0, Math.min(state.gameModeIndex, items.length - 1));
   let maxWidth = 0;
   for (const item of items) {
     maxWidth = Math.max(maxWidth, measureTextWidth(item));
@@ -918,20 +850,12 @@ export function syncTrackSelectWindow() {
 }
 
 function selectedTrackPreset() {
-  if (
-    state.trackSelectIndex < 0 ||
-    state.trackSelectIndex >= trackOptions.length
-  )
-    return null;
+  if (state.trackSelectIndex < 0 || state.trackSelectIndex >= trackOptions.length) return null;
   return getTrackPreset(state.trackSelectIndex);
 }
 
 function selectedTrackCanDelete() {
-  return canDeleteTrackPreset(
-    selectedTrackPreset(),
-    state.auth.userId,
-    state.auth.isAdmin,
-  );
+  return canDeleteTrackPreset(selectedTrackPreset(), state.auth.userId, state.auth.isAdmin);
 }
 
 function selectedTrackCanPublish() {
@@ -956,10 +880,7 @@ export function getTrackSelectRenderModel() {
   const totalColumns = trackGridColumnCount();
   const visibleColumns = trackGridVisibleColumns();
   const maxColOffset = Math.max(0, totalColumns - visibleColumns);
-  const viewColumnOffset = Math.max(
-    0,
-    Math.min(state.trackSelectViewOffset, maxColOffset),
-  );
+  const viewColumnOffset = Math.max(0, Math.min(state.trackSelectViewOffset, maxColOffset));
   const selectedTrack = selectedTrackPreset();
 
   // Build grid cells for visible columns
@@ -1021,11 +942,7 @@ function replaceAppUrl({ pathname, trackId = null } = {}) {
   const url = new URL(window.location.href);
   url.pathname = pathname || url.pathname;
   url.searchParams.delete("track");
-  window.history.replaceState(
-    {},
-    "",
-    `${url.pathname}${url.search ? url.search : ""}${url.hash}`,
-  );
+  window.history.replaceState({}, "", `${url.pathname}${url.search ? url.search : ""}${url.hash}`);
 }
 
 function setTrackSelectUrl() {
@@ -1055,8 +972,7 @@ function setTrackInUrl(trackId) {
 }
 
 function clearTrackInUrl(trackId) {
-  const currentPath =
-    typeof window !== "undefined" ? window.location.pathname : "";
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
   const expectedPath = `/tracks/${encodeURIComponent(trackId)}`;
   if (currentPath !== expectedPath) return;
   replaceAppUrl({ pathname: "/tracks" });
@@ -1128,10 +1044,8 @@ function openInputModal({
   state.modal.cancelLabel = cancelLabel;
   state.modal.danger = false;
   state.modal.selectedAction = "confirm";
-  state.modal.inputValue =
-    typeof initialValue === "string" ? initialValue.slice(0, maxLength) : "";
-  state.modal.inputPlaceholder =
-    typeof placeholder === "string" ? placeholder : "";
+  state.modal.inputValue = typeof initialValue === "string" ? initialValue.slice(0, maxLength) : "";
+  state.modal.inputPlaceholder = typeof placeholder === "string" ? placeholder : "";
   state.modal.inputMaxLength = Math.max(1, Math.floor(maxLength) || 36);
   state.modal.onSubmit = typeof onSubmit === "function" ? onSubmit : null;
   state.modal.onConfirm = null;
@@ -1197,9 +1111,7 @@ export function pauseActiveRace() {
 function setRaceReturnTarget(mode, editorTrackIndex = null) {
   state.raceReturn.mode = mode;
   state.raceReturn.editorTrackIndex =
-    mode === "editor" && Number.isInteger(editorTrackIndex)
-      ? editorTrackIndex
-      : null;
+    mode === "editor" && Number.isInteger(editorTrackIndex) ? editorTrackIndex : null;
 }
 
 function returnFromRace() {
@@ -1233,9 +1145,7 @@ function updateEditorCursorFromScreen(screenX, screenY, canvasY = null) {
 }
 
 function rebuildEditorTrackGeometry() {
-  const generated = regenerateTrackFromCenterlineStrokes(
-    state.editor.trackIndex,
-  );
+  const generated = regenerateTrackFromCenterlineStrokes(state.editor.trackIndex);
   if (!generated) return false;
   applyTrackPreset(state.editor.trackIndex);
   setCurbSegments(initCurbSegments());
@@ -1384,9 +1294,7 @@ function placeEditorCheckpoint() {
   const y = state.editor.cursorY;
   const surface = surfaceAt(x, y);
   if (surface !== "asphalt" && surface !== "curb") return;
-  const progress = normalizeCheckpointProgress(
-    trackProgressAtPoint(x, y, track),
-  );
+  const progress = normalizeCheckpointProgress(trackProgressAtPoint(x, y, track));
   if (checkpointNearStart(progress, preset.track)) {
     showSnackbar("Checkpoint too close to start line", {
       seconds: 1.4,
@@ -1397,10 +1305,7 @@ function placeEditorCheckpoint() {
   if (!preset.checkpoints) preset.checkpoints = [];
   if (!preset.editStack) preset.editStack = [];
 
-  const existingIndex = findCheckpointIndexNearProgress(
-    preset.checkpoints,
-    progress,
-  );
+  const existingIndex = findCheckpointIndexNearProgress(preset.checkpoints, progress);
   if (existingIndex >= 0) {
     state.editor.latestEditTarget = {
       kind: "checkpoint",
@@ -1411,11 +1316,7 @@ function placeEditorCheckpoint() {
     return;
   }
 
-  const insertIndex = findCheckpointInsertIndex(
-    preset.checkpoints,
-    progress,
-    preset.track,
-  );
+  const insertIndex = findCheckpointInsertIndex(preset.checkpoints, progress, preset.track);
   preset.checkpoints.splice(insertIndex, 0, { progress });
   shiftEditorStackForInsert(preset, "checkpoint", insertIndex);
   preset.editStack.push({
@@ -1432,11 +1333,7 @@ function placeEditorCheckpoint() {
 
 function cycleSelectionIndex(count, currentIndex, direction) {
   if (!count) return null;
-  if (
-    !Number.isInteger(currentIndex) ||
-    currentIndex < 0 ||
-    currentIndex >= count
-  )
+  if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex >= count)
     return count - 1;
   return (currentIndex + direction + count) % count;
 }
@@ -1445,8 +1342,7 @@ function selectEditorObject(direction) {
   const preset = getTrackPreset(state.editor.trackIndex);
   const count = preset.worldObjects?.length || 0;
   if (!count) {
-    if (state.editor.latestEditTarget?.kind === "object")
-      state.editor.latestEditTarget = null;
+    if (state.editor.latestEditTarget?.kind === "object") state.editor.latestEditTarget = null;
     return;
   }
   const currentIndex =
@@ -1465,8 +1361,7 @@ function selectEditorRoad(direction) {
   const preset = getTrackPreset(state.editor.trackIndex);
   const count = preset.centerlineStrokes?.length || 0;
   if (!count) {
-    if (state.editor.latestEditTarget?.kind === "stroke")
-      state.editor.latestEditTarget = null;
+    if (state.editor.latestEditTarget?.kind === "stroke") state.editor.latestEditTarget = null;
     return;
   }
   const currentIndex =
@@ -1494,10 +1389,7 @@ function objectSelectionTarget(preset) {
 
 function roadSelectionTarget(preset) {
   const target = state.editor.latestEditTarget;
-  if (
-    target?.kind === "stroke" &&
-    preset.centerlineStrokes?.[target.strokeIndex]
-  ) {
+  if (target?.kind === "stroke" && preset.centerlineStrokes?.[target.strokeIndex]) {
     return target;
   }
   if (preset.centerlineStrokes?.length) {
@@ -1508,10 +1400,7 @@ function roadSelectionTarget(preset) {
 
 function checkpointSelectionTarget(preset) {
   const target = state.editor.latestEditTarget;
-  if (
-    target?.kind === "checkpoint" &&
-    preset.checkpoints?.[target.checkpointIndex]
-  ) {
+  if (target?.kind === "checkpoint" && preset.checkpoints?.[target.checkpointIndex]) {
     return target;
   }
   if (preset.checkpoints?.length) {
@@ -1526,11 +1415,7 @@ function checkpointSelectionTarget(preset) {
 function reindexEditorStack(preset, kind, removedIndex) {
   if (!Array.isArray(preset.editStack)) return;
   const key =
-    kind === "object"
-      ? "objectIndex"
-      : kind === "stroke"
-        ? "strokeIndex"
-        : "checkpointIndex";
+    kind === "object" ? "objectIndex" : kind === "stroke" ? "strokeIndex" : "checkpointIndex";
   preset.editStack = preset.editStack.flatMap((entry) => {
     if (entry.kind !== kind) return [entry];
     if (entry[key] === removedIndex) return [];
@@ -1542,11 +1427,7 @@ function reindexEditorStack(preset, kind, removedIndex) {
 function shiftEditorStackForInsert(preset, kind, insertedIndex) {
   if (!Array.isArray(preset.editStack)) return;
   const key =
-    kind === "object"
-      ? "objectIndex"
-      : kind === "stroke"
-        ? "strokeIndex"
-        : "checkpointIndex";
+    kind === "object" ? "objectIndex" : kind === "stroke" ? "strokeIndex" : "checkpointIndex";
   preset.editStack = preset.editStack.map((entry) => {
     if (entry.kind !== kind) return entry;
     if (entry[key] >= insertedIndex) return { ...entry, [key]: entry[key] + 1 };
@@ -1571,10 +1452,7 @@ function deleteSelectedEditorTarget(kind) {
     if (preset.worldObjects.length) {
       state.editor.latestEditTarget = {
         kind: "object",
-        objectIndex: Math.min(
-          target.objectIndex,
-          preset.worldObjects.length - 1,
-        ),
+        objectIndex: Math.min(target.objectIndex, preset.worldObjects.length - 1),
       };
     } else {
       syncLatestEditorTarget(preset);
@@ -1596,10 +1474,7 @@ function deleteSelectedEditorTarget(kind) {
     if (preset.checkpoints.length) {
       state.editor.latestEditTarget = {
         kind: "checkpoint",
-        checkpointIndex: Math.min(
-          target.checkpointIndex,
-          preset.checkpoints.length - 1,
-        ),
+        checkpointIndex: Math.min(target.checkpointIndex, preset.checkpoints.length - 1),
       };
     } else {
       syncLatestEditorTarget(preset);
@@ -1613,10 +1488,7 @@ function deleteSelectedEditorTarget(kind) {
   if (preset.centerlineStrokes.length) {
     state.editor.latestEditTarget = {
       kind: "stroke",
-      strokeIndex: Math.min(
-        target.strokeIndex,
-        preset.centerlineStrokes.length - 1,
-      ),
+      strokeIndex: Math.min(target.strokeIndex, preset.centerlineStrokes.length - 1),
     };
   } else {
     syncLatestEditorTarget(preset);
@@ -1660,9 +1532,7 @@ function adjustSelectedRoadWidth(direction) {
   if (!stroke?.length) return;
   for (const point of stroke) {
     const nextWidth =
-      (Number.isFinite(point.halfWidth)
-        ? point.halfWidth
-        : getDefaultStrokeHalfWidth(preset)) +
+      (Number.isFinite(point.halfWidth) ? point.halfWidth : getDefaultStrokeHalfWidth(preset)) +
       direction * 4;
     point.halfWidth = Math.max(24, Math.min(120, nextWidth));
   }
@@ -1675,8 +1545,7 @@ function selectEditorCheckpoint(direction) {
   const preset = getTrackPreset(state.editor.trackIndex);
   const count = preset.checkpoints?.length || 0;
   if (!count) {
-    if (state.editor.latestEditTarget?.kind === "checkpoint")
-      state.editor.latestEditTarget = null;
+    if (state.editor.latestEditTarget?.kind === "checkpoint") state.editor.latestEditTarget = null;
     return;
   }
   const currentIndex =
@@ -1698,8 +1567,7 @@ function rotateSelectedEditorObject(direction) {
   if (!target) return;
   const object = preset.worldObjects[target.objectIndex];
   if (!object) return;
-  object.angle =
-    ((object.angle || 0) + direction * (Math.PI / 12)) % (Math.PI * 2);
+  object.angle = ((object.angle || 0) + direction * (Math.PI / 12)) % (Math.PI * 2);
   state.editor.latestEditTarget = target;
   applyTrackPreset(state.editor.trackIndex);
 }
@@ -1709,9 +1577,7 @@ function adjustEditorZoom(direction) {
   const preset = getTrackPreset(state.editor.trackIndex);
   if (!preset?.track) return;
   const current = clampWorldScale(Number(preset.track.worldScale) || 1);
-  const next = clampWorldScale(
-    Number((current + direction * EDITOR_ZOOM_STEP).toFixed(2)),
-  );
+  const next = clampWorldScale(Number((current + direction * EDITOR_ZOOM_STEP).toFixed(2)));
   if (next === current) return;
   preset.track.worldScale = next;
   applyTrackPreset(state.editor.trackIndex);
@@ -1763,14 +1629,9 @@ function adjustEditorSmoothing(direction) {
   if (state.mode !== "editor") return;
   const preset = getTrackPreset(state.editor.trackIndex);
   if (!preset?.track) return;
-  const current = normalizeCenterlineSmoothingMode(
-    preset.track.centerlineSmoothingMode,
-  );
+  const current = normalizeCenterlineSmoothingMode(preset.track.centerlineSmoothingMode);
   const index = CENTERLINE_SMOOTHING_MODES.indexOf(current);
-  const nextIndex = Math.max(
-    0,
-    Math.min(CENTERLINE_SMOOTHING_MODES.length - 1, index + direction),
-  );
+  const nextIndex = Math.max(0, Math.min(CENTERLINE_SMOOTHING_MODES.length - 1, index + direction));
   if (nextIndex === index) return;
   preset.track.centerlineSmoothingMode = CENTERLINE_SMOOTHING_MODES[nextIndex];
   if (!rebuildEditorTrackGeometry()) {
@@ -1793,8 +1654,7 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "rotateLeft") rotateSelectedEditorObject(-1);
   if (actionId === "rotateRight") rotateSelectedEditorObject(1);
   if (actionId === "save") promptSaveEditorTrack();
-  if (actionId === "toggleCurbs")
-    state.editor.showCurbs = !state.editor.showCurbs;
+  if (actionId === "toggleCurbs") state.editor.showCurbs = !state.editor.showCurbs;
   if (actionId === "back") returnToTrackSelect();
   if (actionId === "roadModeSegment") setEditorRoadMode("segment");
   if (actionId === "roadModeCheckpoint") setEditorRoadMode("checkpoint");
@@ -1815,8 +1675,7 @@ function performEditorToolbarAction(actionId) {
 
 function performEditorTopBarAction(actionId) {
   if (actionId === "save") promptSaveEditorTrack();
-  if (actionId === "toggleCurbs")
-    state.editor.showCurbs = !state.editor.showCurbs;
+  if (actionId === "toggleCurbs") state.editor.showCurbs = !state.editor.showCurbs;
   if (actionId === "back") returnToTrackSelect();
   if (actionId === "race") startEditorRace();
   if (actionId === "build") rebuildEditorTrackGeometry();
@@ -1838,8 +1697,7 @@ async function saveEditorTrack(requestedName) {
   const trackIndex = state.editor.trackIndex;
   const previousPreset = getTrackPreset(trackIndex);
   const previousId = previousPreset.id;
-  const shouldReplacePrevious =
-    !previousPreset.fromDb && previousPreset.source !== "system";
+  const shouldReplacePrevious = !previousPreset.fromDb && previousPreset.source !== "system";
   saveTrackPreset(trackIndex);
   try {
     const imported = await saveTrackPresetToDb(trackIndex, {
@@ -1854,9 +1712,7 @@ async function saveEditorTrack(requestedName) {
     if (shouldReplacePrevious && previousId !== imported.id) {
       removeTrackPresetById(previousId, { removePersisted: true });
     }
-    const importedIndex = trackOptions.findIndex(
-      (opt) => opt.id === imported.id,
-    );
+    const importedIndex = trackOptions.findIndex((opt) => opt.id === imported.id);
     if (importedIndex >= 0) {
       state.editor.trackIndex = importedIndex;
       state.selectedTrackIndex = importedIndex;
@@ -1873,11 +1729,7 @@ async function saveEditorTrack(requestedName) {
   }
 }
 
-function openTrackNameModal({
-  initialValue = "",
-  confirmLabel = "Save",
-  onSubmit,
-}) {
+function openTrackNameModal({ initialValue = "", confirmLabel = "Save", onSubmit }) {
   openInputModal({
     title: "Track name",
     message: "Enter the track name.",
@@ -1929,13 +1781,10 @@ export function promptClearTrackRecords(trackIndex) {
       try {
         updatedPreset = await clearTrackRecordsAtIndex(trackIndex);
       } catch (error) {
-        showSnackbar(
-          error instanceof Error ? error.message : "Could not clear records",
-          {
-            seconds: 2,
-            kind: "error",
-          },
-        );
+        showSnackbar(error instanceof Error ? error.message : "Could not clear records", {
+          seconds: 2,
+          kind: "error",
+        });
         return;
       }
       if (!updatedPreset) return;
@@ -1975,20 +1824,17 @@ function setPlayerColor(nextColor) {
 function stepPlayerColor(delta) {
   const paletteIds = CAR_COLOR_PALETTE.map((option) => option.id);
   const currentIndex = Math.max(0, paletteIds.indexOf(state.playerColor));
-  const nextIndex =
-    (currentIndex + delta + paletteIds.length) % paletteIds.length;
+  const nextIndex = (currentIndex + delta + paletteIds.length) % paletteIds.length;
   setPlayerColor(paletteIds[nextIndex]);
 }
 
 function toggleAiOpponents() {
-  physicsConfig.flags.AI_OPPONENTS_ENABLED =
-    !physicsConfig.flags.AI_OPPONENTS_ENABLED;
+  physicsConfig.flags.AI_OPPONENTS_ENABLED = !physicsConfig.flags.AI_OPPONENTS_ENABLED;
   saveAiOpponentsEnabled(physicsConfig.flags.AI_OPPONENTS_ENABLED);
 }
 
 function toggleSidewaysDrift() {
-  physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED =
-    !physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED;
+  physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED = !physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED;
   saveSidewaysDriftEnabled(physicsConfig.flags.SIDEWAYS_DRIFT_ENABLED);
 }
 
@@ -1998,18 +1844,12 @@ function setAiOpponentCount(nextCount) {
 }
 
 function stepAiOpponentCount(delta) {
-  setAiOpponentCount(
-    sanitizeAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT) + delta,
-  );
+  setAiOpponentCount(sanitizeAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT) + delta);
 }
 
 function cycleAiOpponentCount() {
-  const current = sanitizeAiOpponentCount(
-    physicsConfig.flags.AI_OPPONENT_COUNT,
-  );
-  setAiOpponentCount(
-    current >= MAX_AI_OPPONENT_COUNT ? MIN_AI_OPPONENT_COUNT : current + 1,
-  );
+  const current = sanitizeAiOpponentCount(physicsConfig.flags.AI_OPPONENT_COUNT);
+  setAiOpponentCount(current >= MAX_AI_OPPONENT_COUNT ? MIN_AI_OPPONENT_COUNT : current + 1);
 }
 
 function createEmptyTrackAndEdit() {
@@ -2104,8 +1944,7 @@ function startTournament() {
   if (indices.length === 0) return;
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
   Promise.resolve(createHostedTournamentRoom()).catch((error) => {
-    const message =
-      error instanceof Error ? error.message : "Tournament room create failed";
+    const message = error instanceof Error ? error.message : "Tournament room create failed";
     showSnackbar(message, { seconds: 2.2, kind: "error" });
   });
 }
@@ -2180,8 +2019,7 @@ export function getTournamentStandingsData() {
     .sort((a, b) => b.total - a.total);
   const raceIndex = state.tournament.currentRaceIndex;
   const totalRaces = state.tournament.trackOrder.length;
-  const lastResult =
-    state.tournament.raceResults[state.tournament.raceResults.length - 1] || {};
+  const lastResult = state.tournament.raceResults[state.tournament.raceResults.length - 1] || {};
   return { sorted, raceIndex, totalRaces, lastResult };
 }
 
@@ -2192,10 +2030,7 @@ export function prepareSingleRaceAiRoster() {
 }
 
 function activateSelection() {
-  state.menuIndex = Math.max(
-    0,
-    Math.min(state.menuIndex, currentMenuItems().length - 1),
-  );
+  state.menuIndex = Math.max(0, Math.min(state.menuIndex, currentMenuItems().length - 1));
   state.loginProviderIndex = Math.max(
     0,
     Math.min(state.loginProviderIndex, currentLoginProviderItems().length - 1),
@@ -2283,10 +2118,7 @@ function activateSelection() {
       return;
     }
 
-    if (
-      state.gameMode === "tournament" &&
-      state.trackSelectIndex === startTournamentIdx
-    ) {
+    if (state.gameMode === "tournament" && state.trackSelectIndex === startTournamentIdx) {
       startTournament();
       return;
     }
@@ -2305,10 +2137,7 @@ function activateSelection() {
     }
 
     // Single race mode
-    if (
-      state.trackSelectIndex >= 0 &&
-      state.trackSelectIndex < trackOptions.length
-    ) {
+    if (state.trackSelectIndex >= 0 && state.trackSelectIndex < trackOptions.length) {
       state.selectedTrackIndex = state.trackSelectIndex;
       applyTrackPreset(state.selectedTrackIndex);
       setCurbSegments(initCurbSegments());
@@ -2367,8 +2196,7 @@ function activateSelection() {
           showSnackbar("Logged out", { seconds: 1.8, kind: "info" });
         })
         .catch((error) => {
-          const message =
-            error instanceof Error ? error.message : "Logout failed";
+          const message = error instanceof Error ? error.message : "Logout failed";
           showSnackbar(message, { seconds: 2, kind: "error" });
         });
       return;
@@ -2433,19 +2261,12 @@ function onKeyDown(e) {
   if (
     ["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key) ||
     (key === "backspace" &&
-      (state.mode === "trackSelect" ||
-        state.mode === "editor" ||
-        state.modal.open))
+      (state.mode === "trackSelect" || state.mode === "editor" || state.modal.open))
   ) {
     e.preventDefault();
   }
 
-  if (
-    state.mode === "editor" &&
-    key === "s" &&
-    (e.metaKey || e.ctrlKey) &&
-    !e.altKey
-  ) {
+  if (state.mode === "editor" && key === "s" && (e.metaKey || e.ctrlKey) && !e.altKey) {
     e.preventDefault();
     if (!e.repeat) promptSaveEditorTrack();
     return;
@@ -2453,11 +2274,8 @@ function onKeyDown(e) {
 
   if (state.modal.open) {
     if (state.modal.mode === "input") {
-      if (
-        ["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)
-      ) {
-        state.modal.selectedAction =
-          state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
+      if (["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)) {
+        state.modal.selectedAction = state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
         return;
       }
       if (key === "escape") {
@@ -2475,8 +2293,7 @@ function onKeyDown(e) {
         closeModal();
         if (shouldSubmit && typeof onSubmit === "function") {
           Promise.resolve(onSubmit(value)).catch((error) => {
-            const message =
-              error instanceof Error ? error.message : "Action failed";
+            const message = error instanceof Error ? error.message : "Action failed";
             showSnackbar(message, { seconds: 2, kind: "error" });
           });
         }
@@ -2496,11 +2313,8 @@ function onKeyDown(e) {
       return;
     }
 
-    if (
-      ["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)
-    ) {
-      state.modal.selectedAction =
-        state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
+    if (["arrowleft", "arrowright", "arrowup", "arrowdown", "tab"].includes(key)) {
+      state.modal.selectedAction = state.modal.selectedAction === "cancel" ? "confirm" : "cancel";
       return;
     }
     if (key === "escape") {
@@ -2532,9 +2346,7 @@ function onKeyDown(e) {
         if (state.auth.authenticated) {
           Promise.resolve(updateAuthDisplayName(state.playerName))
             .then((payload) => {
-              const nextName = sanitizePlayerName(
-                payload.display_name || state.playerName,
-              );
+              const nextName = sanitizePlayerName(payload.display_name || state.playerName);
               state.playerName = nextName;
               state.auth.displayName = nextName;
               showSnackbar("Display name updated", {
@@ -2543,8 +2355,7 @@ function onKeyDown(e) {
               });
             })
             .catch((error) => {
-              const message =
-                error instanceof Error ? error.message : "Update failed";
+              const message = error instanceof Error ? error.message : "Update failed";
               showSnackbar(message, { seconds: 2, kind: "error" });
             });
         }
@@ -2688,8 +2499,7 @@ function onKeyDown(e) {
   }
   if (state.mode === "editor" && key === "backspace") {
     if (e.repeat) return;
-    if (state.editor.latestEditTarget?.kind === "stroke")
-      deleteSelectedEditorTarget("stroke");
+    if (state.editor.latestEditTarget?.kind === "stroke") deleteSelectedEditorTarget("stroke");
     else if (state.editor.latestEditTarget?.kind === "checkpoint")
       deleteSelectedEditorTarget("checkpoint");
     else deleteSelectedEditorTarget("object");
@@ -2730,14 +2540,13 @@ function onKeyDown(e) {
           },
         );
         if (!updatedPreset) return;
-        showSnackbar(
-          updatedPreset.isPublished ? "Track published" : "Track unpublished",
-          { seconds: 1.8, kind: "success" },
-        );
+        showSnackbar(updatedPreset.isPublished ? "Track published" : "Track unpublished", {
+          seconds: 1.8,
+          kind: "success",
+        });
       })
       .catch((error) => {
-        const message =
-          error instanceof Error ? error.message : "Publish update failed";
+        const message = error instanceof Error ? error.message : "Publish update failed";
         showSnackbar(message, { seconds: 2, kind: "error" });
       });
     return;
@@ -2818,17 +2627,11 @@ function onKeyDown(e) {
     state.trackSelectIndex < trackOptions.length
   ) {
     const preset = getTrackPreset(state.trackSelectIndex);
-    if (
-      !preset ||
-      !canDeleteTrackPreset(preset, state.auth.userId, state.auth.isAdmin)
-    ) {
-      showSnackbar(
-        "Only unpublished tracks you own can be deleted, unless you are admin",
-        {
-          seconds: 1.8,
-          kind: "error",
-        },
-      );
+    if (!preset || !canDeleteTrackPreset(preset, state.auth.userId, state.auth.isAdmin)) {
+      showSnackbar("Only unpublished tracks you own can be deleted, unless you are admin", {
+        seconds: 1.8,
+        kind: "error",
+      });
       return;
     }
     openConfirmModal({
@@ -2860,8 +2663,7 @@ function onKeyDown(e) {
           clearTrackInUrl(preset.id);
           showSnackbar("Track deleted", { seconds: 1.8, kind: "success" });
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Delete failed";
+          const message = error instanceof Error ? error.message : "Delete failed";
           showSnackbar(message, { seconds: 2, kind: "error" });
         }
       },
@@ -2869,11 +2671,7 @@ function onKeyDown(e) {
     return;
   }
 
-  if (
-    key === "a" &&
-    state.mode === "trackSelect" &&
-    state.gameMode === "single"
-  ) {
+  if (key === "a" && state.mode === "trackSelect" && state.gameMode === "single") {
     toggleAiOpponents();
     return;
   }
@@ -2936,26 +2734,20 @@ function onKeyDown(e) {
     }
     if (state.mode === "gameModeSelect") {
       const items = getGameModeItems();
-      state.gameModeIndex =
-        (state.gameModeIndex + items.length - 1) % items.length;
+      state.gameModeIndex = (state.gameModeIndex + items.length - 1) % items.length;
     }
     if (state.mode === "settings") {
       const items = currentSettingsItems();
-      state.settingsIndex =
-        (state.settingsIndex + items.length - 1) % items.length;
+      state.settingsIndex = (state.settingsIndex + items.length - 1) % items.length;
     }
     if (state.mode === "loginProviders") {
       const items = currentLoginProviderItems();
-      state.loginProviderIndex =
-        (state.loginProviderIndex + items.length - 1) % items.length;
+      state.loginProviderIndex = (state.loginProviderIndex + items.length - 1) % items.length;
     }
     if (state.mode === "trackSelect") {
       const backIndex = trackSelectBackIndex();
       const startIdx = trackSelectStartTournamentIndex();
-      if (
-        state.trackSelectIndex === backIndex ||
-        state.trackSelectIndex === startIdx
-      ) {
+      if (state.trackSelectIndex === backIndex || state.trackSelectIndex === startIdx) {
         // Jump from button row back to last track
         const lastTrack = trackOptions.length - 1;
         if (lastTrack >= 0) {
@@ -2971,14 +2763,9 @@ function onKeyDown(e) {
       }
     }
     if (state.mode === "tournamentLobby") {
-      const maxIndex =
-        state.tournamentRoom.slots.length +
-        (state.tournamentRoom.isHost ? 1 : 0);
+      const maxIndex = state.tournamentRoom.slots.length + (state.tournamentRoom.isHost ? 1 : 0);
       state.tournamentLobbyIndex = Math.max(0, state.tournamentLobbyIndex - 1);
-      state.tournamentLobbyIndex = Math.min(
-        state.tournamentLobbyIndex,
-        maxIndex,
-      );
+      state.tournamentLobbyIndex = Math.min(state.tournamentLobbyIndex, maxIndex);
     }
     keys.up = true;
   }
@@ -3000,16 +2787,10 @@ function onKeyDown(e) {
       state.loginProviderIndex = (state.loginProviderIndex + 1) % items.length;
     }
     if (state.mode === "trackSelect") {
-      if (
-        state.trackSelectIndex >= 0 &&
-        state.trackSelectIndex < trackOptions.length
-      ) {
+      if (state.trackSelectIndex >= 0 && state.trackSelectIndex < trackOptions.length) {
         const row = state.trackSelectIndex % TRACK_GRID_ROWS;
         const col = Math.floor(state.trackSelectIndex / TRACK_GRID_ROWS);
-        if (
-          row < TRACK_GRID_ROWS - 1 &&
-          col * TRACK_GRID_ROWS + row + 1 < trackOptions.length
-        ) {
+        if (row < TRACK_GRID_ROWS - 1 && col * TRACK_GRID_ROWS + row + 1 < trackOptions.length) {
           state.trackSelectIndex += 1;
         } else {
           // Bottom of grid — go to primary action button
@@ -3021,13 +2802,8 @@ function onKeyDown(e) {
       }
     }
     if (state.mode === "tournamentLobby") {
-      const maxIndex =
-        state.tournamentRoom.slots.length +
-        (state.tournamentRoom.isHost ? 1 : 0);
-      state.tournamentLobbyIndex = Math.min(
-        maxIndex,
-        state.tournamentLobbyIndex + 1,
-      );
+      const maxIndex = state.tournamentRoom.slots.length + (state.tournamentRoom.isHost ? 1 : 0);
+      state.tournamentLobbyIndex = Math.min(maxIndex, state.tournamentLobbyIndex + 1);
     }
     keys.down = true;
   }
@@ -3046,10 +2822,7 @@ function onKeyDown(e) {
   if (key === "arrowleft" && state.mode === "tournamentLobby") {
     const shareIndex = state.tournamentRoom.slots.length;
     const startIndex = shareIndex + 1;
-    if (
-      state.tournamentRoom.isHost &&
-      state.tournamentLobbyIndex >= shareIndex
-    ) {
+    if (state.tournamentRoom.isHost && state.tournamentLobbyIndex >= shareIndex) {
       state.tournamentLobbyIndex =
         state.tournamentLobbyIndex === startIndex ? shareIndex : startIndex;
     }
@@ -3069,10 +2842,7 @@ function onKeyDown(e) {
   if (key === "arrowright" && state.mode === "tournamentLobby") {
     const shareIndex = state.tournamentRoom.slots.length;
     const startIndex = shareIndex + 1;
-    if (
-      state.tournamentRoom.isHost &&
-      state.tournamentLobbyIndex >= shareIndex
-    ) {
+    if (state.tournamentRoom.isHost && state.tournamentLobbyIndex >= shareIndex) {
       state.tournamentLobbyIndex =
         state.tournamentLobbyIndex === startIndex ? shareIndex : startIndex;
     }
@@ -3104,10 +2874,7 @@ function onKeyDown(e) {
       }
     }
   }
-  if (
-    (key === "arrowleft" || key === "arrowright") &&
-    state.mode === "settings"
-  ) {
+  if ((key === "arrowleft" || key === "arrowright") && state.mode === "settings") {
     const selected = currentSettingsItems()[state.settingsIndex];
     if (selected === "PLAYER COLOR") {
       stepPlayerColor(key === "arrowleft" ? -1 : 1);
@@ -3172,10 +2939,8 @@ export function initInputHandlers() {
   window.addEventListener("mousemove", (event) => {
     updateEditorCursorFromEvent(event);
     if (state.mode === "editor" && state.editor.toolbar.dragging) {
-      state.editor.toolbar.x =
-        state.editor.cursorScreenX - state.editor.toolbar.dragOffsetX;
-      state.editor.toolbar.y =
-        state.editor.cursorScreenY - state.editor.toolbar.dragOffsetY;
+      state.editor.toolbar.x = state.editor.cursorScreenX - state.editor.toolbar.dragOffsetX;
+      state.editor.toolbar.y = state.editor.cursorScreenY - state.editor.toolbar.dragOffsetY;
       clampEditorToolbarPosition();
       saveEditorToolbarPosition();
       return;
@@ -3199,9 +2964,7 @@ export function initInputHandlers() {
         state.editor.cursorScreenY,
       );
       state.editor.toolbar.hoverLabel =
-        toolbarHit?.type === "action"
-          ? editorToolbarActionLabel(toolbarHit.id)
-          : "";
+        toolbarHit?.type === "action" ? editorToolbarActionLabel(toolbarHit.id) : "";
     } else {
       state.editor.toolbar.hoverLabel = "";
     }
@@ -3244,10 +3007,8 @@ export function initInputHandlers() {
     );
     if (toolbarHit?.type === "drag") {
       state.editor.toolbar.dragging = true;
-      state.editor.toolbar.dragOffsetX =
-        state.editor.cursorScreenX - state.editor.toolbar.x;
-      state.editor.toolbar.dragOffsetY =
-        state.editor.cursorScreenY - state.editor.toolbar.y;
+      state.editor.toolbar.dragOffsetX = state.editor.cursorScreenX - state.editor.toolbar.x;
+      state.editor.toolbar.dragOffsetY = state.editor.cursorScreenY - state.editor.toolbar.y;
       return;
     }
     if (toolbarHit?.type === "action") {
@@ -3278,9 +3039,7 @@ export function initInputHandlers() {
     const preset = getTrackPreset(state.editor.trackIndex);
     const halfWidth = getDefaultStrokeHalfWidth(preset);
     state.editor.drawing = true;
-    state.editor.activeStroke = [
-      { x: state.editor.cursorX, y: state.editor.cursorY, halfWidth },
-    ];
+    state.editor.activeStroke = [{ x: state.editor.cursorX, y: state.editor.cursorY, halfWidth }];
   });
   window.addEventListener("mouseup", (event) => {
     if (state.mode !== "editor" || event.button !== 0) return;
@@ -3304,9 +3063,7 @@ export function initInputHandlers() {
     const nextStroke = stroke.map((p) => ({
       x: p.x,
       y: p.y,
-      halfWidth: Number.isFinite(p.halfWidth)
-        ? p.halfWidth
-        : EDITOR_DEFAULT_HALF_WIDTH,
+      halfWidth: Number.isFinite(p.halfWidth) ? p.halfWidth : EDITOR_DEFAULT_HALF_WIDTH,
     }));
     const selectedStrokeIndex =
       state.editor.latestEditTarget?.kind === "stroke"

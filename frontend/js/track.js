@@ -30,11 +30,7 @@ function normalizeProgress(progress) {
 }
 
 function getCenterlineLoop(trackDef = track) {
-  if (
-    !Array.isArray(trackDef.centerlineLoop) ||
-    trackDef.centerlineLoop.length < 3
-  )
-    return null;
+  if (!Array.isArray(trackDef.centerlineLoop) || trackDef.centerlineLoop.length < 3) return null;
   return trackDef.centerlineLoop;
 }
 
@@ -181,10 +177,7 @@ function offsetLoop(loop, offset, miterLimit = 2.6) {
     }
 
     // Bevel fallback on very sharp/degenerate corners avoids offset spikes and self-overlaps.
-    const avg = normalizeVec(
-      inNormal.x + outNormal.x,
-      inNormal.y + outNormal.y,
-    );
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
     const fallbackNormal =
       Math.hypot(avg.x, avg.y) > 1e-4
         ? avg
@@ -208,11 +201,7 @@ function shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol) {
   if (segLenSq < 1e-8) return true;
 
   // Only remove points that project inside the local hull span [prev, next].
-  const t = clamp(
-    ((curr.x - prev.x) * segX + (curr.y - prev.y) * segY) / segLenSq,
-    0,
-    1,
-  );
+  const t = clamp(((curr.x - prev.x) * segX + (curr.y - prev.y) * segY) / segLenSq, 0, 1);
   if (t <= 1e-3 || t >= 1 - 1e-3) return false;
 
   const projX = prev.x + segX * t;
@@ -222,8 +211,7 @@ function shouldCullLoopVertex(prev, curr, next, minEdgeLen, collinearTol) {
 }
 
 function simplifyOpenPathRdp(points, epsilon) {
-  if (!Array.isArray(points) || points.length <= 2)
-    return Array.isArray(points) ? [...points] : [];
+  if (!Array.isArray(points) || points.length <= 2) return Array.isArray(points) ? [...points] : [];
   const first = points[0];
   const last = points[points.length - 1];
   const segX = last.x - first.x;
@@ -256,8 +244,7 @@ function simplifyOpenPathRdp(points, epsilon) {
 }
 
 function simplifyClosedLoopRdp(loop, epsilon, minVertices) {
-  if (!Array.isArray(loop) || loop.length < 4)
-    return Array.isArray(loop) ? [...loop] : [];
+  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
 
   let tol = epsilon;
   let simplified = [...loop];
@@ -281,8 +268,7 @@ function simplifyClosedLoop(
     minVertices = 14,
   } = {},
 ) {
-  if (!Array.isArray(loop) || loop.length < 4)
-    return Array.isArray(loop) ? [...loop] : [];
+  if (!Array.isArray(loop) || loop.length < 4) return Array.isArray(loop) ? [...loop] : [];
   let points = loop.map((p) => ({ x: p.x, y: p.y }));
 
   for (let pass = 0; pass < maxPasses; pass++) {
@@ -418,10 +404,7 @@ export function checkpointProgress(checkpoint, trackDef = track) {
 }
 
 export function checkpointFrame(checkpoint, trackDef = track) {
-  return trackFrameAtProgress(
-    checkpointProgress(checkpoint, trackDef),
-    trackDef,
-  );
+  return trackFrameAtProgress(checkpointProgress(checkpoint, trackDef), trackDef);
 }
 
 export function sampleCenterlineHalfWidth(progress, trackDef = track) {
@@ -480,10 +463,7 @@ function offsetLoopVariable(loop, offsets, miterLimit = 2.6) {
       }
     }
 
-    const avg = normalizeVec(
-      inNormal.x + outNormal.x,
-      inNormal.y + outNormal.y,
-    );
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
     const fallbackNormal =
       Math.hypot(avg.x, avg.y) > 1e-4
         ? avg
@@ -500,10 +480,7 @@ export function trackBoundaryPaths(trackDef = track, segments = 220) {
   const loop = getCenterlineLoop(trackDef);
   if (!loop) return { center: [], outer: [], inner: [] };
   const sampledCenter = sampleLoop(loop, Math.max(segments, loop.length));
-  const widthSamples = sampleCenterlineWidthSeries(
-    trackDef,
-    sampledCenter.length,
-  );
+  const widthSamples = sampleCenterlineWidthSeries(trackDef, sampledCenter.length);
   const outer = offsetLoopVariable(sampledCenter, widthSamples);
   const inner = offsetLoopVariable(
     sampledCenter,
@@ -520,9 +497,7 @@ let cachedTrackNavGraph = null;
 let cachedTrackNavSignature = "";
 
 function trackNavSignature(trackDef = track, objects = worldObjects) {
-  const loop = Array.isArray(trackDef.centerlineLoop)
-    ? trackDef.centerlineLoop
-    : [];
+  const loop = Array.isArray(trackDef.centerlineLoop) ? trackDef.centerlineLoop : [];
   const widths = Array.isArray(trackDef.centerlineWidthProfile)
     ? trackDef.centerlineWidthProfile
     : [];
@@ -553,10 +528,7 @@ function trackNavSignature(trackDef = track, objects = worldObjects) {
     Number(trackDef.centerlineHalfWidth || 0).toFixed(1),
     Number(trackDef.worldScale || 1).toFixed(2),
     loop
-      .map(
-        (point) =>
-          `${Number(point.x || 0).toFixed(1)},${Number(point.y || 0).toFixed(1)}`,
-      )
+      .map((point) => `${Number(point.x || 0).toFixed(1)},${Number(point.y || 0).toFixed(1)}`)
       .join(";"),
     widths.map((value) => Number(value || 0).toFixed(1)).join(","),
     checkpointSig,
@@ -564,15 +536,7 @@ function trackNavSignature(trackDef = track, objects = worldObjects) {
   ].join("#");
 }
 
-function addNavEdge(
-  edges,
-  fromNode,
-  toNode,
-  cost,
-  step,
-  kind = "progress",
-  extra = null,
-) {
+function addNavEdge(edges, fromNode, toNode, cost, step, kind = "progress", extra = null) {
   if (!fromNode || !toNode || toNode.id === fromNode.id) return;
   const edgeList = edges[fromNode.id];
   if (!edgeList) return;
@@ -602,9 +566,7 @@ function computeBaseTargetSpeed(curvature) {
   const aiCfg = physicsConfig.ai;
   const excessCurvature = Math.max(0, curvature - aiCfg.fullThrottleCurvature);
   return clamp(
-    aiCfg.targetSpeedMax -
-      excessCurvature * aiCfg.curvatureSpeedScale +
-      aiCfg.curvatureSpeedBias,
+    aiCfg.targetSpeedMax - excessCurvature * aiCfg.curvatureSpeedScale + aiCfg.curvatureSpeedBias,
     aiCfg.cornerSpeedMin,
     aiCfg.targetSpeedMax,
   );
@@ -614,14 +576,7 @@ function clamp01(value) {
   return clamp(value, 0, 1);
 }
 
-function clearNavSegment(
-  ax,
-  ay,
-  bx,
-  by,
-  trackDef = track,
-  objects = worldObjects,
-) {
+function clearNavSegment(ax, ay, bx, by, trackDef = track, objects = worldObjects) {
   const samples = 6;
   for (let step = 0; step <= samples; step++) {
     const t = step / samples;
@@ -632,43 +587,25 @@ function clearNavSegment(
   return true;
 }
 
-function navSurfacePenaltyAlongSegment(
-  ax,
-  ay,
-  bx,
-  by,
-  trackDef = track,
-  objects = worldObjects,
-) {
+function navSurfacePenaltyAlongSegment(ax, ay, bx, by, trackDef = track, objects = worldObjects) {
   const samples = 6;
   let totalPenalty = 0;
   for (let step = 0; step <= samples; step++) {
     const t = step / samples;
     const x = ax + (bx - ax) * t;
     const y = ay + (by - ay) * t;
-    totalPenalty += nodeSurfacePenalty(
-      surfaceAtForTrack(x, y, trackDef, objects),
-    );
+    totalPenalty += nodeSurfacePenalty(surfaceAtForTrack(x, y, trackDef, objects));
   }
-  return (
-    (totalPenalty / (samples + 1)) *
-    physicsConfig.ai.edgeSegmentSurfacePenaltyWeight
-  );
+  return (totalPenalty / (samples + 1)) * physicsConfig.ai.edgeSegmentSurfacePenaltyWeight;
 }
 
 function getSpringObjects(objects = worldObjects) {
-  return objects
-    .map(normalizeWorldObject)
-    .filter((obj) => obj && obj.type === "spring");
+  return objects.map(normalizeWorldObject).filter((obj) => obj && obj.type === "spring");
 }
 
 function springLaunchApexHeight(speed) {
   const airCfg = physicsConfig.air;
-  const speedRatio = clamp(
-    speed / Math.max(physicsConfig.car.maxSpeed, 1),
-    0,
-    1,
-  );
+  const speedRatio = clamp(speed / Math.max(physicsConfig.car.maxSpeed, 1), 0, 1);
   return Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
 }
 
@@ -681,10 +618,7 @@ function estimateJumpLaunchReach(node, nodeEdges, nodes) {
     if (edge?.kind !== "progress" || edge.step !== 1) continue;
     const nextNode = nodes[edge.to];
     if (!nextNode) continue;
-    forwardReach = Math.max(
-      forwardReach,
-      Math.hypot(nextNode.x - node.x, nextNode.y - node.y),
-    );
+    forwardReach = Math.max(forwardReach, Math.hypot(nextNode.x - node.x, nextNode.y - node.y));
   }
 
   // On long straights the nav graph can leave ~one slice length between nodes.
@@ -703,10 +637,7 @@ function springLaunchOpportunity(
   const dy = spring.y - node.y;
   const along = dx * node.tangentX + dy * node.tangentY;
   const lateral = Math.abs(dx * -node.tangentY + dy * node.tangentX);
-  const approachSlack = Math.max(
-    spring.r * 0.35,
-    Math.min(launchReach * 0.2, spring.r),
-  );
+  const approachSlack = Math.max(spring.r * 0.35, Math.min(launchReach * 0.2, spring.r));
   return (
     along >= -approachSlack &&
     along <= launchReach &&
@@ -714,12 +645,7 @@ function springLaunchOpportunity(
   );
 }
 
-function estimateGroundAlternativeCost(
-  edges,
-  startNodeId,
-  goalNodeId,
-  maxVisits,
-) {
+function estimateGroundAlternativeCost(edges, startNodeId, goalNodeId, maxVisits) {
   if (startNodeId === goalNodeId) return 0;
   const best = new Map([[startNodeId, 0]]);
   const queue = [{ nodeId: startNodeId, cost: 0 }];
@@ -797,12 +723,7 @@ function simulateSpringJumpArc(
       penaltySurfaceDistance += Math.hypot(nextX - x, nextY - y);
     }
 
-    const airborneCollision = resolveObjectCollisions(
-      nextX,
-      nextY,
-      Math.max(nextZ, 0),
-      objects,
-    );
+    const airborneCollision = resolveObjectCollisions(nextX, nextY, Math.max(nextZ, 0), objects);
     if (airborneCollision.hit) return null;
 
     x = nextX;
@@ -835,14 +756,7 @@ function simulateSpringJumpArc(
   return null;
 }
 
-function collectSpringJumpCandidates(
-  node,
-  nodes,
-  progressCount,
-  trackDef,
-  objects,
-  jumpArc,
-) {
+function collectSpringJumpCandidates(node, nodes, progressCount, trackDef, objects, jumpArc) {
   const aiCfg = physicsConfig.ai;
   const landingRadius = aiCfg.jumpLandingRadius || 42;
   const landingHeadingThreshold = aiCfg.jumpLandingHeadingThreshold || 0.2;
@@ -860,18 +774,11 @@ function collectSpringJumpCandidates(
       candidate.tangentX * node.tangentX + candidate.tangentY * node.tangentY;
     if (headingAlignment < landingHeadingThreshold) continue;
     const progressStep =
-      (candidate.sliceIndex - node.sliceIndex + progressCount) %
-        progressCount || 0;
+      (candidate.sliceIndex - node.sliceIndex + progressCount) % progressCount || 0;
     if (progressStep < minProgressStep) continue;
-    const landingSurface = surfaceAtForTrack(
-      candidate.x,
-      candidate.y,
-      trackDef,
-      objects,
-    );
+    const landingSurface = surfaceAtForTrack(candidate.x, candidate.y, trackDef, objects);
     const landingPenalty =
-      nodeSurfacePenalty(landingSurface) *
-      (aiCfg.jumpLandingSurfacePenaltyMul || 0.55);
+      nodeSurfacePenalty(landingSurface) * (aiCfg.jumpLandingSurfacePenaltyMul || 0.55);
     const rolloutDistance = Math.max(distanceToLanding, 1);
     const rolloutPenalty = distanceToLanding * 0.35;
     const obstaclePenalty = (candidate.obstaclePenalty || 0) * 0.12;
@@ -891,8 +798,7 @@ function collectSpringJumpCandidates(
       travelTime: jumpArc.airTime + rolloutDistance / rolloutSpeed,
       landingError: distanceToLanding,
       distanceCost: jumpArc.travelDistance + rolloutDistance,
-      plannerPenaltyCost:
-        rolloutPenalty + landingPenalty + obstaclePenalty + riskPenalty,
+      plannerPenaltyCost: rolloutPenalty + landingPenalty + obstaclePenalty + riskPenalty,
     });
   }
 
@@ -900,13 +806,7 @@ function collectSpringJumpCandidates(
   return candidates.slice(0, aiCfg.jumpMaxLandingOptions || 2);
 }
 
-function addSpringJumpEdges(
-  nodes,
-  edges,
-  progressCount,
-  trackDef = track,
-  objects = worldObjects,
-) {
+function addSpringJumpEdges(nodes, edges, progressCount, trackDef = track, objects = worldObjects) {
   const aiCfg = physicsConfig.ai;
   const springs = getSpringObjects(objects);
   if (!springs.length) return;
@@ -915,9 +815,7 @@ function addSpringJumpEdges(
   for (const node of nodes) {
     if (node.surface !== "asphalt" && node.surface !== "curb") continue;
     const launchReach = estimateJumpLaunchReach(node, edges[node.id], nodes);
-    const spring = springs.find((obj) =>
-      springLaunchOpportunity(node, obj, launchReach),
-    );
+    const spring = springs.find((obj) => springLaunchOpportunity(node, obj, launchReach));
     if (!spring) continue;
     const jumpArc = simulateSpringJumpArc(node, spring, trackDef, objects, {
       launchSpeed: clamp(
@@ -929,8 +827,7 @@ function addSpringJumpEdges(
     if (!jumpArc) continue;
     if (
       !jumpArc.obstacleBypassed &&
-      jumpArc.penaltySurfaceDistance <
-        (aiCfg.jumpMinPenaltySurfaceDistance || 18)
+      jumpArc.penaltySurfaceDistance < (aiCfg.jumpMinPenaltySurfaceDistance || 18)
     ) {
       continue;
     }
@@ -956,26 +853,18 @@ function addSpringJumpEdges(
       ) {
         continue;
       }
-      addNavEdge(
-        edges,
-        node,
-        option.candidate,
-        option.cost,
-        option.step,
-        "jump",
-        {
-          airborne: true,
-          travelTime: option.travelTime,
-          distanceCost: option.distanceCost,
-          plannerPenaltyCost: option.plannerPenaltyCost,
-          launchSpeed: jumpArc.launchSpeed,
-          landingError: option.landingError,
-          obstacleBypassed: jumpArc.obstacleBypassed,
-          penaltySurfaceDistance: jumpArc.penaltySurfaceDistance,
-          groundAlternativeCost,
-          benefitCost,
-        },
-      );
+      addNavEdge(edges, node, option.candidate, option.cost, option.step, "jump", {
+        airborne: true,
+        travelTime: option.travelTime,
+        distanceCost: option.distanceCost,
+        plannerPenaltyCost: option.plannerPenaltyCost,
+        launchSpeed: jumpArc.launchSpeed,
+        landingError: option.landingError,
+        obstacleBypassed: jumpArc.obstacleBypassed,
+        penaltySurfaceDistance: jumpArc.penaltySurfaceDistance,
+        groundAlternativeCost,
+        benefitCost,
+      });
     }
   }
 }
@@ -1018,12 +907,7 @@ function obstaclePenaltyAtPoint(x, y, objects = worldObjects) {
     }
     if (clearance < aiCfg.obstacleAvoidanceRadius) {
       const t =
-        1 -
-        clearance /
-          Math.max(
-            aiCfg.obstacleAvoidanceRadius,
-            aiCfg.obstacleHardClearance + 1,
-          );
+        1 - clearance / Math.max(aiCfg.obstacleAvoidanceRadius, aiCfg.obstacleHardClearance + 1);
       penalty += aiCfg.obstaclePenalty * t * t;
     }
   }
@@ -1057,16 +941,9 @@ function buildCheckpointGoalNodeIds(nodes, trackDef = track) {
   return checkpoints.map((checkpoint) => {
     const frame = checkpointFrame(checkpoint, trackDef);
     const halfSpan =
-      frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER * 0.5 +
-      aiCfg.checkpointGoalLateralMargin;
-    const approachDepth = Math.max(
-      aiCfg.checkpointGoalDepth,
-      frame.roadWidth * 0.22,
-    );
-    const exitDepth = Math.max(
-      aiCfg.checkpointGoalExitDepth,
-      frame.roadWidth * 0.34,
-    );
+      frame.roadWidth * CHECKPOINT_WIDTH_MULTIPLIER * 0.5 + aiCfg.checkpointGoalLateralMargin;
+    const approachDepth = Math.max(aiCfg.checkpointGoalDepth, frame.roadWidth * 0.22);
+    const exitDepth = Math.max(aiCfg.checkpointGoalExitDepth, frame.roadWidth * 0.34);
     const candidates = [];
     for (const node of nodes) {
       const dx = node.x - frame.point.x;
@@ -1075,8 +952,7 @@ function buildCheckpointGoalNodeIds(nodes, trackDef = track) {
       if (approach < -approachDepth || approach > exitDepth) continue;
       const lateral = Math.abs(dx * frame.normal.x + dy * frame.normal.y);
       if (lateral > halfSpan) continue;
-      const headingAlignment =
-        node.tangentX * frame.tangent.x + node.tangentY * frame.tangent.y;
+      const headingAlignment = node.tangentX * frame.tangent.x + node.tangentY * frame.tangent.y;
       if (headingAlignment < aiCfg.checkpointGoalHeadingAlignment) continue;
       candidates.push({
         id: node.id,
@@ -1089,9 +965,7 @@ function buildCheckpointGoalNodeIds(nodes, trackDef = track) {
       });
     }
     candidates.sort((a, b) => a.score - b.score);
-    return candidates
-      .slice(0, aiCfg.checkpointGoalNodeLimit)
-      .map((candidate) => candidate.id);
+    return candidates.slice(0, aiCfg.checkpointGoalNodeLimit).map((candidate) => candidate.id);
   });
 }
 
@@ -1104,21 +978,15 @@ function pickRouteStartNodeId(trackDef, graph) {
   const startAngle = trackStartAngle(trackDef);
   const startFrame = trackFrameAtAngle(startAngle, trackDef);
   const startSlice =
-    Math.round(
-      (normalizeAngle(startAngle) / (Math.PI * 2)) * graph.progressCount,
-    ) % graph.progressCount;
-  const sliceNodeIds = graph.nodesBySlice[startSlice].filter(
-    (nodeId) => nodeId >= 0,
-  );
+    Math.round((normalizeAngle(startAngle) / (Math.PI * 2)) * graph.progressCount) %
+    graph.progressCount;
+  const sliceNodeIds = graph.nodesBySlice[startSlice].filter((nodeId) => nodeId >= 0);
   if (sliceNodeIds.length) {
     let bestNodeId = sliceNodeIds[0];
     let bestDistance = Infinity;
     for (const nodeId of sliceNodeIds) {
       const node = graph.nodes[nodeId];
-      const distance = Math.hypot(
-        node.x - startFrame.point.x,
-        node.y - startFrame.point.y,
-      );
+      const distance = Math.hypot(node.x - startFrame.point.x, node.y - startFrame.point.y);
       if (distance < bestDistance) {
         bestDistance = distance;
         bestNodeId = nodeId;
@@ -1152,32 +1020,23 @@ function chooseBestLapEdge(node, graph) {
         }
       }
     }
-    const futureTurn =
-      nextNode.signedCurvature + (followNode?.signedCurvature ?? 0) * 0.9;
+    const futureTurn = nextNode.signedCurvature + (followNode?.signedCurvature ?? 0) * 0.9;
     const turnDir = Math.sign(futureTurn);
     const turnStrength = clamp01(Math.abs(futureTurn) * 5.5);
     const apexStrength = clamp01(Math.abs(nextNode.signedCurvature) * 7.5);
-    const entryTarget =
-      -turnDir * nextNode.roadHalfWidth * (0.5 + turnStrength * 0.22);
-    const apexTarget =
-      turnDir * nextNode.roadHalfWidth * (0.22 + turnStrength * 0.38);
-    const desiredOffset =
-      turnDir === 0 ? 0 : apexStrength > 0.52 ? apexTarget : entryTarget;
+    const entryTarget = -turnDir * nextNode.roadHalfWidth * (0.5 + turnStrength * 0.22);
+    const apexTarget = turnDir * nextNode.roadHalfWidth * (0.22 + turnStrength * 0.38);
+    const desiredOffset = turnDir === 0 ? 0 : apexStrength > 0.52 ? apexTarget : entryTarget;
     const linePenalty =
       turnDir === 0
         ? Math.abs(nextNode.laneOffset) * 0.04
         : Math.abs(nextNode.laneOffset - desiredOffset) *
-          (apexStrength > 0.52
-            ? aiCfg.apexCommitWeight
-            : aiCfg.apexApproachWeight);
+          (apexStrength > 0.52 ? aiCfg.apexCommitWeight : aiCfg.apexApproachWeight);
     const transitionPenalty =
       turnDir === 0
         ? Math.abs(nextNode.laneOffset - node.laneOffset) * 0.04
-        : Math.abs(
-            nextNode.laneOffset -
-              node.laneOffset -
-              (desiredOffset - node.laneOffset),
-          ) * aiCfg.apexTransitionWeight;
+        : Math.abs(nextNode.laneOffset - node.laneOffset - (desiredOffset - node.laneOffset)) *
+          aiCfg.apexTransitionWeight;
     const score =
       edge.cost * 0.86 +
       futureCost * 0.52 +
@@ -1218,8 +1077,7 @@ function buildBestLapRoute(graph, trackDef) {
     currentNodeId = bestEdge.to;
     if (
       routeSlices.size >= graph.progressCount &&
-      graph.nodes[currentNodeId]?.sliceIndex ===
-        graph.nodes[startNodeId]?.sliceIndex
+      graph.nodes[currentNodeId]?.sliceIndex === graph.nodes[startNodeId]?.sliceIndex
     ) {
       break;
     }
@@ -1230,9 +1088,7 @@ function buildBestLapRoute(graph, trackDef) {
     routeNodeIds.push(startNodeId);
   }
 
-  const routeTargetSpeeds = routeNodeIds.map(
-    (nodeId) => graph.nodes[nodeId].baseTargetSpeed,
-  );
+  const routeTargetSpeeds = routeNodeIds.map((nodeId) => graph.nodes[nodeId].baseTargetSpeed);
   // Physics-based backward propagation: v_entry = sqrt(v_next² + 2·a·d).
   // This lets the AI carry maximum speed into corners while guaranteeing it
   // can brake in time.
@@ -1241,10 +1097,7 @@ function buildBestLapRoute(graph, trackDef) {
   for (let i = routeTargetSpeeds.length - 2; i >= 0; i--) {
     const node = graph.nodes[routeNodeIds[i]];
     const nextNode = graph.nodes[routeNodeIds[i + 1]];
-    const segmentDistance = Math.hypot(
-      nextNode.x - node.x,
-      nextNode.y - node.y,
-    );
+    const segmentDistance = Math.hypot(nextNode.x - node.x, nextNode.y - node.y);
     const carrySpeed = Math.sqrt(
       routeTargetSpeeds[i + 1] * routeTargetSpeeds[i + 1] +
         2 * brakeDecel * brakingEff * segmentDistance,
@@ -1253,14 +1106,11 @@ function buildBestLapRoute(graph, trackDef) {
   }
   if (routeTargetSpeeds.length > 1) {
     const tailDistance = Math.hypot(
-      graph.nodes[routeNodeIds[0]].x -
-        graph.nodes[routeNodeIds[routeNodeIds.length - 1]].x,
-      graph.nodes[routeNodeIds[0]].y -
-        graph.nodes[routeNodeIds[routeNodeIds.length - 1]].y,
+      graph.nodes[routeNodeIds[0]].x - graph.nodes[routeNodeIds[routeNodeIds.length - 1]].x,
+      graph.nodes[routeNodeIds[0]].y - graph.nodes[routeNodeIds[routeNodeIds.length - 1]].y,
     );
     const tailCarry = Math.sqrt(
-      routeTargetSpeeds[0] * routeTargetSpeeds[0] +
-        2 * brakeDecel * brakingEff * tailDistance,
+      routeTargetSpeeds[0] * routeTargetSpeeds[0] + 2 * brakeDecel * brakingEff * tailDistance,
     );
     routeTargetSpeeds[routeTargetSpeeds.length - 1] = Math.min(
       routeTargetSpeeds[routeTargetSpeeds.length - 1],
@@ -1282,20 +1132,14 @@ function buildBestLapRoute(graph, trackDef) {
   };
 }
 
-export function getTrackNavigationGraph(
-  trackDef = track,
-  objects = worldObjects,
-) {
+export function getTrackNavigationGraph(trackDef = track, objects = worldObjects) {
   const signature = trackNavSignature(trackDef, objects);
   if (cachedTrackNavGraph && cachedTrackNavSignature === signature) {
     return cachedTrackNavGraph;
   }
 
   const aiCfg = physicsConfig.ai;
-  const progressCount = Math.max(
-    24,
-    Math.floor(aiCfg.navProgressSamples || 96),
-  );
+  const progressCount = Math.max(24, Math.floor(aiCfg.navProgressSamples || 96));
   const laneFactors =
     Array.isArray(aiCfg.navLaneSamples) && aiCfg.navLaneSamples.length
       ? [...aiCfg.navLaneSamples]
@@ -1376,16 +1220,7 @@ export function getTrackNavigationGraph(
         const nextNodeId = nodesBySlice[nextSliceIndex][nextLaneIndex];
         if (nextNodeId < 0) continue;
         const nextNode = nodes[nextNodeId];
-        if (
-          !clearNavSegment(
-            node.x,
-            node.y,
-            nextNode.x,
-            nextNode.y,
-            trackDef,
-            objects,
-          )
-        ) {
+        if (!clearNavSegment(node.x, node.y, nextNode.x, nextNode.y, trackDef, objects)) {
           continue;
         }
         const segmentObstacleInfo = obstaclePenaltyAlongSegment(
@@ -1398,19 +1233,11 @@ export function getTrackNavigationGraph(
         if (segmentObstacleInfo.blocked) continue;
         const distance = Math.hypot(nextNode.x - node.x, nextNode.y - node.y);
         const laneChangePenalty =
-          Math.abs(nextNode.laneIndex - node.laneIndex) *
-          aiCfg.laneChangePenalty;
+          Math.abs(nextNode.laneIndex - node.laneIndex) * aiCfg.laneChangePenalty;
         const surfacePenalty =
           nodeSurfacePenalty(node.surface) +
           nodeSurfacePenalty(nextNode.surface) +
-          navSurfacePenaltyAlongSegment(
-            node.x,
-            node.y,
-            nextNode.x,
-            nextNode.y,
-            trackDef,
-            objects,
-          );
+          navSurfacePenaltyAlongSegment(node.x, node.y, nextNode.x, nextNode.y, trackDef, objects);
         const curvaturePenalty = nextNode.curvature * 42;
         const plannerPenaltyCost =
           laneChangePenalty +
@@ -1433,43 +1260,20 @@ export function getTrackNavigationGraph(
   // needs to exit a loop it has already visited.  Tagged "backward" so the
   // route builder and continuation greedy walks can skip them.
   for (const node of nodes) {
-    const prevSliceIndex =
-      (node.sliceIndex - 1 + progressCount) % progressCount;
+    const prevSliceIndex = (node.sliceIndex - 1 + progressCount) % progressCount;
     const prevNodeId = nodesBySlice[prevSliceIndex][node.laneIndex];
     if (prevNodeId < 0) continue;
     const prevNode = nodes[prevNodeId];
-    if (
-      !clearNavSegment(
-        node.x,
-        node.y,
-        prevNode.x,
-        prevNode.y,
-        trackDef,
-        objects,
-      )
-    ) {
+    if (!clearNavSegment(node.x, node.y, prevNode.x, prevNode.y, trackDef, objects)) {
       continue;
     }
-    const segInfo = obstaclePenaltyAlongSegment(
-      node.x,
-      node.y,
-      prevNode.x,
-      prevNode.y,
-      objects,
-    );
+    const segInfo = obstaclePenaltyAlongSegment(node.x, node.y, prevNode.x, prevNode.y, objects);
     if (segInfo.blocked) continue;
     const distance = Math.hypot(prevNode.x - node.x, prevNode.y - node.y);
     const surfPenalty =
       nodeSurfacePenalty(node.surface) +
       nodeSurfacePenalty(prevNode.surface) +
-      navSurfacePenaltyAlongSegment(
-        node.x,
-        node.y,
-        prevNode.x,
-        prevNode.y,
-        trackDef,
-        objects,
-      );
+      navSurfacePenaltyAlongSegment(node.x, node.y, prevNode.x, prevNode.y, trackDef, objects);
     const plannerPenaltyCost =
       surfPenalty +
       prevNode.curvature * 42 +
@@ -1492,28 +1296,17 @@ export function getTrackNavigationGraph(
       const dx = candidate.x - node.x;
       const dy = candidate.y - node.y;
       const distance = Math.hypot(dx, dy);
-      if (distance <= 1e-5 || distance > aiCfg.navIntersectionLinkRadius)
-        continue;
+      if (distance <= 1e-5 || distance > aiCfg.navIntersectionLinkRadius) continue;
       const dir = normalizeVec(dx, dy);
       const departureAlignment = node.tangentX * dir.x + node.tangentY * dir.y;
-      const arrivalAlignment =
-        candidate.tangentX * dir.x + candidate.tangentY * dir.y;
+      const arrivalAlignment = candidate.tangentX * dir.x + candidate.tangentY * dir.y;
       if (
         departureAlignment < aiCfg.navIntersectionHeadingThreshold ||
         arrivalAlignment < aiCfg.navIntersectionHeadingThreshold
       ) {
         continue;
       }
-      if (
-        !clearNavSegment(
-          node.x,
-          node.y,
-          candidate.x,
-          candidate.y,
-          trackDef,
-          objects,
-        )
-      ) {
+      if (!clearNavSegment(node.x, node.y, candidate.x, candidate.y, trackDef, objects)) {
         continue;
       }
       const segmentObstacleInfo = obstaclePenaltyAlongSegment(
@@ -1527,14 +1320,7 @@ export function getTrackNavigationGraph(
       const surfacePenalty =
         nodeSurfacePenalty(node.surface) +
         nodeSurfacePenalty(candidate.surface) +
-        navSurfacePenaltyAlongSegment(
-          node.x,
-          node.y,
-          candidate.x,
-          candidate.y,
-          trackDef,
-          objects,
-        );
+        navSurfacePenaltyAlongSegment(node.x, node.y, candidate.x, candidate.y, trackDef, objects);
       const plannerPenaltyCost =
         surfacePenalty +
         candidate.curvature * 24 +
@@ -1563,8 +1349,7 @@ export function getTrackNavigationGraph(
 
   const checkpointNodeIds = checkpoints.map((checkpoint) => {
     const checkpointProgressValue = checkpointProgress(checkpoint, trackDef);
-    const centerSlice =
-      Math.round(checkpointProgressValue * progressCount) % progressCount;
+    const centerSlice = Math.round(checkpointProgressValue * progressCount) % progressCount;
     const nodeIds = [];
     for (let offset = -1; offset <= 1; offset++) {
       const sliceIndex = (centerSlice + offset + progressCount) % progressCount;
@@ -1574,9 +1359,8 @@ export function getTrackNavigationGraph(
     }
     return [...new Set(nodeIds)];
   });
-  const checkpointGoalNodeIds = buildCheckpointGoalNodeIds(nodes, trackDef).map(
-    (nodeIds, index) =>
-      nodeIds.length ? nodeIds : checkpointNodeIds[index] || [],
+  const checkpointGoalNodeIds = buildCheckpointGoalNodeIds(nodes, trackDef).map((nodeIds, index) =>
+    nodeIds.length ? nodeIds : checkpointNodeIds[index] || [],
   );
 
   cachedTrackNavSignature = signature;
@@ -1595,13 +1379,7 @@ export function getTrackNavigationGraph(
               const nextSlice = (node.sliceIndex + 1) % progressCount;
               const nextNodeId = nodesBySlice[nextSlice][node.laneIndex];
               if (nextNodeId < 0) return sum;
-              return (
-                sum +
-                Math.hypot(
-                  nodes[nextNodeId].x - node.x,
-                  nodes[nextNodeId].y - node.y,
-                )
-              );
+              return sum + Math.hypot(nodes[nextNodeId].x - node.x, nodes[nextNodeId].y - node.y);
             }, 0) / Math.max(nodes.length, 1)
           : 1,
     },
@@ -1624,13 +1402,7 @@ export function getTrackNavigationGraph(
             const nextSlice = (node.sliceIndex + 1) % progressCount;
             const nextNodeId = nodesBySlice[nextSlice][node.laneIndex];
             if (nextNodeId < 0) return sum;
-            return (
-              sum +
-              Math.hypot(
-                nodes[nextNodeId].x - node.x,
-                nodes[nextNodeId].y - node.y,
-              )
-            );
+            return sum + Math.hypot(nodes[nextNodeId].x - node.x, nodes[nextNodeId].y - node.y);
           }, 0) / Math.max(nodes.length, 1)
         : 1,
   };
@@ -1656,9 +1428,7 @@ export function findNearestTrackNavNode(
     if (distance > maxDistance) continue;
     let score = distance;
     if (progressHint !== null) {
-      const progressDelta = Math.abs(
-        positiveProgressDelta(progressHint, node.progress),
-      );
+      const progressDelta = Math.abs(positiveProgressDelta(progressHint, node.progress));
       score += Math.min(progressDelta, 1 - progressDelta) * 90;
     }
     if (preferForwardProgress !== null) {
@@ -1693,11 +1463,7 @@ export function drawPath(points) {
 export function blobRadius(ellipseX, ellipseY, angle, seed = 0) {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  const base =
-    1 /
-    Math.sqrt(
-      (c * c) / (ellipseX * ellipseX) + (s * s) / (ellipseY * ellipseY),
-    );
+  const base = 1 / Math.sqrt((c * c) / (ellipseX * ellipseX) + (s * s) / (ellipseY * ellipseY));
   const wobble =
     1 +
     0.16 * Math.sin(angle * 2 + seed) +
@@ -1735,8 +1501,7 @@ export function drawStripedCurb(
       return maxWidth * Math.sin(clamp(d / totalLen, 0, 1) * Math.PI);
     }
     if (d < fadeLen) return maxWidth * smoothstep(d / fadeLen);
-    if (d > totalLen - fadeLen)
-      return maxWidth * smoothstep((totalLen - d) / fadeLen);
+    if (d > totalLen - fadeLen) return maxWidth * smoothstep((totalLen - d) / fadeLen);
     return maxWidth;
   };
 
@@ -1767,9 +1532,7 @@ export function drawStripedCurb(
     nx = (nx / nlen) * sideSign;
     ny = (ny / nlen) * sideSign;
 
-    const cap = Array.isArray(widthCaps)
-      ? Math.max(0, widthCaps[i] ?? maxWidth)
-      : maxWidth;
+    const cap = Array.isArray(widthCaps) ? Math.max(0, widthCaps[i] ?? maxWidth) : maxWidth;
     const w = Math.min(widthAt(cumulative[i]), cap);
     outerPts[i] = {
       x: pathPoints[i].x + nx * w,
@@ -1893,8 +1656,7 @@ function buildCurbSegments(trackDef = track) {
 
   // ── Adaptive curvature threshold ───────────────────────────────────
   const sortedAbs = Array.from(absCurvatures).sort((a, b) => a - b);
-  const curvatureThreshold =
-    sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
+  const curvatureThreshold = sortedAbs[Math.floor(sortedAbs.length * 0.62)] || 0.0022;
   const primaryCurbThreshold = curvatureThreshold * 0.78;
 
   // ── Per-sample available-space estimation ──────────────────────────
@@ -1915,11 +1677,7 @@ function buildCurbSegments(trackDef = track) {
   const minCurbSpaces = new Float64Array(segmentCount);
   const curvatureRange = Math.max(curvatureThreshold * 2.1, 1e-6);
   for (let i = 0; i < segmentCount; i++) {
-    const curvatureT = clamp(
-      (absCurvatures[i] - primaryCurbThreshold) / curvatureRange,
-      0,
-      1,
-    );
+    const curvatureT = clamp((absCurvatures[i] - primaryCurbThreshold) / curvatureRange, 0, 1);
     const widthByRoad = roadHalfWidths[i] * (0.24 + curvatureT * 0.28);
     const targetWidth = clamp(widthByRoad, CURB_MIN_WIDTH, CURB_MAX_WIDTH);
     minCurbSpaces[i] = targetWidth * (0.95 + (1 - curvatureT) * 0.35);
@@ -1952,15 +1710,13 @@ function buildCurbSegments(trackDef = track) {
     // Outer side eligibility
     if (outerSpace[i] >= minCurbSpaces[i]) {
       if (outerIsOutside) outerPrimary[i] = 1;
-      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost)
-        outerSecondary[i] = 1;
+      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) outerSecondary[i] = 1;
     }
 
     // Inner side eligibility
     if (innerSpace[i] >= minCurbSpaces[i]) {
       if (!outerIsOutside) innerPrimary[i] = 1;
-      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost)
-        innerSecondary[i] = 1;
+      else if (absCurvatures[i] >= curvatureThreshold * insideCurvatureBoost) innerSecondary[i] = 1;
     }
   }
 
@@ -1985,10 +1741,8 @@ function buildCurbSegments(trackDef = track) {
   // Re-check space constraint after expansion (don't let expansion push
   // curbs into cramped areas).
   for (let i = 0; i < segmentCount; i++) {
-    if (outerPrimaryExpanded[i] && outerSpace[i] < minCurbSpaces[i])
-      outerPrimaryExpanded[i] = 0;
-    if (innerPrimaryExpanded[i] && innerSpace[i] < minCurbSpaces[i])
-      innerPrimaryExpanded[i] = 0;
+    if (outerPrimaryExpanded[i] && outerSpace[i] < minCurbSpaces[i]) outerPrimaryExpanded[i] = 0;
+    if (innerPrimaryExpanded[i] && innerSpace[i] < minCurbSpaces[i]) innerPrimaryExpanded[i] = 0;
     if (outerSecondaryExpanded[i] && outerSpace[i] < minCurbSpaces[i])
       outerSecondaryExpanded[i] = 0;
     if (innerSecondaryExpanded[i] && innerSpace[i] < minCurbSpaces[i])
@@ -2061,10 +1815,7 @@ function buildCurbSegments(trackDef = track) {
         if (run.length < 4) return false;
         let arcLen = 0;
         for (let i = 1; i < run.length; i++) {
-          arcLen += Math.hypot(
-            run[i].x - run[i - 1].x,
-            run[i].y - run[i - 1].y,
-          );
+          arcLen += Math.hypot(run[i].x - run[i - 1].x, run[i].y - run[i - 1].y);
         }
         return arcLen >= minRunArcLength;
       })
@@ -2165,10 +1916,7 @@ export function initCurbSegments(trackDef = track) {
   try {
     return buildCurbSegments(trackDef);
   } catch (err) {
-    console.error(
-      "Curb segment generation failed, falling back to full curbs.",
-      err,
-    );
+    console.error("Curb segment generation failed, falling back to full curbs.", err);
     return buildFullCurbSegments(trackDef);
   }
 }
@@ -2222,12 +1970,7 @@ export function surfaceAt(x, y) {
   return "asphalt";
 }
 
-export function surfaceAtForTrack(
-  x,
-  y,
-  trackDef = track,
-  objects = worldObjects,
-) {
+export function surfaceAtForTrack(x, y, trackDef = track, objects = worldObjects) {
   if (pondSlowdownAt(x, y, objects)) return "water";
   if (oilSlipAt(x, y, objects)) return "oil";
   const surface = getSurface(x, y, trackDef);
@@ -2296,11 +2039,7 @@ export function getObjectHeight(obj) {
 export function getSolidObjects(objects = worldObjects) {
   return objects
     .map(normalizeWorldObject)
-    .filter(
-      (obj) =>
-        obj &&
-        (obj.type === "tree" || obj.type === "barrel" || obj.type === "wall"),
-    );
+    .filter((obj) => obj && (obj.type === "tree" || obj.type === "barrel" || obj.type === "wall"));
 }
 
 export function pointInsideWallFootprint(x, y, wall) {
@@ -2312,10 +2051,7 @@ export function pointInsideWallFootprint(x, y, wall) {
   const sin = Math.sin(normalized.angle);
   const localX = dx * cos + dy * sin;
   const localY = -dx * sin + dy * cos;
-  return (
-    Math.abs(localX) <= normalized.length * 0.5 &&
-    Math.abs(localY) <= normalized.width * 0.5
-  );
+  return Math.abs(localX) <= normalized.length * 0.5 && Math.abs(localY) <= normalized.width * 0.5;
 }
 
 export function findSpringTrigger(x, y, objects = worldObjects) {
@@ -2400,12 +2136,7 @@ function resolveWallCollision(rx, ry, obj, carRadius) {
   };
 }
 
-export function resolveObjectCollisions(
-  x,
-  y,
-  carZ = 0,
-  objects = worldObjects,
-) {
+export function resolveObjectCollisions(x, y, carZ = 0, objects = worldObjects) {
   let rx = x;
   let ry = y;
   let hit = false;

@@ -1,10 +1,4 @@
-import {
-  AUDIO_TUNING,
-  createGain,
-  makeOscillator,
-  now,
-  setParam,
-} from "./shared.js";
+import { AUDIO_TUNING, createGain, makeOscillator, now, setParam } from "./shared.js";
 
 export class SignalSynth {
   constructor(context, output) {
@@ -13,10 +7,7 @@ export class SignalSynth {
   }
 
   triggerCountdownBeep(step = 1) {
-    const index = Math.max(
-      0,
-      Math.min(AUDIO_TUNING.signal.countdownHz.length - 1, step - 1),
-    );
+    const index = Math.max(0, Math.min(AUDIO_TUNING.signal.countdownHz.length - 1, step - 1));
     const freq = AUDIO_TUNING.signal.countdownHz[index];
     const time = now(this.context);
     const osc = makeOscillator(this.context, "square", freq);
@@ -32,10 +23,7 @@ export class SignalSynth {
 
     body.gain.setValueAtTime(0.0001, time);
     body.gain.linearRampToValueAtTime(0.14, time + 0.01);
-    body.gain.exponentialRampToValueAtTime(
-      0.0001,
-      time + AUDIO_TUNING.signal.countdownDuration,
-    );
+    body.gain.exponentialRampToValueAtTime(0.0001, time + AUDIO_TUNING.signal.countdownDuration);
     osc.frequency.setValueAtTime(freq, time);
     osc.frequency.exponentialRampToValueAtTime(freq * 0.92, time + 0.09);
 
@@ -48,11 +36,7 @@ export class SignalSynth {
     const duration = AUDIO_TUNING.signal.goDuration;
     const voices = AUDIO_TUNING.signal.goHz;
     for (let i = 0; i < voices.length; i++) {
-      const osc = makeOscillator(
-        this.context,
-        i === 0 ? "square" : "triangle",
-        voices[i],
-      );
+      const osc = makeOscillator(this.context, i === 0 ? "square" : "triangle", voices[i]);
       const gain = createGain(this.context, 0);
       const filter = this.context.createBiquadFilter();
       filter.type = "bandpass";

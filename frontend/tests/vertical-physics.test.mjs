@@ -201,8 +201,7 @@ function getPathSurfaceExposure(graph, pathNodeIds, samplesPerSegment = 10) {
       const x = fromNode.x + (toNode.x - fromNode.x) * t;
       const y = fromNode.y + (toNode.y - fromNode.y) * t;
       const surface = surfaceAt(x, y);
-      if (surface === "grass" || surface === "water" || surface === "oil")
-        counts[surface] += 1;
+      if (surface === "grass" || surface === "water" || surface === "oil") counts[surface] += 1;
     }
   }
   return counts;
@@ -343,26 +342,18 @@ test("legacy checkpoint angles migrate to editable progress checkpoints", () => 
   assert.equal(preset.checkpoints.length, 3);
   assert.ok(
     preset.checkpoints.every(
-      (checkpoint) =>
-        Number.isFinite(checkpoint.progress) &&
-        !Object.hasOwn(checkpoint, "angle"),
+      (checkpoint) => Number.isFinite(checkpoint.progress) && !Object.hasOwn(checkpoint, "angle"),
     ),
   );
 
-  const trackIndex = trackOptions.findIndex(
-    (option) => option.id === imported.id,
-  );
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
   applyTrackPreset(trackIndex);
   assert.equal(checkpoints.length, 4);
   assert.equal(checkpoints[0].isStart, true);
-  assert.ok(
-    checkpoints.slice(1).every((checkpoint) => checkpoint.isStart === false),
-  );
+  assert.ok(checkpoints.slice(1).every((checkpoint) => checkpoint.isStart === false));
 
   removeTrackPresetById(imported.id);
-  const restoreIndex = trackOptions.findIndex(
-    (option) => option.id === originalTrackId,
-  );
+  const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
   applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
 });
 
@@ -552,9 +543,7 @@ test("resetRace spawns a five-car AI field with matching heading and lap state",
     const goalNodeIds = graph.checkpointGoalNodeIds[nextCheckpointIndex]?.length
       ? graph.checkpointGoalNodeIds[nextCheckpointIndex]
       : graph.checkpointNodeIds[nextCheckpointIndex];
-    const goalIndex = runtime.plannedNodeIds.findIndex((nodeId) =>
-      goalNodeIds.includes(nodeId),
-    );
+    const goalIndex = runtime.plannedNodeIds.findIndex((nodeId) => goalNodeIds.includes(nodeId));
 
     assert.equal(lap.lap, 1);
     assert.equal(lap.finished, false);
@@ -577,25 +566,14 @@ test("random ai roster uses unique names from the configured pool", () => {
 
   assert.equal(roster.length, aiCars.length);
   assert.equal(new Set(roster.map((entry) => entry.name)).size, aiCars.length);
-  assert.ok(
-    roster.every((entry) => AI_OPPONENT_NAME_POOL.includes(entry.name)),
-  );
+  assert.ok(roster.every((entry) => AI_OPPONENT_NAME_POOL.includes(entry.name)));
   assert.equal(preciseDrivers.length, 1);
   assert.ok(bumpDrivers.length >= 2);
-  assert.equal(
-    longDrivers.length + bumpDrivers.length + preciseDrivers.length,
-    aiCars.length,
-  );
+  assert.equal(longDrivers.length + bumpDrivers.length + preciseDrivers.length, aiCars.length);
   assert.equal(preciseDrivers[0].topSpeedMul, 1);
-  assert.ok(
-    preciseDrivers.every((entry) => AI_PRECISE_NAME_POOL.includes(entry.name)),
-  );
-  assert.ok(
-    bumpDrivers.every((entry) => AI_BUMP_NAME_POOL.includes(entry.name)),
-  );
-  assert.ok(
-    longDrivers.every((entry) => AI_LONG_NAME_POOL.includes(entry.name)),
-  );
+  assert.ok(preciseDrivers.every((entry) => AI_PRECISE_NAME_POOL.includes(entry.name)));
+  assert.ok(bumpDrivers.every((entry) => AI_BUMP_NAME_POOL.includes(entry.name)));
+  assert.ok(longDrivers.every((entry) => AI_LONG_NAME_POOL.includes(entry.name)));
   assert.ok(
     roster
       .filter((entry) => entry.style !== "precise")
@@ -825,10 +803,7 @@ test("finish celebration standings keep unique accent colors for AI finishers", 
     summary.entries.map((entry) => entry.accentColor),
     ["#d22525", "#66d987", "#ffd25e", "#34d1c6"],
   );
-  assert.equal(
-    new Set(summary.entries.map((entry) => entry.accentColor)).size,
-    4,
-  );
+  assert.equal(new Set(summary.entries.map((entry) => entry.accentColor)).size, 4);
 
   assignRandomAiRoster();
   resetRace();
@@ -981,10 +956,7 @@ test("inner-loop checkpoint: AI enters loop, reaches checkpoint, and exits", () 
   assert.ok(path.includes(6), "path must enter the loop (node 6)");
   assert.ok(path.includes(7), "path must reach the checkpoint (node 7)");
   // Must NOT include node 3 (the main-line node past the branch)
-  assert.ok(
-    !path.includes(3),
-    "path should not follow the main line past the branch",
-  );
+  assert.ok(!path.includes(3), "path should not follow the main line past the branch");
   assert.ok(!path.includes(5), "path should not continue to end of main line");
   assert.deepEqual(path, [0, 1, 2, 6, 7]);
 });
@@ -1032,11 +1004,7 @@ test("time-based planner takes grass shortcut only when faster", () => {
 
   const path = planTrackNavPath(graph, 0, [2]);
   // The 20px grass shortcut is faster → planner takes the direct route
-  assert.deepEqual(
-    path,
-    [0, 1, 2],
-    "should take the short grass path when faster",
-  );
+  assert.deepEqual(path, [0, 1, 2], "should take the short grass path when faster");
 });
 
 test("time-based planner avoids grass when asphalt route is faster", () => {
@@ -1081,11 +1049,7 @@ test("time-based planner avoids grass when asphalt route is faster", () => {
 
   const path = planTrackNavPath(graph, 0, [2]);
   // Asphalt detour is faster → planner avoids the grass
-  assert.deepEqual(
-    path,
-    [0, 3, 4, 2],
-    "should avoid long grass when asphalt is faster",
-  );
+  assert.deepEqual(path, [0, 3, 4, 2], "should avoid long grass when asphalt is faster");
 });
 
 test("AI reverses out of a completed loop instead of repeating it", () => {
@@ -1145,26 +1109,16 @@ test("AI reverses out of a completed loop instead of repeating it", () => {
   assert.ok(path.length > 0, "path should be found");
   // With backward edge: 4 → 2 (backward) → 3.  Only 3 nodes.
   // Without backward: 4 → 5 → 1 → 2 → 3.  5 nodes + more time.
-  assert.deepEqual(
-    path,
-    [4, 2, 3],
-    "should reverse to junction then go forward",
-  );
+  assert.deepEqual(path, [4, 2, 3], "should reverse to junction then go forward");
 });
 
 test("track navigation graph adds junction links for intersecting layouts", () => {
   const graph = getTrackNavigationGraph(makeIntersectionTrackData(), []);
-  const junctionEdges = graph.edges
-    .flat()
-    .filter((edge) => edge.kind === "junction");
+  const junctionEdges = graph.edges.flat().filter((edge) => edge.kind === "junction");
 
   assert.ok(graph.nodes.length > 0);
   assert.ok(junctionEdges.length > 0);
-  assert.ok(
-    junctionEdges.some(
-      (edge) => edge.step >= physicsConfig.ai.navIntersectionMinSliceGap,
-    ),
-  );
+  assert.ok(junctionEdges.some((edge) => edge.step >= physicsConfig.ai.navIntersectionMinSliceGap));
 });
 
 test("track navigation graph adds jump edges that clear blocking walls near springs", () => {
@@ -1174,9 +1128,7 @@ test("track navigation graph adds jump edges that clear blocking walls near spri
 
   assert.ok(jumpEdges.length > 0);
   assert.ok(jumpEdges.some((edge) => edge.obstacleBypassed));
-  assert.ok(
-    jumpEdges.some((edge) => !Number.isFinite(edge.groundAlternativeCost)),
-  );
+  assert.ok(jumpEdges.some((edge) => !Number.isFinite(edge.groundAlternativeCost)));
 });
 
 test("planTrackNavPath uses a spring jump route to cross a wall shortcut", () => {
@@ -1185,9 +1137,7 @@ test("planTrackNavPath uses a spring jump route to cross a wall shortcut", () =>
   const springNode = graph.nodes.find((node) =>
     graph.edges[node.id].some((edge) => edge.kind === "jump"),
   );
-  const jumpEdge = graph.edges[springNode.id].find(
-    (edge) => edge.kind === "jump",
-  );
+  const jumpEdge = graph.edges[springNode.id].find((edge) => edge.kind === "jump");
   const fartherGoal = graph.nodes.find(
     (node) =>
       node.sliceIndex >= graph.nodes[jumpEdge.to].sliceIndex + 3 &&
@@ -1212,9 +1162,7 @@ test("planTrackNavPath uses a spring jump to skip a penalty pond when faster", (
   const springNode = graph.nodes.find((node) =>
     graph.edges[node.id].some((edge) => edge.kind === "jump"),
   );
-  const jumpEdge = graph.edges[springNode.id].find(
-    (edge) => edge.kind === "jump",
-  );
+  const jumpEdge = graph.edges[springNode.id].find((edge) => edge.kind === "jump");
   const fartherGoal = graph.nodes.find(
     (node) =>
       node.sliceIndex >= graph.nodes[jumpEdge.to].sliceIndex + 3 &&
@@ -1250,9 +1198,7 @@ test("checkpoint planning uses the wall-clearing jump on coarse spring spacing",
   );
 
   try {
-    const trackIndex = trackOptions.findIndex(
-      (option) => option.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
     applyTrackPreset(trackIndex);
 
     const graph = getTrackNavigationGraph();
@@ -1271,8 +1217,7 @@ test("checkpoint planning uses the wall-clearing jump on coarse spring spacing",
       const kinds = path
         .map((nodeId, index) =>
           index < path.length - 1
-            ? graph.edges[nodeId].find((edge) => edge.to === path[index + 1])
-                ?.kind
+            ? graph.edges[nodeId].find((edge) => edge.to === path[index + 1])?.kind
             : null,
         )
         .filter(Boolean);
@@ -1282,27 +1227,19 @@ test("checkpoint planning uses the wall-clearing jump on coarse spring spacing",
       }
     }
 
-    assert.ok(
-      jumpEdges.length > 0,
-      "expected jump edges on the spring section",
-    );
+    assert.ok(jumpEdges.length > 0, "expected jump edges on the spring section");
     assert.ok(
       jumpEdges.some((edge) => edge.obstacleBypassed),
       "expected a jump edge that clears the wall line",
     );
-    assert.ok(
-      jumpRoute,
-      "expected checkpoint routing to use the jump shortcut",
-    );
+    assert.ok(jumpRoute, "expected checkpoint routing to use the jump shortcut");
     assert.ok(
       jumpRoute.kinds.slice(0, 4).includes("jump"),
       `expected the jump to appear early in the route, got ${jumpRoute.kinds.join(" -> ")}`,
     );
   } finally {
     removeTrackPresetById(imported.id);
-    const restoreIndex = trackOptions.findIndex(
-      (option) => option.id === originalTrackId,
-    );
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
     applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
   }
 });
@@ -1370,31 +1307,23 @@ test("track navigation graph keeps water nodes available as expensive shortcuts"
   });
 
   try {
-    const trackIndex = trackOptions.findIndex(
-      (option) => option.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
     state.selectedTrackIndex = trackIndex;
     applyTrackPreset(trackIndex);
     const graph = getTrackNavigationGraph();
-    const waterNodeCount = graph.nodes.filter(
-      (node) => node.surface === "water",
-    ).length;
+    const waterNodeCount = graph.nodes.filter((node) => node.surface === "water").length;
     const connectedWaterNodeCount = graph.nodes.filter(
       (node) =>
         node.surface === "water" &&
         ((graph.edges[node.id] || []).length > 0 ||
-          graph.edges.some((edges) =>
-            edges.some((edge) => edge.to === node.id),
-          )),
+          graph.edges.some((edges) => edges.some((edge) => edge.to === node.id))),
     ).length;
 
     assert.ok(waterNodeCount > 0);
     assert.ok(connectedWaterNodeCount > 0);
   } finally {
     removeTrackPresetById(imported.id);
-    const restoreIndex = trackOptions.findIndex(
-      (option) => option.id === originalTrackId,
-    );
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
     state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
     applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
   }
@@ -1430,31 +1359,23 @@ test("track navigation graph keeps oil nodes available as expensive shortcuts", 
   });
 
   try {
-    const trackIndex = trackOptions.findIndex(
-      (option) => option.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
     state.selectedTrackIndex = trackIndex;
     applyTrackPreset(trackIndex);
     const graph = getTrackNavigationGraph();
-    const oilNodeCount = graph.nodes.filter(
-      (node) => node.surface === "oil",
-    ).length;
+    const oilNodeCount = graph.nodes.filter((node) => node.surface === "oil").length;
     const connectedOilNodeCount = graph.nodes.filter(
       (node) =>
         node.surface === "oil" &&
         ((graph.edges[node.id] || []).length > 0 ||
-          graph.edges.some((edges) =>
-            edges.some((edge) => edge.to === node.id),
-          )),
+          graph.edges.some((edges) => edges.some((edge) => edge.to === node.id))),
     ).length;
 
     assert.ok(oilNodeCount > 0);
     assert.ok(connectedOilNodeCount > 0);
   } finally {
     removeTrackPresetById(imported.id);
-    const restoreIndex = trackOptions.findIndex(
-      (option) => option.id === originalTrackId,
-    );
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
     state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
     applyTrackPreset(restoreIndex >= 0 ? restoreIndex : 0);
   }
@@ -1474,10 +1395,7 @@ test("best lap route keeps clearance from placed road obstacles", () => {
   const graph = getTrackNavigationGraph();
   const bestRouteDistance = graph.bestLapRouteNodeIds.reduce((best, nodeId) => {
     const node = graph.nodes[nodeId];
-    return Math.min(
-      best,
-      Math.hypot(node.x - obstaclePoint.x, node.y - obstaclePoint.y),
-    );
+    return Math.min(best, Math.hypot(node.x - obstaclePoint.x, node.y - obstaclePoint.y));
   }, Infinity);
 
   worldObjects.pop();
@@ -1574,10 +1492,7 @@ test("handbrake drift rotates harder, slows the car, and creates skids", () => {
     updateRace(0.016);
   }
   const noHandbrakeAngleDelta = Math.abs(car.angle - baselineAngle);
-  const noHandbrakeTravelDelta = absoluteAngleDelta(
-    Math.atan2(car.vy, car.vx),
-    car.angle,
-  );
+  const noHandbrakeTravelDelta = absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle);
   const noHandbrakeSpeed = car.speed;
 
   preparePlayerMotion({ speed: 220, right: true, handbrake: true });
@@ -1586,12 +1501,9 @@ test("handbrake drift rotates harder, slows the car, and creates skids", () => {
     updateRace(0.016);
   }
 
+  assert.ok(Math.abs(car.angle - handbrakeAngle) > noHandbrakeAngleDelta + 0.04);
   assert.ok(
-    Math.abs(car.angle - handbrakeAngle) > noHandbrakeAngleDelta + 0.04,
-  );
-  assert.ok(
-    absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle) >
-      noHandbrakeTravelDelta + 0.06,
+    absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle) > noHandbrakeTravelDelta + 0.06,
   );
   assert.ok(car.speed < noHandbrakeSpeed - 10);
   assert.ok(skidMarks.length > 0);
@@ -1638,10 +1550,7 @@ test("oil surface keeps straight travel but resists steering bite", () => {
     updateRace(0.016);
   }
   const asphaltBodyTurn = absoluteAngleDelta(car.angle, Math.PI);
-  const asphaltTravelTurn = absoluteAngleDelta(
-    Math.atan2(car.vy, car.vx),
-    Math.PI,
-  );
+  const asphaltTravelTurn = absoluteAngleDelta(Math.atan2(car.vy, car.vx), Math.PI);
   const asphaltSlip = absoluteAngleDelta(Math.atan2(car.vy, car.vx), car.angle);
 
   preparePlayerMotion({ speed: 190, right: true });
@@ -1690,11 +1599,7 @@ test("oil carry persists off the patch, decays over time, and leaves black marks
 
   assert.ok(physicsRuntime.oilCarry < 1);
   assert.ok(physicsRuntime.oilCarry > 0.95);
-  assert.ok(
-    skidMarks
-      .slice(marksBeforeExit)
-      .some((mark) => mark.color === "rgba(6, 6, 6, 0.92)"),
-  );
+  assert.ok(skidMarks.slice(marksBeforeExit).some((mark) => mark.color === "rgba(6, 6, 6, 0.92)"));
 
   for (let i = 0; i < 190; i++) {
     updateRace(0.016);
@@ -1821,12 +1726,7 @@ test("spring launches stay within the tuned apex and airborne frames do not draw
   assert.equal(car.airborne, true);
   assert.ok(car.vz > 0);
   assert.equal(skidMarks.length, 0);
-  assert.ok(
-    car.vz <=
-      Math.sqrt(
-        2 * physicsConfig.air.gravity * physicsConfig.air.maxJumpHeight,
-      ),
-  );
+  assert.ok(car.vz <= Math.sqrt(2 * physicsConfig.air.gravity * physicsConfig.air.maxJumpHeight));
 
   updateRace(0.016);
   assert.equal(skidMarks.length, 0);

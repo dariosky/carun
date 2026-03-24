@@ -1,11 +1,4 @@
-import {
-  AUDIO_TUNING,
-  clamp,
-  createFilter,
-  createGain,
-  now,
-  smoothParam,
-} from "./shared.js";
+import { AUDIO_TUNING, clamp, createFilter, createGain, now, smoothParam } from "./shared.js";
 import { createNoiseSource } from "./noise.js";
 
 export class SkidSynth {
@@ -44,26 +37,12 @@ export class SkidSynth {
         ? AUDIO_TUNING.skid.roadOnlyMul
         : AUDIO_TUNING.skid.offroadMul;
     const gain =
-      AUDIO_TUNING.skid.maxGain *
-      Math.pow(skid, 1.45) *
-      Math.pow(speed, 0.6) *
-      surfaceMul;
+      AUDIO_TUNING.skid.maxGain * Math.pow(skid, 1.45) * Math.pow(speed, 0.6) * surfaceMul;
     const centerFreq =
-      AUDIO_TUNING.skid.baseFreq +
-      skid * (AUDIO_TUNING.skid.topFreq - AUDIO_TUNING.skid.baseFreq);
+      AUDIO_TUNING.skid.baseFreq + skid * (AUDIO_TUNING.skid.topFreq - AUDIO_TUNING.skid.baseFreq);
 
-    smoothParam(
-      this.bandpass.frequency,
-      centerFreq,
-      time,
-      AUDIO_TUNING.smoothing.fast,
-    );
-    smoothParam(
-      this.highpass.frequency,
-      350 + skid * 1100,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
+    smoothParam(this.bandpass.frequency, centerFreq, time, AUDIO_TUNING.smoothing.fast);
+    smoothParam(this.highpass.frequency, 350 + skid * 1100, time, AUDIO_TUNING.smoothing.medium);
     smoothParam(this.output.gain, gain, time, AUDIO_TUNING.smoothing.fast);
   }
 }

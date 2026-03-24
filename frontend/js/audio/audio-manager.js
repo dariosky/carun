@@ -49,10 +49,7 @@ export class AudioManager {
     this.context = new AudioContextCtor();
     this.masterGain = createGain(this.context, 0);
     this.vehicleBus = createGain(this.context, 0);
-    this.rivalBus = createGain(
-      this.context,
-      AUDIO_TUNING.vehicleBusGain * 0.38,
-    );
+    this.rivalBus = createGain(this.context, AUDIO_TUNING.vehicleBusGain * 0.38);
     this.uiBus = createGain(this.context, AUDIO_TUNING.uiBusGain);
     this.impactBus = createGain(this.context, AUDIO_TUNING.impactBusGain);
 
@@ -88,12 +85,7 @@ export class AudioManager {
     if (context.state === "suspended") await context.resume();
     this.started = true;
     const time = now(context);
-    smoothParam(
-      this.masterGain.gain,
-      AUDIO_TUNING.masterGain,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
+    smoothParam(this.masterGain.gain, AUDIO_TUNING.masterGain, time, AUDIO_TUNING.smoothing.medium);
     smoothParam(
       this.vehicleBus.gain,
       AUDIO_TUNING.vehicleBusGain,

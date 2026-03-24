@@ -85,20 +85,10 @@ const {
   removeTrackPresetById,
   trackOptions,
 } = await import("../js/parameters.js");
-const {
-  aiCar,
-  aiCars,
-  aiLapData,
-  aiLapDataList,
-  assignAiRoster,
-  car,
-  lapData,
-  state,
-} = await import("../js/state.js");
-const { getRacePosition, getRaceStandings, resetRace } =
-  await import("../js/physics.js");
-const { checkpointProgress, trackFrameAtProgress } =
-  await import("../js/track.js");
+const { aiCar, aiCars, aiLapData, aiLapDataList, assignAiRoster, car, lapData, state } =
+  await import("../js/state.js");
+const { getRacePosition, getRaceStandings, resetRace } = await import("../js/physics.js");
+const { checkpointProgress, trackFrameAtProgress } = await import("../js/track.js");
 
 function enableAiOpponents() {
   physicsConfig.flags.AI_OPPONENTS_ENABLED = true;
@@ -146,9 +136,7 @@ function withRacePositionTrack(callback) {
     },
     { persist: false },
   );
-  const presetIndex = trackOptions.findIndex(
-    (preset) => preset.id === presetId,
-  );
+  const presetIndex = trackOptions.findIndex((preset) => preset.id === presetId);
   assert.ok(presetIndex >= 0);
   state.selectedTrackIndex = presetIndex;
   applyTrackPreset(presetIndex);
@@ -223,14 +211,8 @@ test("race standings rank more passed checkpoints ahead of later local segment p
       nextCheckpointIndex: 2,
     });
 
-    placeVehicleAtProgress(
-      car,
-      interpolateProgressForward(checkpoint2, checkpoint3, 0.1),
-    );
-    placeVehicleAtProgress(
-      aiCar,
-      interpolateProgressForward(checkpoint1, checkpoint2, 0.95),
-    );
+    placeVehicleAtProgress(car, interpolateProgressForward(checkpoint2, checkpoint3, 0.1));
+    placeVehicleAtProgress(aiCar, interpolateProgressForward(checkpoint1, checkpoint2, 0.95));
 
     const standings = getRaceStandings();
     assert.equal(standings[0].id, "player");
@@ -256,14 +238,8 @@ test("race standings rank same-checkpoint racers by progress through the active 
       nextCheckpointIndex: 2,
     });
 
-    placeVehicleAtProgress(
-      car,
-      interpolateProgressForward(checkpoint1, checkpoint2, 0.8),
-    );
-    placeVehicleAtProgress(
-      aiCar,
-      interpolateProgressForward(checkpoint1, checkpoint2, 0.3),
-    );
+    placeVehicleAtProgress(car, interpolateProgressForward(checkpoint1, checkpoint2, 0.8));
+    placeVehicleAtProgress(aiCar, interpolateProgressForward(checkpoint1, checkpoint2, 0.3));
 
     assert.equal(getRacePosition("player"), 1);
     assert.ok(getRacePosition("ai") > 1);
@@ -287,14 +263,8 @@ test("race standings handle wraparound progress on the final checkpoint segment"
       nextCheckpointIndex: 0,
     });
 
-    placeVehicleAtProgress(
-      car,
-      interpolateProgressForward(lastCheckpoint, startCheckpoint, 0.8),
-    );
-    placeVehicleAtProgress(
-      aiCar,
-      interpolateProgressForward(lastCheckpoint, startCheckpoint, 0.2),
-    );
+    placeVehicleAtProgress(car, interpolateProgressForward(lastCheckpoint, startCheckpoint, 0.8));
+    placeVehicleAtProgress(aiCar, interpolateProgressForward(lastCheckpoint, startCheckpoint, 0.2));
 
     assert.equal(getRacePosition("player"), 1);
     assert.ok(getRacePosition("ai") > 1);
@@ -377,11 +347,7 @@ test("race standings keep a deterministic order for exact active-racer ties", ()
   withRacePositionTrack(() => {
     const checkpoint1 = checkpointProgress(checkpoints[1]);
     const checkpoint2 = checkpointProgress(checkpoints[2]);
-    const tiedProgress = interpolateProgressForward(
-      checkpoint1,
-      checkpoint2,
-      0.5,
-    );
+    const tiedProgress = interpolateProgressForward(checkpoint1, checkpoint2, 0.5);
 
     setLapState(lapData, {
       lap: 1,

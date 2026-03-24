@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  makeTrackData,
-  setupFrontendTestEnv,
-} from "./helpers/frontend-test-env.mjs";
+import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
@@ -17,8 +14,7 @@ const {
   saveTrackPresetToDb,
   trackOptions,
 } = await import("../js/parameters.js");
-const { getTrackSelectRenderModel, syncTrackSelectWindow } =
-  await import("../js/menus.js");
+const { getTrackSelectRenderModel, syncTrackSelectWindow } = await import("../js/menus.js");
 
 test("canDeleteTrackPreset allows admins to delete any unpublished db track", () => {
   const currentUserId = "user-1";
@@ -84,9 +80,7 @@ test("track selector render model windows large catalogs and exposes admin actio
 
   state.auth.userId = "admin-1";
   state.auth.isAdmin = true;
-  const selector4Index = trackOptions.findIndex(
-    (track) => track.id === "selector-4",
-  );
+  const selector4Index = trackOptions.findIndex((track) => track.id === "selector-4");
   state.trackSelectIndex = selector4Index;
   state.trackSelectViewOffset = 0;
 
@@ -98,15 +92,12 @@ test("track selector render model windows large catalogs and exposes admin actio
   assert.equal(model.selectedTrackCanClearRecords, true);
   assert.equal(model.selectedTrackCanDelete, false);
 
-  const selector2Index = trackOptions.findIndex(
-    (track) => track.id === "selector-2",
-  );
+  const selector2Index = trackOptions.findIndex((track) => track.id === "selector-2");
   state.trackSelectIndex = selector2Index;
   const draftModel = getTrackSelectRenderModel();
   assert.equal(draftModel.selectedTrackCanDelete, true);
 
-  for (const id of addedIds)
-    removeTrackPresetById(id, { removePersisted: false });
+  for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
 });
 
 test("track selector sync keeps a deep-linked track visible in the grid", () => {
@@ -129,9 +120,7 @@ test("track selector sync keeps a deep-linked track visible in the grid", () => 
     addedIds.push(imported.id);
   }
 
-  const deepLinkedIndex = trackOptions.findIndex(
-    (track) => track.id === "grid-sync-23",
-  );
+  const deepLinkedIndex = trackOptions.findIndex((track) => track.id === "grid-sync-23");
   state.trackSelectIndex = deepLinkedIndex;
   state.trackSelectViewOffset = 0;
 
@@ -146,8 +135,7 @@ test("track selector sync keeps a deep-linked track visible in the grid", () => 
     true,
   );
 
-  for (const id of addedIds)
-    removeTrackPresetById(id, { removePersisted: false });
+  for (const id of addedIds) removeTrackPresetById(id, { removePersisted: false });
 });
 
 test("visible tracks from API replace local presets and keep published flags", async () => {
@@ -214,12 +202,8 @@ test("visible tracks from API replace local presets and keep published flags", a
     true,
   );
 
-  const systemTrack = trackOptions.find(
-    (t) => t.id === "11111111-1111-1111-1111-111111111111",
-  );
-  const userTrack = trackOptions.find(
-    (t) => t.id === "22222222-2222-2222-2222-222222222222",
-  );
+  const systemTrack = trackOptions.find((t) => t.id === "11111111-1111-1111-1111-111111111111");
+  const userTrack = trackOptions.find((t) => t.id === "22222222-2222-2222-2222-222222222222");
   assert.equal(systemTrack?.isPublished, true);
   assert.equal(userTrack?.isPublished, true);
 });
@@ -332,18 +316,13 @@ test("saveTrackPresetToDb updates existing db tracks instead of creating duplica
 
   try {
     const saved = await saveTrackPresetToDb(
-      trackOptions.findIndex(
-        (track) => track.id === "44444444-4444-4444-4444-444444444444",
-      ),
+      trackOptions.findIndex((track) => track.id === "44444444-4444-4444-4444-444444444444"),
       {
         currentUserId: "user-1",
         name: "UPDATED TRACK",
       },
     );
-    assert.equal(
-      requestPath,
-      "/api/tracks/44444444-4444-4444-4444-444444444444",
-    );
+    assert.equal(requestPath, "/api/tracks/44444444-4444-4444-4444-444444444444");
     assert.equal(requestMethod, "PATCH");
     assert.equal(requestBody?.name, "UPDATED TRACK");
     assert.equal(saved?.id, "44444444-4444-4444-4444-444444444444");

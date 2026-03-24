@@ -147,24 +147,16 @@ function vehicleIsFlying(vehicle = car) {
   return Boolean(vehicle?.airborne) || Number(vehicle?.z) > 0.001;
 }
 
-function getVehicleSurfaceAt(
-  vehicle = car,
-  groundSurfaceName = surfaceAt(vehicle.x, vehicle.y),
-) {
+function getVehicleSurfaceAt(vehicle = car, groundSurfaceName = surfaceAt(vehicle.x, vehicle.y)) {
   return vehicleIsFlying(vehicle) ? "flying" : groundSurfaceName;
 }
 
 function isPenaltySurface(surfaceName) {
-  return (
-    surfaceName === "grass" || surfaceName === "water" || surfaceName === "oil"
-  );
+  return surfaceName === "grass" || surfaceName === "water" || surfaceName === "oil";
 }
 
 function updateOilCarry(runtime, groundSurfaceName, dt) {
-  const duration = Math.max(
-    physicsConfig.constants.oilCarryDuration || 3,
-    0.01,
-  );
+  const duration = Math.max(physicsConfig.constants.oilCarryDuration || 3, 0.01);
   if (groundSurfaceName === "oil") {
     runtime.oilCarry = 1;
     runtime.oilCarryTime = duration;
@@ -186,14 +178,9 @@ function updateOilCarry(runtime, groundSurfaceName, dt) {
 
 function getOilSteerSlipStrength(runtime, groundSurfaceName, steerAbs) {
   const constants = physicsConfig.constants;
-  const carryStrength =
-    groundSurfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
+  const carryStrength = groundSurfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
   if (carryStrength <= 0) return 0;
-  const steerBlend = clamp(
-    (steerAbs - (constants.oilSteerThreshold || 0.03)) / 0.12,
-    0,
-    1,
-  );
+  const steerBlend = clamp((steerAbs - (constants.oilSteerThreshold || 0.03)) / 0.12, 0, 1);
   return carryStrength * steerBlend;
 }
 
@@ -236,12 +223,8 @@ function getCheckpointsPassedThisLap(racerLapData) {
     racerLapData?.nextCheckpointIndex,
     checkpointCount,
   );
-  const firstCheckpointAfterStart =
-    (startCheckpointIndex + 1) % checkpointCount;
-  return normalizeCheckpointIndex(
-    nextCheckpointIndex - firstCheckpointAfterStart,
-    checkpointCount,
-  );
+  const firstCheckpointAfterStart = (startCheckpointIndex + 1) % checkpointCount;
+  return normalizeCheckpointIndex(nextCheckpointIndex - firstCheckpointAfterStart, checkpointCount);
 }
 
 function getSegmentProgress(rawProgress, racerLapData) {
@@ -251,21 +234,12 @@ function getSegmentProgress(rawProgress, racerLapData) {
     racerLapData?.nextCheckpointIndex,
     checkpointCount,
   );
-  const lastCheckpointIndex =
-    (nextCheckpointIndex - 1 + checkpointCount) % checkpointCount;
-  const lastCheckpointProgress =
-    getCheckpointProgressValue(lastCheckpointIndex);
-  const nextCheckpointProgress =
-    getCheckpointProgressValue(nextCheckpointIndex);
-  const segmentSpan = progressDeltaForward(
-    lastCheckpointProgress,
-    nextCheckpointProgress,
-  );
+  const lastCheckpointIndex = (nextCheckpointIndex - 1 + checkpointCount) % checkpointCount;
+  const lastCheckpointProgress = getCheckpointProgressValue(lastCheckpointIndex);
+  const nextCheckpointProgress = getCheckpointProgressValue(nextCheckpointIndex);
+  const segmentSpan = progressDeltaForward(lastCheckpointProgress, nextCheckpointProgress);
   if (segmentSpan <= 1e-6) return 0;
-  const segmentDistance = progressDeltaForward(
-    lastCheckpointProgress,
-    rawProgress,
-  );
+  const segmentDistance = progressDeltaForward(lastCheckpointProgress, rawProgress);
   return clamp(segmentDistance / segmentSpan, 0, 1);
 }
 
@@ -281,9 +255,7 @@ function resetLapProgress(targetLapData, startCheckpointIndex) {
   targetLapData.lapTimes = [];
   targetLapData.passed = new Set([startCheckpointIndex]);
   targetLapData.nextCheckpointIndex =
-    checkpoints.length > 0
-      ? (startCheckpointIndex + 1) % checkpoints.length
-      : 0;
+    checkpoints.length > 0 ? (startCheckpointIndex + 1) % checkpoints.length : 0;
   targetLapData.lap = 1;
   if ("finished" in targetLapData) targetLapData.finished = false;
   if ("finishTime" in targetLapData) targetLapData.finishTime = 0;
@@ -309,15 +281,11 @@ function applyLapSnapshot(targetLapData, payload = {}) {
           .filter((value) => Number.isInteger(value) && value >= 0),
       )
     : targetLapData.passed;
-  targetLapData.nextCheckpointIndex = Number.isInteger(
-    payload.nextCheckpointIndex,
-  )
+  targetLapData.nextCheckpointIndex = Number.isInteger(payload.nextCheckpointIndex)
     ? Math.max(0, payload.nextCheckpointIndex)
     : targetLapData.nextCheckpointIndex;
   targetLapData.finished = Boolean(payload.finished);
-  targetLapData.finishTime = Number.isFinite(payload.finishTime)
-    ? Number(payload.finishTime)
-    : 0;
+  targetLapData.finishTime = Number.isFinite(payload.finishTime) ? Number(payload.finishTime) : 0;
   targetLapData.finalPosition = Number.isInteger(payload.finalPosition)
     ? Math.max(0, payload.finalPosition)
     : 0;
@@ -353,31 +321,22 @@ function getRacerSnapshot(racerKey) {
   const rawProgress = trackProgressAtPoint(vehicle.x, vehicle.y, track);
   const checkpointsPassedThisLap = getCheckpointsPassedThisLap(racerLapData);
   const nextCheckpointIndex = checkpoints.length
-    ? normalizeCheckpointIndex(
-        racerLapData.nextCheckpointIndex,
-        checkpoints.length,
-      )
+    ? normalizeCheckpointIndex(racerLapData.nextCheckpointIndex, checkpoints.length)
     : -1;
   const lastCheckpointIndex =
     nextCheckpointIndex >= 0 && checkpoints.length
       ? (nextCheckpointIndex - 1 + checkpoints.length) % checkpoints.length
       : -1;
   const finishOrder =
-    racerKey === "player"
-      ? state.raceStandings.playerFinishOrder
-      : getFinishOrder(racerKey);
-  const finalPosition =
-    racerLapData.finalPosition > 0 ? racerLapData.finalPosition : finishOrder;
+    racerKey === "player" ? state.raceStandings.playerFinishOrder : getFinishOrder(racerKey);
+  const finalPosition = racerLapData.finalPosition > 0 ? racerLapData.finalPosition : finishOrder;
   return {
     id: racerKey,
     finished: racerLapData.finished,
     finishOrder,
     finalPosition,
     finishTime: racerLapData.finishTime || 0,
-    lapsCompleted: Math.max(
-      0,
-      Math.min(racerLapData.lap - 1, racerLapData.maxLaps),
-    ),
+    lapsCompleted: Math.max(0, Math.min(racerLapData.lap - 1, racerLapData.maxLaps)),
     checkpointsPassedThisLap,
     lastCheckpointIndex,
     nextCheckpointIndex,
@@ -429,9 +388,8 @@ function getRacerDisplayName(racerKey) {
   const aiState = getAiStateById(racerKey);
   if (!aiState) return String(racerKey || "RIVAL");
   return (
-    String(
-      aiState.vehicle?.label || getAiProfileByIndex(aiState.index).name,
-    ).trim() || String(racerKey || "RIVAL")
+    String(aiState.vehicle?.label || getAiProfileByIndex(aiState.index).name).trim() ||
+    String(racerKey || "RIVAL")
   );
 }
 
@@ -452,9 +410,7 @@ function getRacerAccentColor(racerKey) {
 }
 
 export function getFinishCelebrationStandings() {
-  const activeRivalCount = aiOpponentsEnabled()
-    ? getActiveAiOpponentCount()
-    : 0;
+  const activeRivalCount = aiOpponentsEnabled() ? getActiveAiOpponentCount() : 0;
   const activeRivals = state.aiRoster.slice(0, activeRivalCount);
   const humanFieldCount =
     1 +
@@ -477,12 +433,7 @@ export function getFinishCelebrationStandings() {
       const previous = list[index - 1] || null;
       const gapMs =
         previous && Number.isFinite(previous.finishTime)
-          ? Math.max(
-              0,
-              Math.round(
-                (Number(entry.finishTime) - Number(previous.finishTime)) * 1000,
-              ),
-            )
+          ? Math.max(0, Math.round((Number(entry.finishTime) - Number(previous.finishTime)) * 1000))
           : 0;
       return {
         id: entry.id,
@@ -514,11 +465,9 @@ export function buildFinishCelebrationStats({
   const totalMs = Math.round(totalTime * 1000);
   const bestLapMs = Math.round(bestLapTime * 1000);
   const bestLap =
-    lapTimes.length > 0 &&
-    (previousBestLapMs === null || bestLapMs < previousBestLapMs);
+    lapTimes.length > 0 && (previousBestLapMs === null || bestLapMs < previousBestLapMs);
   const bestRace =
-    lapTimes.length > 0 &&
-    (previousBestRaceMs === null || totalMs < previousBestRaceMs);
+    lapTimes.length > 0 && (previousBestRaceMs === null || totalMs < previousBestRaceMs);
 
   return {
     bestLap,
@@ -526,13 +475,9 @@ export function buildFinishCelebrationStats({
     totalTime,
     bestLapTime,
     bestLapImprovementMs:
-      bestLap && previousBestLapMs !== null
-        ? previousBestLapMs - bestLapMs
-        : null,
+      bestLap && previousBestLapMs !== null ? previousBestLapMs - bestLapMs : null,
     bestRaceImprovementMs:
-      bestRace && previousBestRaceMs !== null
-        ? previousBestRaceMs - totalMs
-        : null,
+      bestRace && previousBestRaceMs !== null ? previousBestRaceMs - totalMs : null,
     previousBestLapMs,
     previousBestRaceMs,
     previousBestLapDisplayName:
@@ -548,8 +493,7 @@ export function buildFinishCelebrationStats({
 }
 
 export function getRacePosition(racerKey = "player") {
-  const targetLapData =
-    racerKey === "player" ? lapData : getAiStateById(racerKey)?.lapData;
+  const targetLapData = racerKey === "player" ? lapData : getAiStateById(racerKey)?.lapData;
   if (targetLapData?.finished && targetLapData.finalPosition > 0) {
     return targetLapData.finalPosition;
   }
@@ -574,8 +518,7 @@ function progressDeltaForward(from, to) {
 // Approximate equilibrium speed ratio on a surface relative to asphalt.
 // At steady-state the car's speed is proportional to engineMul / longDragMul.
 function surfaceSpeedRatio(surfaceName) {
-  const surface =
-    physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
+  const surface = physicsConfig.surfaces[surfaceName] || physicsConfig.surfaces.asphalt;
   return surface.engineMul / Math.max(surface.longDragMul, 0.01);
 }
 
@@ -592,9 +535,7 @@ function computeEdgeTimeCost(edge, fromNode, toNode) {
   const maxSpeed = physicsConfig.ai.targetSpeedMax;
   // Average curvature-limited speed along the edge
   const curvatureSpeed =
-    ((fromNode.baseTargetSpeed || maxSpeed) +
-      (toNode.baseTargetSpeed || maxSpeed)) *
-    0.5;
+    ((fromNode.baseTargetSpeed || maxSpeed) + (toNode.baseTargetSpeed || maxSpeed)) * 0.5;
   const fromRatio = surfaceSpeedRatio(fromNode.surface || "asphalt");
   const toRatio = surfaceSpeedRatio(toNode.surface || "asphalt");
   const avgSurfaceRatio = (fromRatio + toRatio) * 0.5;
@@ -626,31 +567,19 @@ function estimateRemainingGoalProgress(node, goalNodeIds, graph) {
   for (const goalNodeId of goalNodeIds) {
     const goalNode = graph.nodes[goalNodeId];
     if (!goalNode || !Number.isFinite(goalNode.progress)) continue;
-    best = Math.min(
-      best,
-      progressDeltaForward(node.progress, goalNode.progress),
-    );
+    best = Math.min(best, progressDeltaForward(node.progress, goalNode.progress));
   }
   return best === Infinity ? 0 : best;
 }
 
 function estimateNavLapLength(graph) {
   const averageSegmentLength = Math.max(graph.averageSegmentLength || 0, 1);
-  const segmentCount = Math.max(
-    graph.progressCount || 0,
-    graph.nodes.length || 0,
-    1,
-  );
+  const segmentCount = Math.max(graph.progressCount || 0, graph.nodes.length || 0, 1);
   return averageSegmentLength * segmentCount;
 }
 
 export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
-  if (
-    !graph ||
-    startNodeId < 0 ||
-    startNodeId >= graph.nodes.length ||
-    !goalNodeIds.length
-  ) {
+  if (!graph || startNodeId < 0 || startNodeId >= graph.nodes.length || !goalNodeIds.length) {
     return [];
   }
   const aiCfg = physicsConfig.ai;
@@ -677,11 +606,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
   cameFrom.fill(-1);
   const open = [startNodeId];
   gScore[startNodeId] = 0;
-  fScore[startNodeId] = estimateNavHeuristic(
-    graph.nodes[startNodeId],
-    goalNodeIds,
-    graph,
-  );
+  fScore[startNodeId] = estimateNavHeuristic(graph.nodes[startNodeId], goalNodeIds, graph);
   inOpen[startNodeId] = 1;
 
   while (open.length) {
@@ -735,8 +660,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
       // --- Time-based edge cost ---
       const timeCost = computeEdgeTimeCost(edge, currentNode, neighbor);
       const plannerPenaltyTime =
-        Math.max(edge?.plannerPenaltyCost || 0, 0) /
-        Math.max(aiCfg.targetSpeedMax, 1);
+        Math.max(edge?.plannerPenaltyCost || 0, 0) / Math.max(aiCfg.targetSpeedMax, 1);
 
       // Backward edges incur a reversal penalty: the car must brake, turn
       // around, and re-accelerate.  Still much cheaper than a full lap.
@@ -749,8 +673,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
 
       // Obstacle proximity penalty (safety concern, in time-equivalent units)
       const obstaclePenalty =
-        ((currentNode.obstaclePenalty || 0) + (neighbor.obstaclePenalty || 0)) *
-        0.001;
+        ((currentNode.obstaclePenalty || 0) + (neighbor.obstaclePenalty || 0)) * 0.001;
 
       // Dynamic player avoidance (mild — don't distort the optimal path)
       const playerDist = Math.hypot(neighbor.x - car.x, neighbor.y - car.y);
@@ -772,8 +695,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
       if (tentative >= gScore[neighborId]) continue;
       cameFrom[neighborId] = currentId;
       gScore[neighborId] = tentative;
-      fScore[neighborId] =
-        tentative + estimateNavHeuristic(neighbor, goalNodeIds, graph);
+      fScore[neighborId] = tentative + estimateNavHeuristic(neighbor, goalNodeIds, graph);
       if (!inOpen[neighborId]) {
         open.push(neighborId);
         inOpen[neighborId] = 1;
@@ -786,14 +708,7 @@ export function planTrackNavPath(graph, startNodeId, goalNodeIds) {
 
 function findReachableTrackNavPlan(
   graph,
-  {
-    x,
-    y,
-    progressHint = null,
-    maxDistance = Infinity,
-    goalNodeIds = [],
-    fallbackGoalNodeIds = [],
-  },
+  { x, y, progressHint = null, maxDistance = Infinity, goalNodeIds = [], fallbackGoalNodeIds = [] },
 ) {
   const candidates = [];
   for (const node of graph.nodes) {
@@ -814,11 +729,7 @@ function findReachableTrackNavPlan(
       ? planTrackNavPath(graph, candidate.node.id, goalNodeIds)
       : [];
     if (!plannedNodeIds.length && fallbackGoalNodeIds.length) {
-      plannedNodeIds = planTrackNavPath(
-        graph,
-        candidate.node.id,
-        fallbackGoalNodeIds,
-      );
+      plannedNodeIds = planTrackNavPath(graph, candidate.node.id, fallbackGoalNodeIds);
     }
     if (plannedNodeIds.length) {
       return { node: candidate.node, plannedNodeIds };
@@ -831,8 +742,7 @@ function findReachableTrackNavPlan(
 function getRouteNodeIdAt(graph, routeIndex) {
   if (!graph.bestLapRouteNodeIds.length) return -1;
   const normalizedIndex =
-    ((routeIndex % graph.bestLapRouteNodeIds.length) +
-      graph.bestLapRouteNodeIds.length) %
+    ((routeIndex % graph.bestLapRouteNodeIds.length) + graph.bestLapRouteNodeIds.length) %
     graph.bestLapRouteNodeIds.length;
   return graph.bestLapRouteNodeIds[normalizedIndex] ?? -1;
 }
@@ -845,16 +755,10 @@ function findNearestRouteIndex(graph, node, progressHint = null) {
   }
   let bestRouteIndex = 0;
   let bestScore = Infinity;
-  for (
-    let routeIndex = 0;
-    routeIndex < graph.bestLapRouteNodeIds.length;
-    routeIndex++
-  ) {
+  for (let routeIndex = 0; routeIndex < graph.bestLapRouteNodeIds.length; routeIndex++) {
     const routeNode = graph.nodes[graph.bestLapRouteNodeIds[routeIndex]];
     if (!routeNode) continue;
-    let score = node
-      ? Math.hypot(routeNode.x - node.x, routeNode.y - node.y)
-      : 0;
+    let score = node ? Math.hypot(routeNode.x - node.x, routeNode.y - node.y) : 0;
     if (progressHint !== null) {
       score += progressDeltaForward(progressHint, routeNode.progress) * 60;
     }
@@ -915,16 +819,11 @@ function buildAiPath(graph, force = false) {
   const aiCfg = physicsConfig.ai;
   if (!force && aiPhysicsRuntime.replanCooldown > 0) return;
   const fallbackNode =
-    aiPhysicsRuntime.lastValidNodeId >= 0
-      ? graph.nodes[aiPhysicsRuntime.lastValidNodeId]
-      : null;
+    aiPhysicsRuntime.lastValidNodeId >= 0 ? graph.nodes[aiPhysicsRuntime.lastValidNodeId] : null;
 
-  const nextCheckpointIndex =
-    aiLapData.nextCheckpointIndex % checkpoints.length;
-  const checkpointGoalNodeIds =
-    graph.checkpointGoalNodeIds?.[nextCheckpointIndex] || [];
-  const checkpointFallbackNodeIds =
-    graph.checkpointNodeIds?.[nextCheckpointIndex] || [];
+  const nextCheckpointIndex = aiLapData.nextCheckpointIndex % checkpoints.length;
+  const checkpointGoalNodeIds = graph.checkpointGoalNodeIds?.[nextCheckpointIndex] || [];
+  const checkpointFallbackNodeIds = graph.checkpointNodeIds?.[nextCheckpointIndex] || [];
 
   const currentNode =
     findNearestTrackNavNode(aiCar.x, aiCar.y, {
@@ -933,23 +832,11 @@ function buildAiPath(graph, force = false) {
     }) || fallbackNode;
   if (!currentNode) return;
   aiPhysicsRuntime.currentNodeId = currentNode.id;
-  const currentRouteIndex = findNearestRouteIndex(
-    graph,
-    currentNode,
-    aiPhysicsRuntime.progress,
-  );
+  const currentRouteIndex = findNearestRouteIndex(graph, currentNode, aiPhysicsRuntime.progress);
   aiPhysicsRuntime.routeNodeIndex = currentRouteIndex;
-  let plannedNodeIds = planTrackNavPath(
-    graph,
-    currentNode.id,
-    checkpointGoalNodeIds,
-  );
+  let plannedNodeIds = planTrackNavPath(graph, currentNode.id, checkpointGoalNodeIds);
   if (!plannedNodeIds.length && checkpointFallbackNodeIds.length) {
-    plannedNodeIds = planTrackNavPath(
-      graph,
-      currentNode.id,
-      checkpointFallbackNodeIds,
-    );
+    plannedNodeIds = planTrackNavPath(graph, currentNode.id, checkpointFallbackNodeIds);
   }
   if (!plannedNodeIds.length) {
     const fallbackPlan = findReachableTrackNavPlan(graph, {
@@ -976,9 +863,7 @@ function buildAiPath(graph, force = false) {
     plannedNodeIds = [...aiPhysicsRuntime.plannedNodeIds];
   }
   const terminalNodeId =
-    plannedNodeIds.length > 0
-      ? plannedNodeIds[plannedNodeIds.length - 1]
-      : currentNode.id;
+    plannedNodeIds.length > 0 ? plannedNodeIds[plannedNodeIds.length - 1] : currentNode.id;
   const terminalNode = graph.nodes[terminalNodeId] || currentNode;
   const rejoinRouteIndex = findNearestRouteIndex(
     graph,
@@ -989,8 +874,7 @@ function buildAiPath(graph, force = false) {
     aiPhysicsRuntime.rejoinRouteIndex = rejoinRouteIndex;
     aiPhysicsRuntime.plannedNodeIds = plannedNodeIds;
     aiPhysicsRuntime.pathCursor = 0;
-    aiPhysicsRuntime.targetNodeId =
-      plannedNodeIds[Math.min(1, plannedNodeIds.length - 1)];
+    aiPhysicsRuntime.targetNodeId = plannedNodeIds[Math.min(1, plannedNodeIds.length - 1)];
     aiPhysicsRuntime.debugPathPoints = plannedNodeIds.map((nodeId) => {
       const node = graph.nodes[nodeId];
       return { x: node.x, y: node.y };
@@ -1021,8 +905,7 @@ function primeAiRaceStartPlan() {
 function pickAiRecoveryNode(graph, maxDistance) {
   const baseProgress =
     aiPhysicsRuntime.lastValidNodeId >= 0
-      ? (graph.nodes[aiPhysicsRuntime.lastValidNodeId]?.progress ??
-        aiPhysicsRuntime.progress)
+      ? (graph.nodes[aiPhysicsRuntime.lastValidNodeId]?.progress ?? aiPhysicsRuntime.progress)
       : aiPhysicsRuntime.progress;
   return findNearestTrackNavNode(aiCar.x, aiCar.y, {
     maxDistance,
@@ -1078,11 +961,7 @@ function applyAiSoftReset(graph) {
   aiPhysicsRuntime.currentNodeId = candidate.id;
   aiPhysicsRuntime.lastValidNodeId = candidate.id;
   aiPhysicsRuntime.targetNodeId = candidate.id;
-  aiPhysicsRuntime.routeNodeIndex = findNearestRouteIndex(
-    graph,
-    candidate,
-    candidate.progress,
-  );
+  aiPhysicsRuntime.routeNodeIndex = findNearestRouteIndex(graph, candidate, candidate.progress);
   aiPhysicsRuntime.rejoinRouteIndex = aiPhysicsRuntime.routeNodeIndex;
   aiPhysicsRuntime.plannedNodeIds = [candidate.id];
   aiPhysicsRuntime.pathCursor = 0;
@@ -1098,26 +977,14 @@ function applyAiSoftReset(graph) {
   aiPhysicsRuntime.replanCooldown = 0;
 }
 
-function setAiInputTargets(
-  dt,
-  { throttle = 0, brake = 0, steer = 0, handbrake = 0 },
-) {
+function setAiInputTargets(dt, { throttle = 0, brake = 0, steer = 0, handbrake = 0 }) {
   // AI uses very fast input response (near-instant) — no human-like lag.
   const aiSmoothing = physicsConfig.ai.inputSmoothing;
   const response = clamp((1 - aiSmoothing) * dt * 60, 0, 1);
   const chase = (current, target) => current + (target - current) * response;
-  aiPhysicsRuntime.input.throttle = chase(
-    aiPhysicsRuntime.input.throttle,
-    clamp(throttle, 0, 1),
-  );
-  aiPhysicsRuntime.input.brake = chase(
-    aiPhysicsRuntime.input.brake,
-    clamp(brake, 0, 1),
-  );
-  aiPhysicsRuntime.input.steer = chase(
-    aiPhysicsRuntime.input.steer,
-    clamp(steer, -1, 1),
-  );
+  aiPhysicsRuntime.input.throttle = chase(aiPhysicsRuntime.input.throttle, clamp(throttle, 0, 1));
+  aiPhysicsRuntime.input.brake = chase(aiPhysicsRuntime.input.brake, clamp(brake, 0, 1));
+  aiPhysicsRuntime.input.steer = chase(aiPhysicsRuntime.input.steer, clamp(steer, -1, 1));
   aiPhysicsRuntime.input.handbrake = chase(
     aiPhysicsRuntime.input.handbrake,
     clamp(handbrake, 0, 1),
@@ -1153,14 +1020,7 @@ function pathRangeIncludesJump(graph, startIndex, endIndex) {
   return false;
 }
 
-function aiSightlineBlocked(
-  ax,
-  ay,
-  bx,
-  by,
-  samples,
-  { ignoreGroundPenalties = false } = {},
-) {
+function aiSightlineBlocked(ax, ay, bx, by, samples, { ignoreGroundPenalties = false } = {}) {
   const isFlying = vehicleIsFlying(aiCar);
   let penaltySurfaceCount = 0;
   const penaltySurfaceThreshold = Math.max(1, Math.floor(samples * 0.25));
@@ -1183,21 +1043,14 @@ function aiSightlineBlocked(
 function buildAiTargetPreview(graph) {
   if (!aiPhysicsRuntime.plannedNodeIds.length) return null;
   const aiCfg = physicsConfig.ai;
-  const currentNode =
-    graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
+  const currentNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
   if (!currentNode) return null;
 
   let anchorX = currentNode.x;
   let anchorY = currentNode.y;
   let segmentIndex = aiPhysicsRuntime.pathCursor;
-  if (
-    aiPhysicsRuntime.pathCursor <
-    aiPhysicsRuntime.plannedNodeIds.length - 1
-  ) {
-    const nextNode =
-      graph.nodes[
-        aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]
-      ];
+  if (aiPhysicsRuntime.pathCursor < aiPhysicsRuntime.plannedNodeIds.length - 1) {
+    const nextNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]];
     if (nextNode) {
       const projection = projectPointToSegment(
         aiCar.x,
@@ -1220,8 +1073,7 @@ function buildAiTargetPreview(graph) {
   let previewY = anchorY;
   let previewNode = currentNode;
   let penaltySurfaceDistance = 0;
-  const maxPenaltySurfaceDistance =
-    aiCfg.maxPreviewPenaltySurfaceDistance || 30;
+  const maxPenaltySurfaceDistance = aiCfg.maxPreviewPenaltySurfaceDistance || 30;
   let lastCleanX = anchorX;
   let lastCleanY = anchorY;
   let lastCleanNode = currentNode;
@@ -1234,8 +1086,7 @@ function buildAiTargetPreview(graph) {
     !penaltyCapped
   ) {
     const fromNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
-    const toNode =
-      graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1]];
+    const toNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1]];
     if (!fromNode || !toNode) break;
     const edge = getGraphEdge(
       graph,
@@ -1243,10 +1094,8 @@ function buildAiTargetPreview(graph) {
       aiPhysicsRuntime.plannedNodeIds[segmentIndex + 1],
     );
     const jumpSegment = edge?.kind === "jump";
-    const fromX =
-      segmentIndex === aiPhysicsRuntime.pathCursor ? anchorX : fromNode.x;
-    const fromY =
-      segmentIndex === aiPhysicsRuntime.pathCursor ? anchorY : fromNode.y;
+    const fromX = segmentIndex === aiPhysicsRuntime.pathCursor ? anchorX : fromNode.x;
+    const fromY = segmentIndex === aiPhysicsRuntime.pathCursor ? anchorY : fromNode.y;
     const segDx = toNode.x - fromX;
     const segDy = toNode.y - fromY;
     const segLen = Math.hypot(segDx, segDy);
@@ -1261,8 +1110,7 @@ function buildAiTargetPreview(graph) {
     const midY = fromY + segDy * 0.5;
     const midSurface = surfaceAt(midX, midY);
     const isPenalty = isPenaltySurface(midSurface);
-    const springBypass =
-      fromNode.nearSpring || vehicleIsFlying(aiCar) || jumpSegment;
+    const springBypass = fromNode.nearSpring || vehicleIsFlying(aiCar) || jumpSegment;
     const segTravel = Math.min(remainingDistance, segLen);
     if (isPenalty && !springBypass) {
       penaltySurfaceDistance += segTravel;
@@ -1299,24 +1147,16 @@ function buildAiTargetPreview(graph) {
   while (
     segmentIndex > aiPhysicsRuntime.pathCursor &&
     !pathRangeIncludesJump(graph, aiPhysicsRuntime.pathCursor, segmentIndex) &&
-    aiSightlineBlocked(
-      aiCar.x,
-      aiCar.y,
-      previewX,
-      previewY,
-      aiCfg.targetSightlineSamples,
-      {
-        ignoreGroundPenalties:
-          getGraphEdge(
-            graph,
-            aiPhysicsRuntime.plannedNodeIds[Math.max(segmentIndex - 1, 0)],
-            aiPhysicsRuntime.plannedNodeIds[segmentIndex],
-          )?.kind === "jump",
-      },
-    )
+    aiSightlineBlocked(aiCar.x, aiCar.y, previewX, previewY, aiCfg.targetSightlineSamples, {
+      ignoreGroundPenalties:
+        getGraphEdge(
+          graph,
+          aiPhysicsRuntime.plannedNodeIds[Math.max(segmentIndex - 1, 0)],
+          aiPhysicsRuntime.plannedNodeIds[segmentIndex],
+        )?.kind === "jump",
+    })
   ) {
-    const fallbackNode =
-      graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
+    const fallbackNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[segmentIndex]];
     if (!fallbackNode) break;
     previewX = fallbackNode.x;
     previewY = fallbackNode.y;
@@ -1335,14 +1175,8 @@ function updateAiPathCursor(graph) {
   if (!aiPhysicsRuntime.plannedNodeIds.length) return null;
   const aiCfg = physicsConfig.ai;
   const profile = getActiveAiProfile();
-  while (
-    aiPhysicsRuntime.pathCursor <
-    aiPhysicsRuntime.plannedNodeIds.length - 1
-  ) {
-    const nextNode =
-      graph.nodes[
-        aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]
-      ];
+  while (aiPhysicsRuntime.pathCursor < aiPhysicsRuntime.plannedNodeIds.length - 1) {
+    const nextNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor + 1]];
     if (!nextNode) break;
     const distance = Math.hypot(nextNode.x - aiCar.x, nextNode.y - aiCar.y);
     if (distance > aiCfg.pathNodeReachDistance) break;
@@ -1363,8 +1197,7 @@ function updateAiPathCursor(graph) {
   const targetNode = graph.nodes[targetNodeId] || null;
   const preview = buildAiTargetPreview(graph);
   if (preview) {
-    const offset =
-      profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
+    const offset = profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
     const rightX = -(preview.node?.tangentY ?? targetNode?.tangentY ?? 0);
     const rightY = preview.node?.tangentX ?? targetNode?.tangentX ?? 1;
     const offsetX = rightX * offset;
@@ -1377,9 +1210,7 @@ function updateAiPathCursor(graph) {
       tangentX: preview.node?.tangentX ?? targetNode?.tangentX ?? 1,
       tangentY: preview.node?.tangentY ?? targetNode?.tangentY ?? 0,
       targetSpeed:
-        preview.node?.targetSpeed ??
-        targetNode?.targetSpeed ??
-        physicsConfig.ai.targetSpeedMax,
+        preview.node?.targetSpeed ?? targetNode?.targetSpeed ?? physicsConfig.ai.targetSpeedMax,
     };
   }
   if (!targetNode) return null;
@@ -1446,14 +1277,8 @@ function computeAiTargetSpeed(graph) {
         // Also blend in a fraction of the node's centerline curvature
         // so the AI still respects tight centerline corners when the
         // planned path can't smooth them out.
-        const effectiveCurvature = Math.max(
-          pathCurvature,
-          (node.curvature || 0) * 0.5,
-        );
-        const excessCurvature = Math.max(
-          0,
-          effectiveCurvature - aiCfg.fullThrottleCurvature,
-        );
+        const effectiveCurvature = Math.max(pathCurvature, (node.curvature || 0) * 0.5);
+        const excessCurvature = Math.max(0, effectiveCurvature - aiCfg.fullThrottleCurvature);
         const nodeSpeedLimit = clamp(
           aiCfg.targetSpeedMax -
             excessCurvature * aiCfg.curvatureSpeedScale +
@@ -1488,10 +1313,7 @@ function computeAiTargetSpeed(graph) {
           aiPhysicsRuntime.plannedNodeIds[cursor + 1],
         )
       : null;
-  if (
-    nextJumpEdge?.kind === "jump" &&
-    Number.isFinite(nextJumpEdge.launchSpeed)
-  ) {
+  if (nextJumpEdge?.kind === "jump" && Number.isFinite(nextJumpEdge.launchSpeed)) {
     targetSpeed = Math.max(targetSpeed, nextJumpEdge.launchSpeed);
   }
 
@@ -1550,8 +1372,7 @@ function updateAiRaceControl(dt, graph) {
 
   // Force immediate replan when the checkpoint advances — don't follow
   // the old plan's continuation nodes deeper into a loop we've already done.
-  const currentCheckpointTarget =
-    aiLapData.nextCheckpointIndex % checkpoints.length;
+  const currentCheckpointTarget = aiLapData.nextCheckpointIndex % checkpoints.length;
   const checkpointChanged =
     aiPhysicsRuntime.planCheckpointIndex !== undefined &&
     aiPhysicsRuntime.planCheckpointIndex !== currentCheckpointTarget;
@@ -1561,10 +1382,7 @@ function updateAiRaceControl(dt, graph) {
     !aiPhysicsRuntime.plannedNodeIds.length ||
     aiPhysicsRuntime.replanCooldown <= 0
   ) {
-    buildAiPath(
-      graph,
-      checkpointChanged || !aiPhysicsRuntime.plannedNodeIds.length,
-    );
+    buildAiPath(graph, checkpointChanged || !aiPhysicsRuntime.plannedNodeIds.length);
   }
 
   const targetNode = updateAiPathCursor(graph);
@@ -1582,11 +1400,9 @@ function updateAiRaceControl(dt, graph) {
   const directHeading = Math.atan2(dy, dx);
   const tangentHeading = Math.atan2(targetNode.tangentY, targetNode.tangentX);
   const tangentBlend =
-    clamp(distanceToTarget / Math.max(aiCfg.tangentBlendDistance, 1), 0, 1) *
-    aiCfg.tangentBlendMax;
+    clamp(distanceToTarget / Math.max(aiCfg.tangentBlendDistance, 1), 0, 1) * aiCfg.tangentBlendMax;
   const desiredHeading =
-    directHeading +
-    signedAngleDelta(directHeading, tangentHeading) * tangentBlend;
+    directHeading + signedAngleDelta(directHeading, tangentHeading) * tangentBlend;
   const forwardX = Math.cos(aiCar.angle);
   const forwardY = Math.sin(aiCar.angle);
   const rightX = -forwardY;
@@ -1594,8 +1410,7 @@ function updateAiRaceControl(dt, graph) {
   const lateralError = dx * rightX + dy * rightY;
   const headingError = signedAngleDelta(aiCar.angle, desiredHeading);
   let steerTarget =
-    headingError * physicsConfig.ai.steeringGain +
-    lateralError * physicsConfig.ai.lateralErrorGain;
+    headingError * physicsConfig.ai.steeringGain + lateralError * physicsConfig.ai.lateralErrorGain;
   steerTarget = clamp(steerTarget, -1, 1);
 
   const forwardSpeed = aiCar.vx * forwardX + aiCar.vy * forwardY;
@@ -1625,32 +1440,21 @@ function updateAiRaceControl(dt, graph) {
   }
 
   const rivalDistance = getNearestBlockingRival(forwardX, forwardY);
-  if (
-    rivalDistance < physicsConfig.ai.rivalAvoidanceRadius &&
-    profile.style !== "bump"
-  ) {
+  if (rivalDistance < physicsConfig.ai.rivalAvoidanceRadius && profile.style !== "bump") {
     brakeTarget = Math.max(
       brakeTarget,
-      0.04 *
-        (1 -
-          rivalDistance / Math.max(physicsConfig.ai.rivalAvoidanceRadius, 1)),
+      0.04 * (1 - rivalDistance / Math.max(physicsConfig.ai.rivalAvoidanceRadius, 1)),
     );
   }
 
   if (profile.style === "bump") {
-    const rivalMetrics = getNearestRivalMetrics(
-      forwardX,
-      forwardY,
-      rightX,
-      rightY,
-    );
+    const rivalMetrics = getNearestRivalMetrics(forwardX, forwardY, rightX, rightY);
     const closeThreat =
       rivalMetrics &&
       rivalMetrics.distance < 86 &&
       rivalMetrics.forwardDistance > -24 &&
       rivalMetrics.forwardDistance < 72 &&
-      (Math.abs(rivalMetrics.lateralDistance) < 64 ||
-        rivalMetrics.closingSpeed > 14);
+      (Math.abs(rivalMetrics.lateralDistance) < 64 || rivalMetrics.closingSpeed > 14);
     if (closeThreat) {
       steerTarget = clamp(
         steerTarget + clamp(rivalMetrics.lateralDistance / 26, -0.65, 0.65),
@@ -1659,10 +1463,7 @@ function updateAiRaceControl(dt, graph) {
       );
       throttleTarget = Math.max(throttleTarget, 0.82);
       brakeTarget *= 0.35;
-      if (
-        Math.abs(rivalMetrics.lateralDistance) > 10 &&
-        Math.abs(forwardSpeed) > 95
-      ) {
+      if (Math.abs(rivalMetrics.lateralDistance) > 10 && Math.abs(forwardSpeed) > 95) {
         handbrakeTarget = Math.max(handbrakeTarget, 0.14);
       }
     }
@@ -1681,9 +1482,7 @@ function updateAiRecoveryControl(dt, graph) {
   aiPhysicsRuntime.recoveryTimer += dt;
   const recoveryNode =
     pickAiRecoveryNode(graph, aiCfg.softResetSearchRadiusFallback) ||
-    (aiPhysicsRuntime.lastValidNodeId >= 0
-      ? graph.nodes[aiPhysicsRuntime.lastValidNodeId]
-      : null);
+    (aiPhysicsRuntime.lastValidNodeId >= 0 ? graph.nodes[aiPhysicsRuntime.lastValidNodeId] : null);
   if (!recoveryNode) {
     applyAiSoftReset(graph);
     return;
@@ -1692,10 +1491,7 @@ function updateAiRecoveryControl(dt, graph) {
   aiPhysicsRuntime.targetNodeId = recoveryNode.id;
   aiPhysicsRuntime.targetPoint = { x: recoveryNode.x, y: recoveryNode.y };
   aiPhysicsRuntime.debugPathPoints = [{ x: recoveryNode.x, y: recoveryNode.y }];
-  const desiredForwardHeading = Math.atan2(
-    recoveryNode.y - aiCar.y,
-    recoveryNode.x - aiCar.x,
-  );
+  const desiredForwardHeading = Math.atan2(recoveryNode.y - aiCar.y, recoveryNode.x - aiCar.x);
 
   if (aiPhysicsRuntime.recoveryTimer >= aiCfg.maxRecoveryTime) {
     if (aiPhysicsRuntime.softResetCooldown <= 0) {
@@ -1711,10 +1507,7 @@ function updateAiRecoveryControl(dt, graph) {
       brake: 0,
       steer: clamp(headingError * 1.4, -1, 1),
     });
-    if (
-      aiPhysicsRuntime.recoveryTimer >=
-      aiCfg.reverseRecoverTime + aiCfg.forwardRecoverTime
-    ) {
+    if (aiPhysicsRuntime.recoveryTimer >= aiCfg.reverseRecoverTime + aiCfg.forwardRecoverTime) {
       aiPhysicsRuntime.recoveryMode = "reverseTurn";
       aiPhysicsRuntime.recoveryTimer = 0;
     }
@@ -1741,14 +1534,8 @@ function updateAiControl(dt) {
   aiPhysicsRuntime.targetLaneOffset =
     profile.style === "long" ? Number(profile.laneOffset) || 0 : 0;
   aiPhysicsRuntime.progress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
-  aiPhysicsRuntime.replanCooldown = Math.max(
-    0,
-    aiPhysicsRuntime.replanCooldown - dt,
-  );
-  aiPhysicsRuntime.softResetCooldown = Math.max(
-    0,
-    aiPhysicsRuntime.softResetCooldown - dt,
-  );
+  aiPhysicsRuntime.replanCooldown = Math.max(0, aiPhysicsRuntime.replanCooldown - dt);
+  aiPhysicsRuntime.softResetCooldown = Math.max(0, aiPhysicsRuntime.softResetCooldown - dt);
 
   const nearestNode = findNearestTrackNavNode(aiCar.x, aiCar.y, {
     maxDistance: aiCfg.softResetSearchRadiusFallback,
@@ -1796,8 +1583,7 @@ function distanceToAiPlannedPath(graph) {
     );
   }
   if (!Number.isFinite(bestDistance)) {
-    const fallbackNode =
-      graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
+    const fallbackNode = graph.nodes[aiPhysicsRuntime.plannedNodeIds[aiPhysicsRuntime.pathCursor]];
     if (!fallbackNode) return Infinity;
     return Math.hypot(fallbackNode.x - aiCar.x, fallbackNode.y - aiCar.y);
   }
@@ -1808,10 +1594,7 @@ function updateAiProgressHealth(dt, collision) {
   const aiCfg = physicsConfig.ai;
   const graph = getTrackNavigationGraph(track);
   const nextProgress = trackProgressAtPoint(aiCar.x, aiCar.y, track);
-  const progressGain = progressDeltaForward(
-    aiPhysicsRuntime.progressAtLastSample,
-    nextProgress,
-  );
+  const progressGain = progressDeltaForward(aiPhysicsRuntime.progressAtLastSample, nextProgress);
   aiPhysicsRuntime.progressAtLastSample = nextProgress;
   aiPhysicsRuntime.progress = nextProgress;
 
@@ -1830,10 +1613,7 @@ function updateAiProgressHealth(dt, collision) {
       aiPhysicsRuntime.lowProgressTimer += dt * 0.5;
     }
   } else {
-    aiPhysicsRuntime.lowProgressTimer = Math.max(
-      0,
-      aiPhysicsRuntime.lowProgressTimer - dt * 1.5,
-    );
+    aiPhysicsRuntime.lowProgressTimer = Math.max(0, aiPhysicsRuntime.lowProgressTimer - dt * 1.5);
   }
   // Track off-road time only when far from the planned path (truly lost,
   // not an intentional shortcut the planner chose).
@@ -1842,16 +1622,10 @@ function updateAiProgressHealth(dt, collision) {
     if (distanceToPlan > aiCfg.grassRecoveryPathDistance) {
       aiPhysicsRuntime.offRoadTimer += dt;
     } else {
-      aiPhysicsRuntime.offRoadTimer = Math.max(
-        0,
-        aiPhysicsRuntime.offRoadTimer - dt * 2,
-      );
+      aiPhysicsRuntime.offRoadTimer = Math.max(0, aiPhysicsRuntime.offRoadTimer - dt * 2);
     }
   } else {
-    aiPhysicsRuntime.offRoadTimer = Math.max(
-      0,
-      aiPhysicsRuntime.offRoadTimer - dt * 3,
-    );
+    aiPhysicsRuntime.offRoadTimer = Math.max(0, aiPhysicsRuntime.offRoadTimer - dt * 3);
   }
 
   if (collision?.hit) {
@@ -1869,8 +1643,7 @@ function updateAiProgressHealth(dt, collision) {
   }
 
   const recovered =
-    progressGain >= aiCfg.stuckProgressThreshold * 2 &&
-    aiCar.speed >= aiCfg.stuckSpeedThreshold;
+    progressGain >= aiCfg.stuckProgressThreshold * 2 && aiCar.speed >= aiCfg.stuckSpeedThreshold;
   if (aiPhysicsRuntime.mode === "recover" && recovered) {
     aiPhysicsRuntime.mode = "race";
     aiPhysicsRuntime.recoveryMode = "none";
@@ -1944,8 +1717,7 @@ export function resolveCarToCarCollision(
   carB.x += nx * overlap * (1 - pushBias);
   carB.y += ny * overlap * (1 - pushBias);
 
-  const relativeNormalVelocity =
-    (carB.vx - carA.vx) * nx + (carB.vy - carA.vy) * ny;
+  const relativeNormalVelocity = (carB.vx - carA.vx) * nx + (carB.vy - carA.vy) * ny;
   if (relativeNormalVelocity < 0) {
     const impulse = -(1 + restitution) * relativeNormalVelocity * 0.5;
     carA.vx -= nx * impulse;
@@ -1972,8 +1744,7 @@ function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
   const bx = frame.point.x + frame.normal.x * halfSpan;
   const by = frame.point.y + frame.normal.y * halfSpan;
   const triggerDistance = Math.max(15, vehicle.width * 0.55);
-  const nearCheckpoint =
-    distanceToSegment(vehicle.x, vehicle.y, ax, ay, bx, by) <= triggerDistance;
+  const nearCheckpoint = distanceToSegment(vehicle.x, vehicle.y, ax, ay, bx, by) <= triggerDistance;
   if (!nearCheckpoint) return;
 
   if (blink) {
@@ -1993,8 +1764,7 @@ function checkCheckpointProgress(vehicle, targetLapData, options = {}) {
   // Reset checkpoint set and advance to next lap's first checkpoint,
   // keeping the car cycling through checkpoints even after finishing.
   targetLapData.passed = new Set([startCheckpointIndex]);
-  targetLapData.nextCheckpointIndex =
-    (startCheckpointIndex + 1) % checkpoints.length;
+  targetLapData.nextCheckpointIndex = (startCheckpointIndex + 1) % checkpoints.length;
 
   // After the race is finished, keep cycling but don't record times or advance laps.
   if (targetLapData.finished) return;
@@ -2080,13 +1850,10 @@ function emitDrivingParticles({
     emitters.smokeCooldown = 0.05 - rearSmokeStrength * 0.02;
   }
 
-  const waterStrength =
-    surfaceName === "water" ? clamp((vehicle.speed - 30) / 115, 0, 1) : 0;
+  const waterStrength = surfaceName === "water" ? clamp((vehicle.speed - 30) / 115, 0, 1) : 0;
   if (waterStrength > 0.03 && emitters.splashCooldown <= 0) {
     const travelAngle = Math.atan2(vehicle.vy, vehicle.vx);
-    const sprayAngle = Number.isFinite(travelAngle)
-      ? travelAngle
-      : Math.atan2(forwardY, forwardX);
+    const sprayAngle = Number.isFinite(travelAngle) ? travelAngle : Math.atan2(forwardY, forwardX);
     for (let i = 0; i < wheelPoints.length; i++) {
       emitWaterSpray({
         x: wheelPoints[i].x,
@@ -2100,8 +1867,7 @@ function emitDrivingParticles({
     emitters.splashCooldown = 0.045 - waterStrength * 0.02;
   }
 
-  const grassStrength =
-    surfaceName === "grass" ? clamp((vehicle.speed - 42) / 120, 0, 1) : 0;
+  const grassStrength = surfaceName === "grass" ? clamp((vehicle.speed - 42) / 120, 0, 1) : 0;
   if (grassStrength > 0.02 && emitters.dustCooldown <= 0) {
     const travelAngle = Math.atan2(vehicle.vy, vehicle.vx);
     const dustAngle = Number.isFinite(travelAngle)
@@ -2143,8 +1909,7 @@ function recordSkids(
   const isOil = surfaceName === "oil";
   const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
   const speedAbs = Math.abs(forwardSpeed);
-  const oilyStrength =
-    surfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
+  const oilyStrength = surfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
   const oilyMarksActive = oilyStrength > 0.02 && speedAbs > 6;
   if (
     !isGrass &&
@@ -2165,16 +1930,8 @@ function recordSkids(
     Math.abs(runtime.debug.rearSlip) > driftCfg.rearSkidLateralThreshold &&
     speedAbs > 30;
   const shouldDrawRoadSkids =
-    isRoad &&
-    (strongAccel || strongBrake || skidding || handbrakeSkid || driftSkid);
-  if (
-    !isGrass &&
-    !isWater &&
-    !isOil &&
-    !oilyMarksActive &&
-    !shouldDrawRoadSkids
-  )
-    return;
+    isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid || driftSkid);
+  if (!isGrass && !isWater && !isOil && !oilyMarksActive && !shouldDrawRoadSkids) return;
 
   const color = oilyMarksActive
     ? "rgba(6, 6, 6, 0.92)"
@@ -2313,19 +2070,11 @@ function updateAiVehicleAudioState({
 
 function springLaunchApexHeight(speed) {
   const airCfg = physicsConfig.air;
-  const speedRatio = clamp(
-    speed / Math.max(physicsConfig.car.maxSpeed, 1),
-    0,
-    1,
-  );
+  const speedRatio = clamp(speed / Math.max(physicsConfig.car.maxSpeed, 1), 0, 1);
   return Math.min(airCfg.maxJumpHeight, 1.8 + speedRatio * 1.2);
 }
 
-function launchVehicleFromSpring(
-  vehicle = car,
-  runtime = physicsRuntime,
-  speed = vehicle.speed,
-) {
+function launchVehicleFromSpring(vehicle = car, runtime = physicsRuntime, speed = vehicle.speed) {
   const airCfg = physicsConfig.air;
   const apexHeight = springLaunchApexHeight(speed);
   vehicle.airborne = true;
@@ -2356,8 +2105,7 @@ function resolveVehicleLanding(
   if (vehicle.z > 0) return;
   vehicle.z = 0;
   const landingImpact = clamp(Math.abs(vehicle.vz) / 8, 0, 1);
-  if (landingImpact > 0.08)
-    emitLandingMarks(surfaceName, landingImpact, vehicle);
+  if (landingImpact > 0.08) emitLandingMarks(surfaceName, landingImpact, vehicle);
   if (vehicle.vz < -airCfg.minBounceVz && runtime.landingBouncePending) {
     vehicle.vz = Math.abs(vehicle.vz) * airCfg.bounceRestitution;
     vehicle.airborne = true;
@@ -2402,10 +2150,8 @@ function integrateVehicleAirborne(
   const headingForwardSpeed = vehicle.vx * headingX + vehicle.vy * headingY;
   let forwardSpeed = headingForwardSpeed;
 
-  forwardSpeed +=
-    carCfg.engineAccel * airCfg.throttleAccelMul * runtime.input.throttle * dt;
-  forwardSpeed -=
-    carCfg.brakeDecel * airCfg.brakeDecelMul * runtime.input.brake * dt;
+  forwardSpeed += carCfg.engineAccel * airCfg.throttleAccelMul * runtime.input.throttle * dt;
+  forwardSpeed -= carCfg.brakeDecel * airCfg.brakeDecelMul * runtime.input.brake * dt;
   forwardSpeed *= Math.exp(-carCfg.longDrag * airCfg.longDragMul * dt);
 
   vehicle.vx = headingX * forwardSpeed;
@@ -2418,8 +2164,7 @@ function integrateVehicleAirborne(
   vehicle.x = collision.x;
   vehicle.y = collision.y;
   if (collision.hit) {
-    const inwardSpeed =
-      vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
+    const inwardSpeed = vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
     if (inwardSpeed < 0) {
       vehicle.vx -= inwardSpeed * collision.normalX;
       vehicle.vy -= inwardSpeed * collision.normalY;
@@ -2430,10 +2175,7 @@ function integrateVehicleAirborne(
   vehicle.vz -= airCfg.gravity * dt;
   vehicle.z += vehicle.vz * dt;
   vehicle.airTime += dt;
-  vehicle.visualScale = Math.min(
-    1.32,
-    1 + Math.max(vehicle.z, 0) * airCfg.visualScalePerMeter,
-  );
+  vehicle.visualScale = Math.min(1.32, 1 + Math.max(vehicle.z, 0) * airCfg.visualScalePerMeter);
   runtime.debug.vForward = forwardSpeed;
   runtime.debug.vLateral = 0;
   runtime.debug.z = vehicle.z;
@@ -2448,8 +2190,7 @@ function integrateVehicleAirborne(
   runtime.debug.surface = effectiveSurfaceName;
 
   const prevForward = runtime.prevForwardSpeed;
-  const longAccel =
-    prevForward === null || dt <= 0 ? 0 : (forwardSpeed - prevForward) / dt;
+  const longAccel = prevForward === null || dt <= 0 ? 0 : (forwardSpeed - prevForward) / dt;
   runtime.prevForwardSpeed = forwardSpeed;
   return {
     collision,
@@ -2461,15 +2202,9 @@ function integrateVehicleAirborne(
 }
 
 function integrateAirborneMotion(dt, surfaceName) {
-  const motion = integrateVehicleAirborne(
-    car,
-    physicsRuntime,
-    dt,
-    surfaceName,
-    {
-      playLandingAudio: true,
-    },
-  );
+  const motion = integrateVehicleAirborne(car, physicsRuntime, dt, surfaceName, {
+    playLandingAudio: true,
+  });
   updateVehicleAudioState({
     surfaceName: motion.effectiveSurfaceName,
     headingForwardSpeed: motion.headingForwardSpeed,
@@ -2479,15 +2214,10 @@ function integrateAirborneMotion(dt, surfaceName) {
 }
 
 function playGroundImpactSound(collision, inwardSpeed, vehicleSpeed) {
-  const impactStrength = clamp(
-    Math.max(Math.abs(inwardSpeed), vehicleSpeed * 0.4) / 180,
-    0,
-    1,
-  );
+  const impactStrength = clamp(Math.max(Math.abs(inwardSpeed), vehicleSpeed * 0.4) / 180, 0, 1);
   if (impactStrength <= 0.08) return false;
   if (collision.hitType === "tree") gameAudio.playTreeBump(impactStrength);
-  else if (collision.hitType === "barrel")
-    gameAudio.playBarrelBump(impactStrength);
+  else if (collision.hitType === "barrel") gameAudio.playBarrelBump(impactStrength);
   else gameAudio.playWallBump(impactStrength);
   return true;
 }
@@ -2512,18 +2242,15 @@ function integrateVehicleGround(
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
   updateOilCarry(runtime, groundSurfaceName, dt);
-  const targetSurface =
-    physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
+  const targetSurface = physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
   const blendAlpha = flags.SURFACE_BLENDING
     ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
     : 1;
   runtime.surface.lateralGripMul +=
-    (targetSurface.lateralGripMul - runtime.surface.lateralGripMul) *
-    blendAlpha;
+    (targetSurface.lateralGripMul - runtime.surface.lateralGripMul) * blendAlpha;
   runtime.surface.longDragMul +=
     (targetSurface.longDragMul - runtime.surface.longDragMul) * blendAlpha;
-  runtime.surface.engineMul +=
-    (targetSurface.engineMul - runtime.surface.engineMul) * blendAlpha;
+  runtime.surface.engineMul += (targetSurface.engineMul - runtime.surface.engineMul) * blendAlpha;
   runtime.surface.coastDecelMul +=
     (targetSurface.coastDecelMul - runtime.surface.coastDecelMul) * blendAlpha;
 
@@ -2537,11 +2264,7 @@ function integrateVehicleGround(
   let lateralSpeed = vehicle.vx * rightX + vehicle.vy * rightY;
 
   if (runtime.input.throttle > 0.01) {
-    forwardSpeed +=
-      carCfg.engineAccel *
-      runtime.surface.engineMul *
-      runtime.input.throttle *
-      dt;
+    forwardSpeed += carCfg.engineAccel * runtime.surface.engineMul * runtime.input.throttle * dt;
   }
   if (runtime.input.brake > 0.01) {
     forwardSpeed -= carCfg.brakeDecel * runtime.input.brake * dt;
@@ -2554,8 +2277,7 @@ function integrateVehicleGround(
     );
   }
   if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-    const handbrakeDecel =
-      handbrakeCfg.longDecel * runtime.input.handbrake * dt;
+    const handbrakeDecel = handbrakeCfg.longDecel * runtime.input.handbrake * dt;
     if (forwardSpeed > 0) {
       forwardSpeed = Math.max(0, forwardSpeed - handbrakeDecel);
     } else {
@@ -2575,11 +2297,9 @@ function integrateVehicleGround(
   const speedAbs = Math.abs(forwardSpeed);
   const lowSpeedSteerMul =
     carCfg.steerAtLowSpeedMul +
-    (1 - carCfg.steerAtLowSpeedMul) *
-      clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
+    (1 - carCfg.steerAtLowSpeedMul) * clamp(speedAbs / constants.lowSpeedSteerAt, 0, 1);
   const speedSteerMul = flags.SPEED_SENSITIVE_STEERING
-    ? 1 -
-      assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
+    ? 1 - assistCfg.speedSensitiveSteer * clamp(speedAbs / carCfg.maxSpeed, 0, 1)
     : 1;
   const driftiness = Math.max(Number(carCfg.driftiness) || 0, 0);
   const driftinessScale = clamp(driftiness, 0, 2);
@@ -2588,31 +2308,23 @@ function integrateVehicleGround(
   let rearSlipTarget = 0;
   let yawAssist = 0;
   const steerAbs = Math.abs(runtime.input.steer);
-  const oilSteerSlip = getOilSteerSlipStrength(
-    runtime,
-    groundSurfaceName,
-    steerAbs,
-  );
+  const oilSteerSlip = getOilSteerSlipStrength(runtime, groundSurfaceName, steerAbs);
   const oilGripFloor = clamp(constants.oilGripFloor || 0.02, 0.001, 1);
 
   if (sidewaysDriftEnabled) {
-    const allowAutoDrift =
-      groundSurfaceName === "asphalt" || groundSurfaceName === "curb";
+    const allowAutoDrift = groundSurfaceName === "asphalt" || groundSurfaceName === "curb";
     const driftSpeedFactor = clamp(
-      (speedAbs - driftCfg.minSpeed) /
-        Math.max(driftCfg.fullEffectSpeed - driftCfg.minSpeed, 1),
+      (speedAbs - driftCfg.minSpeed) / Math.max(driftCfg.fullEffectSpeed - driftCfg.minSpeed, 1),
       0,
       1,
     );
     const driftSteerFactor = clamp(
-      (steerAbs - driftCfg.steerThreshold) /
-        Math.max(1 - driftCfg.steerThreshold, 0.001),
+      (steerAbs - driftCfg.steerThreshold) / Math.max(1 - driftCfg.steerThreshold, 0.001),
       0,
       1,
     );
     const heavySteerFactor = clamp(
-      (steerAbs - driftCfg.heavySteerThreshold) /
-        Math.max(1 - driftCfg.heavySteerThreshold, 0.001),
+      (steerAbs - driftCfg.heavySteerThreshold) / Math.max(1 - driftCfg.heavySteerThreshold, 0.001),
       0,
       1,
     );
@@ -2628,9 +2340,7 @@ function integrateVehicleGround(
         ? runtime.input.handbrake * Math.max(driftSpeedFactor, 0.35)
         : 0;
     const throttleStabilityFactor =
-      allowAutoDrift && handbrakeFactor < 0.05
-        ? runtime.input.throttle * driftSpeedFactor
-        : 0;
+      allowAutoDrift && handbrakeFactor < 0.05 ? runtime.input.throttle * driftSpeedFactor : 0;
     const driftDirection = pickDriftDirection(
       runtime.input.steer,
       lateralSpeed,
@@ -2647,15 +2357,9 @@ function integrateVehicleGround(
             (1 - throttleStabilityFactor * 0.45),
         );
       }
-      driftTarget = Math.max(
-        driftTarget,
-        throttleLiftFactor * (0.72 + heavySteerFactor * 0.2),
-      );
+      driftTarget = Math.max(driftTarget, throttleLiftFactor * (0.72 + heavySteerFactor * 0.2));
     }
-    driftTarget = Math.max(
-      driftTarget,
-      handbrakeFactor * (0.74 + handbrakeCfg.entryBoost),
-    );
+    driftTarget = Math.max(driftTarget, handbrakeFactor * (0.74 + handbrakeCfg.entryBoost));
     driftTarget = clamp(driftTarget * driftinessScale, 0, 1);
     if (driftTarget >= runtime.driftAmount) {
       runtime.driftAmount = moveTowards(
@@ -2667,25 +2371,14 @@ function integrateVehicleGround(
       if (driftTarget > 0.08) {
         runtime.driftRecoveryTimer = driftCfg.driftSustainTime;
       } else if (runtime.driftRecoveryTimer > 0) {
-        runtime.driftRecoveryTimer = Math.max(
-          0,
-          runtime.driftRecoveryTimer - dt,
-        );
+        runtime.driftRecoveryTimer = Math.max(0, runtime.driftRecoveryTimer - dt);
         driftTarget = Math.max(driftTarget, runtime.driftAmount * 0.85);
       }
-      let driftExitRate =
-        driftCfg.driftExitRate / Math.max(0.6 + driftinessScale * 0.4, 0.25);
-      if (
-        driftDirection !== 0 &&
-        runtime.input.steer * driftDirection < -0.08
-      ) {
+      let driftExitRate = driftCfg.driftExitRate / Math.max(0.6 + driftinessScale * 0.4, 0.25);
+      if (driftDirection !== 0 && runtime.input.steer * driftDirection < -0.08) {
         driftExitRate += driftCfg.countersteerRecoveryBonus;
       }
-      runtime.driftAmount = moveTowards(
-        runtime.driftAmount,
-        driftTarget,
-        driftExitRate * dt,
-      );
+      runtime.driftAmount = moveTowards(runtime.driftAmount, driftTarget, driftExitRate * dt);
     }
     if (runtime.driftAmount > 0.02 && driftDirection !== 0) {
       runtime.driftDirection = driftDirection;
@@ -2697,29 +2390,20 @@ function integrateVehicleGround(
     let frontGripMul = 1;
     let rearGripMul = 1;
     if (allowAutoDrift) {
-      frontGripMul -=
-        (1 - driftCfg.frontGripFloor) * runtime.driftAmount * driftinessScale;
-      rearGripMul -=
-        (1 - driftCfg.rearGripFloor) * runtime.driftAmount * driftinessScale;
-      rearGripMul -=
-        driftCfg.rearGripHeavySteerCut * heavySteerFactor * driftinessScale;
-      rearGripMul -=
-        driftCfg.rearGripLiftBonusCut * throttleLiftFactor * driftinessScale;
+      frontGripMul -= (1 - driftCfg.frontGripFloor) * runtime.driftAmount * driftinessScale;
+      rearGripMul -= (1 - driftCfg.rearGripFloor) * runtime.driftAmount * driftinessScale;
+      rearGripMul -= driftCfg.rearGripHeavySteerCut * heavySteerFactor * driftinessScale;
+      rearGripMul -= driftCfg.rearGripLiftBonusCut * throttleLiftFactor * driftinessScale;
       rearGripMul += throttleStabilityFactor * 0.08;
     }
     if (flags.AUTO_DRIFT_ON_STEER && allowAutoDrift) {
-      rearGripMul -=
-        assistCfg.autoDriftGripCut * 0.45 * steerAbs * driftinessScale;
+      rearGripMul -= assistCfg.autoDriftGripCut * 0.45 * steerAbs * driftinessScale;
     }
     if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-      frontGripMul -=
-        driftCfg.frontGripHandbrakeCut * handbrakeFactor * driftinessScale;
-      rearGripMul -=
-        driftCfg.rearGripHandbrakeCut * handbrakeFactor * driftinessScale;
-      frontGripMul *=
-        1 + (handbrakeCfg.frontGripMul - 1) * runtime.input.handbrake;
-      rearGripMul *=
-        1 + (handbrakeCfg.rearGripMul - 1) * runtime.input.handbrake;
+      frontGripMul -= driftCfg.frontGripHandbrakeCut * handbrakeFactor * driftinessScale;
+      rearGripMul -= driftCfg.rearGripHandbrakeCut * handbrakeFactor * driftinessScale;
+      frontGripMul *= 1 + (handbrakeCfg.frontGripMul - 1) * runtime.input.handbrake;
+      rearGripMul *= 1 + (handbrakeCfg.rearGripMul - 1) * runtime.input.handbrake;
     }
     if (flags.DRIFT_ASSIST_RECOVERY) {
       if (
@@ -2737,10 +2421,8 @@ function integrateVehicleGround(
     }
     frontGripMul = clamp(frontGripMul, 0.45, 1.25);
     rearGripMul = clamp(rearGripMul, 0.18, 1.2);
-    let effectiveFrontGrip =
-      carCfg.lateralGrip * runtime.surface.lateralGripMul * frontGripMul;
-    let effectiveRearGrip =
-      carCfg.lateralGrip * runtime.surface.lateralGripMul * rearGripMul;
+    let effectiveFrontGrip = carCfg.lateralGrip * runtime.surface.lateralGripMul * frontGripMul;
+    let effectiveRearGrip = carCfg.lateralGrip * runtime.surface.lateralGripMul * rearGripMul;
     if (oilSteerSlip > 0) {
       const oilGripMul = 1 - oilSteerSlip * (1 - oilGripFloor);
       effectiveFrontGrip *= oilGripMul;
@@ -2764,15 +2446,10 @@ function integrateVehicleGround(
       (1 + runtime.driftAmount * driftCfg.yawRateDriftBoost);
     if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
       targetYawRate +=
-        handbrakeCfg.yawBoost *
-        driftinessScale *
-        runtime.input.handbrake *
-        runtime.input.steer;
+        handbrakeCfg.yawBoost * driftinessScale * runtime.input.handbrake * runtime.input.steer;
     }
     const lateralSlipRatio =
-      speedAbs > 10
-        ? clamp(Math.abs(lateralSpeed) / Math.max(speedAbs, 1), 0, 1)
-        : 0;
+      speedAbs > 10 ? clamp(Math.abs(lateralSpeed) / Math.max(speedAbs, 1), 0, 1) : 0;
     yawAssist =
       runtime.driftDirection *
       driftSpeedFactor *
@@ -2780,15 +2457,11 @@ function integrateVehicleGround(
       (driftCfg.rearYawAssist + lateralSlipRatio * driftCfg.yawAssistFromSlip) *
       driftinessScale;
     runtime.steeringRate +=
-      (targetYawRate + yawAssist - runtime.steeringRate) *
-      clamp(carCfg.yawDamping * dt, 0, 1);
+      (targetYawRate + yawAssist - runtime.steeringRate) * clamp(carCfg.yawDamping * dt, 0, 1);
     oldAngle = vehicle.angle;
     vehicle.angle += runtime.steeringRate * dt;
 
-    if (
-      runtime.driftDirection !== 0 &&
-      runtime.input.steer * runtime.driftDirection < -0.08
-    ) {
+    if (runtime.driftDirection !== 0 && runtime.input.steer * runtime.driftDirection < -0.08) {
       effectiveFrontGrip *= 1 + driftCfg.countersteerRecoveryBonus * 0.18;
       effectiveRearGrip *= 1 + driftCfg.countersteerRecoveryBonus * 0.11;
     }
@@ -2801,8 +2474,7 @@ function integrateVehicleGround(
       runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
     }
 
-    const effectiveLateralGrip =
-      effectiveFrontGrip * 0.38 + effectiveRearGrip * 0.62;
+    const effectiveLateralGrip = effectiveFrontGrip * 0.38 + effectiveRearGrip * 0.62;
     const lateralCorrection = clamp(
       effectiveLateralGrip *
         dt *
@@ -2813,11 +2485,9 @@ function integrateVehicleGround(
     lateralSpeed *= 1 - lateralCorrection;
 
     const alignedVx =
-      Math.cos(vehicle.angle) * forwardSpeed -
-      Math.sin(vehicle.angle) * lateralSpeed;
+      Math.cos(vehicle.angle) * forwardSpeed - Math.sin(vehicle.angle) * lateralSpeed;
     const alignedVy =
-      Math.sin(vehicle.angle) * forwardSpeed +
-      Math.cos(vehicle.angle) * lateralSpeed;
+      Math.sin(vehicle.angle) * forwardSpeed + Math.cos(vehicle.angle) * lateralSpeed;
     const baseInertiaCarry = clamp(
       driftCfg.inertiaCarry * runtime.driftAmount * driftinessScale +
         handbrakeFactor * 0.08 * driftinessScale,
@@ -2827,8 +2497,7 @@ function integrateVehicleGround(
     const inertiaCarry = clamp(
       baseInertiaCarry +
         oilSteerSlip *
-          (Math.max(constants.oilInertiaCarry || 0.985, baseInertiaCarry) -
-            baseInertiaCarry),
+          (Math.max(constants.oilInertiaCarry || 0.985, baseInertiaCarry) - baseInertiaCarry),
       0,
       Math.max(0.78, constants.oilInertiaCarry || 0.985),
     );
@@ -2839,8 +2508,7 @@ function integrateVehicleGround(
     runtime.driftDirection = 0;
     runtime.driftRecoveryTimer = 0;
 
-    let targetYawRate =
-      runtime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
+    let targetYawRate = runtime.input.steer * carCfg.steerRate * lowSpeedSteerMul * speedSteerMul;
     if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
       targetYawRate +=
         assistCfg.handbrakeYawBoost *
@@ -2849,22 +2517,18 @@ function integrateVehicleGround(
         runtime.input.steer;
     }
     runtime.steeringRate +=
-      (targetYawRate - runtime.steeringRate) *
-      clamp(carCfg.yawDamping * dt, 0, 1);
+      (targetYawRate - runtime.steeringRate) * clamp(carCfg.yawDamping * dt, 0, 1);
     oldAngle = vehicle.angle;
     vehicle.angle += runtime.steeringRate * dt;
 
-    let effectiveLateralGrip =
-      carCfg.lateralGrip * runtime.surface.lateralGripMul;
-    const allowLegacyAutoDrift =
-      groundSurfaceName !== "grass" && groundSurfaceName !== "oil";
+    let effectiveLateralGrip = carCfg.lateralGrip * runtime.surface.lateralGripMul;
+    const allowLegacyAutoDrift = groundSurfaceName !== "grass" && groundSurfaceName !== "oil";
     if (
       flags.AUTO_DRIFT_ON_STEER &&
       allowLegacyAutoDrift &&
       steerAbs > constants.driftSteerThreshold
     ) {
-      effectiveLateralGrip *=
-        1 - assistCfg.autoDriftGripCut * steerAbs * driftinessScale;
+      effectiveLateralGrip *= 1 - assistCfg.autoDriftGripCut * steerAbs * driftinessScale;
     }
     if (flags.DRIFT_ASSIST_RECOVERY) {
       if (
@@ -2892,8 +2556,7 @@ function integrateVehicleGround(
           0,
           1,
         );
-      effectiveLateralGrip *=
-        1 - assistCfg.throttleLiftGripCut * liftBlend * driftinessScale;
+      effectiveLateralGrip *= 1 - assistCfg.throttleLiftGripCut * liftBlend * driftinessScale;
       lateralSpeed +=
         runtime.input.steer *
         speedAbs *
@@ -2903,8 +2566,7 @@ function integrateVehicleGround(
         dt;
     }
     if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-      const gripMul =
-        1 + (assistCfg.handbrakeGrip - 1) * runtime.input.handbrake;
+      const gripMul = 1 + (assistCfg.handbrakeGrip - 1) * runtime.input.handbrake;
       effectiveLateralGrip *= gripMul;
       lateralSpeed +=
         runtime.input.steer *
@@ -2928,11 +2590,9 @@ function integrateVehicleGround(
     const lateralCorrection = clamp(effectiveLateralGrip * dt, 0, 1);
     lateralSpeed *= 1 - lateralCorrection;
     const alignedVx =
-      Math.cos(vehicle.angle) * forwardSpeed -
-      Math.sin(vehicle.angle) * lateralSpeed;
+      Math.cos(vehicle.angle) * forwardSpeed - Math.sin(vehicle.angle) * lateralSpeed;
     const alignedVy =
-      Math.sin(vehicle.angle) * forwardSpeed +
-      Math.cos(vehicle.angle) * lateralSpeed;
+      Math.sin(vehicle.angle) * forwardSpeed + Math.cos(vehicle.angle) * lateralSpeed;
     const inertiaCarry = clamp(
       oilSteerSlip * (constants.oilInertiaCarry || 0.985),
       0,
@@ -2944,25 +2604,17 @@ function integrateVehicleGround(
 
   const headingForwardX = Math.cos(vehicle.angle);
   const headingForwardY = Math.sin(vehicle.angle);
-  const pivotBlend = clamp(
-    Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1),
-    0,
-    1,
-  );
+  const pivotBlend = clamp(Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1), 0, 1);
   let pivotRatio =
     constants.pivotAtLowSpeedRatio +
-    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
-      pivotBlend;
+    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) * pivotBlend;
   if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
     pivotRatio +=
-      (constants.pivotAtLowSpeedRatio - pivotRatio) *
-      clamp(runtime.input.handbrake, 0, 1);
+      (constants.pivotAtLowSpeedRatio - pivotRatio) * clamp(runtime.input.handbrake, 0, 1);
   }
   const pivotOffset = vehicle.width * (pivotRatio - 0.5);
-  const pivotShiftX =
-    Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
-  const pivotShiftY =
-    Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
+  const pivotShiftX = Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
+  const pivotShiftY = Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
   const collision = resolveObjectCollisions(
     vehicle.x + vehicle.vx * dt + pivotShiftX,
     vehicle.y + vehicle.vy * dt + pivotShiftY,
@@ -2971,8 +2623,7 @@ function integrateVehicleGround(
   vehicle.x = collision.x;
   vehicle.y = collision.y;
   if (collision.hit) {
-    const inwardSpeed =
-      vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
+    const inwardSpeed = vehicle.vx * collision.normalX + vehicle.vy * collision.normalY;
     if (
       playImpactAudio &&
       runtime.impactCooldown <= 0 &&
@@ -2998,21 +2649,14 @@ function integrateVehicleGround(
 
   const headingRightX = -headingForwardY;
   const headingRightY = headingForwardX;
-  let rawHeadingForwardSpeed =
-    vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
-  if (
-    flags.HANDBRAKE_MODE &&
-    runtime.input.handbrake > 0.05 &&
-    rawHeadingForwardSpeed < 0
-  ) {
+  let rawHeadingForwardSpeed = vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
+  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05 && rawHeadingForwardSpeed < 0) {
     vehicle.vx -= rawHeadingForwardSpeed * headingForwardX;
     vehicle.vy -= rawHeadingForwardSpeed * headingForwardY;
     rawHeadingForwardSpeed = 0;
   }
   const maxVectorSpeed =
-    rawHeadingForwardSpeed >= 0
-      ? carCfg.maxSpeed
-      : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
+    rawHeadingForwardSpeed >= 0 ? carCfg.maxSpeed : carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
   const vectorSpeed = Math.hypot(vehicle.vx, vehicle.vy);
   if (vectorSpeed > maxVectorSpeed && vectorSpeed > 0) {
     const scale = maxVectorSpeed / vectorSpeed;
@@ -3022,10 +2666,8 @@ function integrateVehicleGround(
 
   vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
   runtime.lastGroundedSpeed = vehicle.speed;
-  const headingForwardSpeed =
-    vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
-  const headingLateralSpeed =
-    vehicle.vx * headingRightX + vehicle.vy * headingRightY;
+  const headingForwardSpeed = vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
+  const headingLateralSpeed = vehicle.vx * headingRightX + vehicle.vy * headingRightY;
   runtime.debug.surface = getVehicleSurfaceAt(vehicle, groundSurfaceName);
   runtime.debug.vForward = headingForwardSpeed;
   runtime.debug.vLateral = headingLateralSpeed;
@@ -3040,10 +2682,7 @@ function integrateVehicleGround(
     Math.abs(headingForwardSpeed) + 0.0001,
   );
   const prevForward = runtime.prevForwardSpeed;
-  const longAccel =
-    prevForward === null || dt <= 0
-      ? 0
-      : (headingForwardSpeed - prevForward) / dt;
+  const longAccel = prevForward === null || dt <= 0 ? 0 : (headingForwardSpeed - prevForward) / dt;
   runtime.prevForwardSpeed = headingForwardSpeed;
   const spring = findSpringTrigger(vehicle.x, vehicle.y);
   if (spring && !vehicleIsFlying(vehicle)) {
@@ -3053,16 +2692,10 @@ function integrateVehicleGround(
   const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, skidSurface);
   runtime.debug.surface = effectiveSurfaceName;
   const wheelPoints = wheelWorldPoints(vehicle);
-  recordSkids(
-    skidSurface,
-    headingForwardSpeed,
-    headingLateralSpeed,
-    longAccel,
-    {
-      vehicle,
-      runtime,
-    },
-  );
+  recordSkids(skidSurface, headingForwardSpeed, headingLateralSpeed, longAccel, {
+    vehicle,
+    runtime,
+  });
   emitDrivingParticles({
     dt,
     vehicle,
@@ -3084,12 +2717,7 @@ function integrateVehicleGround(
   };
 }
 
-function resetAiOpponentForRace(
-  index,
-  spawnPoint,
-  headingAngle,
-  startCheckpoint,
-) {
+function resetAiOpponentForRace(index, spawnPoint, headingAngle, startCheckpoint) {
   withAiOpponent(index, () => {
     const profile = getAiProfileByIndex(index);
     const forwardX = Math.cos(headingAngle);
@@ -3201,10 +2829,7 @@ export function resetRace() {
   car.y = spawnPoint.y;
   car.vx = 0;
   car.vy = 0;
-  car.angle = Math.atan2(
-    aheadPoint.y - spawnPoint.y,
-    aheadPoint.x - spawnPoint.x,
-  );
+  car.angle = Math.atan2(aheadPoint.y - spawnPoint.y, aheadPoint.x - spawnPoint.x);
   car.speed = 0;
   car.z = 0;
   car.vz = 0;
@@ -3321,14 +2946,8 @@ function resolveRaceFieldCollisions() {
       if (!resolveCarToCarCollision(field[i].vehicle, field[j].vehicle)) {
         continue;
       }
-      field[i].runtime.collisionGripTimer = Math.max(
-        field[i].runtime.collisionGripTimer,
-        0.06,
-      );
-      field[j].runtime.collisionGripTimer = Math.max(
-        field[j].runtime.collisionGripTimer,
-        0.06,
-      );
+      field[i].runtime.collisionGripTimer = Math.max(field[i].runtime.collisionGripTimer, 0.06);
+      field[j].runtime.collisionGripTimer = Math.max(field[j].runtime.collisionGripTimer, 0.06);
     }
   }
 }
@@ -3358,11 +2977,7 @@ function updateAiCheckpointProgress() {
 }
 
 export function applyExternalRivalState(index, payload = {}) {
-  if (
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index >= getActiveAiOpponentCount()
-  ) {
+  if (!Number.isInteger(index) || index < 0 || index >= getActiveAiOpponentCount()) {
     return;
   }
   withAiOpponent(index, () => {
@@ -3370,26 +2985,16 @@ export function applyExternalRivalState(index, payload = {}) {
     aiCar.y = Number.isFinite(payload.y) ? Number(payload.y) : aiCar.y;
     aiCar.vx = Number.isFinite(payload.vx) ? Number(payload.vx) : aiCar.vx;
     aiCar.vy = Number.isFinite(payload.vy) ? Number(payload.vy) : aiCar.vy;
-    aiCar.angle = Number.isFinite(payload.angle)
-      ? Number(payload.angle)
-      : aiCar.angle;
-    aiCar.speed = Number.isFinite(payload.speed)
-      ? Number(payload.speed)
-      : aiCar.speed;
+    aiCar.angle = Number.isFinite(payload.angle) ? Number(payload.angle) : aiCar.angle;
+    aiCar.speed = Number.isFinite(payload.speed) ? Number(payload.speed) : aiCar.speed;
     aiCar.z = Number.isFinite(payload.z) ? Number(payload.z) : aiCar.z;
     aiCar.vz = Number.isFinite(payload.vz) ? Number(payload.vz) : aiCar.vz;
     aiCar.airborne = Boolean(payload.airborne);
-    aiCar.airTime = Number.isFinite(payload.airTime)
-      ? Number(payload.airTime)
-      : 0;
-    aiCar.visualScale = Number.isFinite(payload.visualScale)
-      ? Number(payload.visualScale)
-      : 1;
+    aiCar.airTime = Number.isFinite(payload.airTime) ? Number(payload.airTime) : 0;
+    aiCar.visualScale = Number.isFinite(payload.visualScale) ? Number(payload.visualScale) : 1;
     aiPhysicsRuntime.input = {
       ...aiPhysicsRuntime.input,
-      ...(payload.input && typeof payload.input === "object"
-        ? payload.input
-        : {}),
+      ...(payload.input && typeof payload.input === "object" ? payload.input : {}),
     };
     applyLapSnapshot(aiLapData, payload);
     if (aiLapData.finished) {
@@ -3409,11 +3014,7 @@ export function applyExternalRivalState(index, payload = {}) {
 }
 
 export function getRivalPhysicsSnapshot(index) {
-  if (
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index >= getActiveAiOpponentCount()
-  ) {
+  if (!Number.isInteger(index) || index < 0 || index >= getActiveAiOpponentCount()) {
     return null;
   }
   return withAiOpponent(index, () => ({
@@ -3442,8 +3043,7 @@ export function getRivalPhysicsSnapshot(index) {
 
 export function getExternalHumanRivalCount() {
   return state.aiRoster.reduce((count, _entry, index) => {
-    if (!rivalIsRemoteHuman(index) || !rivalUsesExternalControl(index))
-      return count;
+    if (!rivalIsRemoteHuman(index) || !rivalUsesExternalControl(index)) return count;
     return aiLapDataList[index].finished ? count : count + 1;
   }, 0);
 }
@@ -3464,11 +3064,7 @@ export function updateRace(dt) {
     state.startSequence.elapsed += dt;
     const countdownStep = Math.min(3, Math.floor(state.startSequence.elapsed));
     if (countdownStep > state.startSequence.lastCountdownStep) {
-      for (
-        let step = state.startSequence.lastCountdownStep + 1;
-        step <= countdownStep;
-        step++
-      ) {
+      for (let step = state.startSequence.lastCountdownStep + 1; step <= countdownStep; step++) {
         gameAudio.playCountdownBeep(step);
       }
       state.startSequence.lastCountdownStep = countdownStep;
@@ -3514,9 +3110,7 @@ export function updateRace(dt) {
 
   const throttleTarget = keys.accel ? 1 : 0;
   const brakeTarget = keys.brake ? 1 : 0;
-  const steerTarget = vehicleIsFlying(car)
-    ? 0
-    : (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  const steerTarget = vehicleIsFlying(car) ? 0 : (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
   const handbrakeTarget = keys.handbrake ? 1 : 0;
 
   physicsRuntime.input.throttle = smoothInputValue(
@@ -3524,16 +3118,8 @@ export function updateRace(dt) {
     throttleTarget,
     dt,
   );
-  physicsRuntime.input.brake = smoothInputValue(
-    physicsRuntime.input.brake,
-    brakeTarget,
-    dt,
-  );
-  physicsRuntime.input.steer = smoothInputValue(
-    physicsRuntime.input.steer,
-    steerTarget,
-    dt,
-  );
+  physicsRuntime.input.brake = smoothInputValue(physicsRuntime.input.brake, brakeTarget, dt);
+  physicsRuntime.input.steer = smoothInputValue(physicsRuntime.input.steer, steerTarget, dt);
   physicsRuntime.input.handbrake = smoothInputValue(
     physicsRuntime.input.handbrake,
     handbrakeTarget,
@@ -3541,10 +3127,7 @@ export function updateRace(dt) {
   );
 
   if (physicsRuntime.landingCooldown > 0) {
-    physicsRuntime.landingCooldown = Math.max(
-      0,
-      physicsRuntime.landingCooldown - dt,
-    );
+    physicsRuntime.landingCooldown = Math.max(0, physicsRuntime.landingCooldown - dt);
   }
 
   if (vehicleIsFlying(car)) {
@@ -3563,15 +3146,9 @@ export function updateRace(dt) {
     updateAiCheckpointProgress();
     return;
   }
-  const motion = integrateVehicleGround(
-    car,
-    physicsRuntime,
-    dt,
-    groundSurfaceName,
-    {
-      playImpactAudio: true,
-    },
-  );
+  const motion = integrateVehicleGround(car, physicsRuntime, dt, groundSurfaceName, {
+    playImpactAudio: true,
+  });
   updateVehicleAudioState({
     surfaceName: motion.effectiveSurfaceName,
     headingForwardSpeed: motion.headingForwardSpeed,
@@ -3593,11 +3170,7 @@ export function updateRace(dt) {
   }
   updateAiCheckpointProgress();
 
-  if (
-    state.finished &&
-    !state.raceSubmission.completed &&
-    !state.raceSubmission.inFlight
-  ) {
+  if (state.finished && !state.raceSubmission.completed && !state.raceSubmission.inFlight) {
     state.raceSubmission.inFlight = true;
     Promise.resolve(persistRaceResults())
       .catch(() => {
@@ -3612,19 +3185,10 @@ export function updateRace(dt) {
 
 async function persistRaceResults() {
   if (!state.auth.authenticated) return;
-  if (
-    state.selectedTrackIndex < 0 ||
-    state.selectedTrackIndex >= trackOptions.length
-  )
-    return;
+  if (state.selectedTrackIndex < 0 || state.selectedTrackIndex >= trackOptions.length) return;
 
   const selectedTrack = trackOptions[state.selectedTrackIndex];
-  if (
-    !selectedTrack ||
-    !selectedTrack.fromDb ||
-    typeof selectedTrack.id !== "string"
-  )
-    return;
+  if (!selectedTrack || !selectedTrack.fromDb || typeof selectedTrack.id !== "string") return;
 
   if (!lapData.lapTimes.length) return;
 

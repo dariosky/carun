@@ -228,10 +228,7 @@ export const aiWallJumpShortcutTrack = {
     borderSize: 22,
     centerlineLoop,
     centerlineHalfWidth: 72,
-    centerlineWidthProfile: Array.from(
-      { length: centerlineLoop.length },
-      () => 60,
-    ),
+    centerlineWidthProfile: Array.from({ length: centerlineLoop.length }, () => 60),
     worldScale: 0.5,
     centerlineSmoothingMode: "light",
     startAngle: 0,

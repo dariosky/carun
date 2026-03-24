@@ -50,9 +50,7 @@ export async function updateAuthDisplayName(displayName) {
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Update failed";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Update failed";
     throw new Error(message);
   }
   if (!isObject(payload)) throw new Error("Update failed");
@@ -64,9 +62,7 @@ export async function logoutAuth() {
   if (!response.ok) {
     const payload = await parseJsonSafe(response);
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Logout failed";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Logout failed";
     throw new Error(message);
   }
   return { ok: true };
@@ -83,9 +79,7 @@ export async function saveTrackToDb(name, trackPayload) {
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Save failed";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Save failed";
     throw new Error(message);
   }
   return payload;
@@ -94,8 +88,7 @@ export async function saveTrackToDb(name, trackPayload) {
 export async function updateTrackInDb(trackId, { name, trackPayload } = {}) {
   const body = {};
   if (typeof name === "string") body.name = name;
-  if (trackPayload && typeof trackPayload === "object")
-    body.track_payload_json = trackPayload;
+  if (trackPayload && typeof trackPayload === "object") body.track_payload_json = trackPayload;
   const response = await request(`/api/tracks/${encodeURIComponent(trackId)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -103,9 +96,7 @@ export async function updateTrackInDb(trackId, { name, trackPayload } = {}) {
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Save failed";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Save failed";
     throw new Error(message);
   }
   if (!isObject(payload)) throw new Error("Save failed");
@@ -119,9 +110,7 @@ export async function fetchTrackById(trackId) {
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Track not found";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Track not found";
     throw new Error(message);
   }
   return payload;
@@ -141,29 +130,23 @@ export async function fetchMyTracks() {
 }
 
 export async function fetchSharedTrack(shareToken) {
-  const response = await request(
-    `/api/tracks/share/${encodeURIComponent(shareToken)}`,
-    { method: "GET" },
-  );
+  const response = await request(`/api/tracks/share/${encodeURIComponent(shareToken)}`, {
+    method: "GET",
+  });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Track not found";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Track not found";
     throw new Error(message);
   }
   return payload;
 }
 
 export async function setTrackPublished(trackId, isPublished) {
-  const response = await request(
-    `/api/tracks/${encodeURIComponent(trackId)}/publish`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ is_published: Boolean(isPublished) }),
-    },
-  );
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}/publish`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_published: Boolean(isPublished) }),
+  });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
@@ -192,20 +175,15 @@ export async function deleteTrackById(trackId) {
   if (!response.ok) {
     const payload = await parseJsonSafe(response);
     const message =
-      isObject(payload) && typeof payload.detail === "string"
-        ? payload.detail
-        : "Delete failed";
+      isObject(payload) && typeof payload.detail === "string" ? payload.detail : "Delete failed";
     throw new Error(message);
   }
 }
 
 export async function clearTrackRecords(trackId) {
-  const response = await request(
-    `/api/tracks/${encodeURIComponent(trackId)}/records`,
-    {
-      method: "DELETE",
-    },
-  );
+  const response = await request(`/api/tracks/${encodeURIComponent(trackId)}/records`, {
+    method: "DELETE",
+  });
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
@@ -226,9 +204,7 @@ export async function submitLapResult(payload) {
   const data = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(data) && typeof data.detail === "string"
-        ? data.detail
-        : "Lap submit failed";
+      isObject(data) && typeof data.detail === "string" ? data.detail : "Lap submit failed";
     throw new Error(message);
   }
   if (!isObject(data)) throw new Error("Lap submit failed");
@@ -243,9 +219,7 @@ export async function submitRaceResult(payload) {
   const data = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(data) && typeof data.detail === "string"
-        ? data.detail
-        : "Race submit failed";
+      isObject(data) && typeof data.detail === "string" ? data.detail : "Race submit failed";
     throw new Error(message);
   }
   if (!isObject(data)) throw new Error("Race submit failed");
@@ -270,18 +244,13 @@ export async function createTournamentRoom(payload) {
 }
 
 export async function fetchTournamentRoom(roomId) {
-  const response = await request(
-    `/api/tournaments/${encodeURIComponent(roomId)}`,
-    {
-      method: "GET",
-    },
-  );
+  const response = await request(`/api/tournaments/${encodeURIComponent(roomId)}`, {
+    method: "GET",
+  });
   const data = await parseJsonSafe(response);
   if (!response.ok) {
     const message =
-      isObject(data) && typeof data.detail === "string"
-        ? data.detail
-        : "Tournament room not found";
+      isObject(data) && typeof data.detail === "string" ? data.detail : "Tournament room not found";
     throw new Error(message);
   }
   if (!isObject(data)) throw new Error("Tournament room not found");
@@ -289,13 +258,10 @@ export async function fetchTournamentRoom(roomId) {
 }
 
 export async function joinTournamentRoom(roomId, payload) {
-  const response = await request(
-    `/api/tournaments/${encodeURIComponent(roomId)}/join`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-  );
+  const response = await request(`/api/tournaments/${encodeURIComponent(roomId)}/join`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
   const data = await parseJsonSafe(response);
   if (!response.ok) {
     const message =

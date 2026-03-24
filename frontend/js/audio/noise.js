@@ -3,10 +3,7 @@ const noiseCache = new WeakMap();
 export function getNoiseBuffer(context) {
   if (noiseCache.has(context)) return noiseCache.get(context);
   const durationSeconds = 2;
-  const frameCount = Math.max(
-    1,
-    Math.floor(context.sampleRate * durationSeconds),
-  );
+  const frameCount = Math.max(1, Math.floor(context.sampleRate * durationSeconds));
   const buffer = context.createBuffer(1, frameCount, context.sampleRate);
   const channel = buffer.getChannelData(0);
   for (let i = 0; i < frameCount; i++) {

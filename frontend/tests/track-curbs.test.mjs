@@ -78,14 +78,8 @@ test("intersection curbs collapse when the outside of the curb is asphalt", () =
       if (segment.renderStyle !== "striped") continue;
       const sideSign = segment.outwardSign ?? (side === "outer" ? -1 : 1);
       for (let index = 0; index < segment.points.length; index++) {
-        const probe = curbOuterProbePoint(
-          segment.points,
-          index,
-          sideSign,
-          asphaltProbeDistance,
-        );
-        if (surfaceAtForTrack(probe.x, probe.y, trackData, []) !== "asphalt")
-          continue;
+        const probe = curbOuterProbePoint(segment.points, index, sideSign, asphaltProbeDistance);
+        if (surfaceAtForTrack(probe.x, probe.y, trackData, []) !== "asphalt") continue;
         const supportWidth = measureCurbSupportWidth(
           segment.points,
           index,

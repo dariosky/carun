@@ -17,7 +17,7 @@ repos:
         language: system
         pass_filenames: false
         files: ^(uv\.lock|pyproject\.toml)$
-      - id: prettier
+      - id: oxfmt
         name: frontend format
         entry: bash -c 'cd frontend && npm run format'
         language: system

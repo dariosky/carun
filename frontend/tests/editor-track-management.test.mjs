@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  makeTrackData,
-  setupFrontendTestEnv,
-} from "./helpers/frontend-test-env.mjs";
+import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env.mjs";
 
 setupFrontendTestEnv();
 
@@ -67,9 +64,7 @@ test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke
   });
   assert.ok(imported);
 
-  const trackIndex = trackOptions.findIndex(
-    (track) => track.id === imported.id,
-  );
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
   assert.ok(trackIndex >= 0);
   assert.equal(regenerateTrackFromCenterlineStrokes(trackIndex), true);
 
@@ -108,9 +103,7 @@ test("editor clear-records command opens confirmation and clears stored best tim
     });
     assert.ok(imported);
 
-    const trackIndex = trackOptions.findIndex(
-      (track) => track.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
     assert.ok(trackIndex >= 0);
     enterEditor(trackIndex);
 
@@ -184,9 +177,7 @@ test("editor clear-records command calls API for DB-backed tracks", async () => 
     });
     assert.ok(imported);
 
-    const trackIndex = trackOptions.findIndex(
-      (track) => track.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
     assert.ok(trackIndex >= 0);
     enterEditor(trackIndex);
 
@@ -238,9 +229,7 @@ test("track selector clear-records command opens confirmation and clears stored 
     });
     assert.ok(imported);
 
-    const trackIndex = trackOptions.findIndex(
-      (track) => track.id === imported.id,
-    );
+    const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
     assert.ok(trackIndex >= 0);
 
     state.mode = "trackSelect";
@@ -286,9 +275,7 @@ test("editor toolbar exposes a pan toggle and track zoom can clamp to 25 percent
   });
   assert.ok(imported);
 
-  const trackIndex = trackOptions.findIndex(
-    (track) => track.id === imported.id,
-  );
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
   assert.ok(trackIndex >= 0);
   enterEditor(trackIndex);
 
@@ -327,9 +314,7 @@ test("editor toolbar exposes oil placement and preserves imported oil blobs", ()
   });
   assert.ok(imported);
 
-  const trackIndex = trackOptions.findIndex(
-    (track) => track.id === imported.id,
-  );
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
   assert.ok(trackIndex >= 0);
   enterEditor(trackIndex);
 

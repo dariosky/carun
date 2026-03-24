@@ -104,10 +104,7 @@ export function loadPlayerColor(defaultValue = DEFAULT_PLAYER_COLOR) {
 
 export function savePlayerColor(colorId) {
   try {
-    localStorage.setItem(
-      PLAYER_COLOR_STORAGE_KEY,
-      sanitizeCarColor(colorId, DEFAULT_PLAYER_COLOR),
-    );
+    localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, sanitizeCarColor(colorId, DEFAULT_PLAYER_COLOR));
   } catch {
     // Ignore storage failures in restricted environments.
   }
@@ -177,10 +174,7 @@ export const DEFAULT_AI_OPPONENT_COUNT = 3;
 export function sanitizeAiOpponentCount(raw) {
   const numeric = Number(raw);
   if (!Number.isFinite(numeric)) return DEFAULT_AI_OPPONENT_COUNT;
-  return Math.max(
-    MIN_AI_OPPONENT_COUNT,
-    Math.min(MAX_AI_OPPONENT_COUNT, Math.round(numeric)),
-  );
+  return Math.max(MIN_AI_OPPONENT_COUNT, Math.min(MAX_AI_OPPONENT_COUNT, Math.round(numeric)));
 }
 
 export function loadAiOpponentCount(defaultValue = DEFAULT_AI_OPPONENT_COUNT) {
@@ -195,10 +189,7 @@ export function loadAiOpponentCount(defaultValue = DEFAULT_AI_OPPONENT_COUNT) {
 
 export function saveAiOpponentCount(count) {
   try {
-    localStorage.setItem(
-      AI_OPPONENT_COUNT_STORAGE_KEY,
-      String(sanitizeAiOpponentCount(count)),
-    );
+    localStorage.setItem(AI_OPPONENT_COUNT_STORAGE_KEY, String(sanitizeAiOpponentCount(count)));
   } catch {
     // Ignore storage failures in restricted environments.
   }
@@ -217,19 +208,14 @@ export function loadSidewaysDriftEnabled(defaultValue = true) {
 
 export function saveSidewaysDriftEnabled(enabled) {
   try {
-    localStorage.setItem(
-      SIDEWAYS_DRIFT_STORAGE_KEY,
-      enabled ? "true" : "false",
-    );
+    localStorage.setItem(SIDEWAYS_DRIFT_STORAGE_KEY, enabled ? "true" : "false");
   } catch {
     // Ignore storage failures in restricted environments.
   }
 }
 
 export function getMenuItems(authenticated) {
-  return authenticated
-    ? ["RACE", "SETTINGS"]
-    : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
+  return authenticated ? ["RACE", "SETTINGS"] : ["LOGIN", "RACE ANONYMOUSLY", "SETTINGS"];
 }
 
 export function getLoginProviderItems() {
@@ -255,18 +241,9 @@ export const AI_BUMP_NAME_POOL = [
   "Ollie Oilspill",
   "Crashy Carl",
 ];
-export const AI_LONG_NAME_POOL = [
-  "Chuck Chicane",
-  "Pete Stop",
-  "Turbo Tina",
-  "Loopy Lap",
-];
+export const AI_LONG_NAME_POOL = ["Chuck Chicane", "Pete Stop", "Turbo Tina", "Loopy Lap"];
 export const AI_OPPONENT_NAME_POOL = [
-  ...new Set([
-    ...AI_PRECISE_NAME_POOL,
-    ...AI_BUMP_NAME_POOL,
-    ...AI_LONG_NAME_POOL,
-  ]),
+  ...new Set([...AI_PRECISE_NAME_POOL, ...AI_BUMP_NAME_POOL, ...AI_LONG_NAME_POOL]),
 ];
 export const AI_DRIVING_STYLE_POOL = ["precise", "long", "bump"];
 export const TOURNAMENT_POINTS = [10, 8, 6, 4, 3, 2];
@@ -349,9 +326,7 @@ function cloneCenterlinePoint(point, fallbackHalfWidth = 60) {
   return {
     x: Number(point?.x) || 0,
     y: Number(point?.y) || 0,
-    halfWidth: Number.isFinite(point?.halfWidth)
-      ? Number(point.halfWidth)
-      : fallbackHalfWidth,
+    halfWidth: Number.isFinite(point?.halfWidth) ? Number(point.halfWidth) : fallbackHalfWidth,
   };
 }
 
@@ -361,29 +336,19 @@ function cloneWorldObject(obj) {
   const base = {
     ...obj,
     type,
-    angle: Number.isFinite(obj?.angle)
-      ? Number(obj.angle)
-      : defaults.angle || 0,
+    angle: Number.isFinite(obj?.angle) ? Number(obj.angle) : defaults.angle || 0,
   };
 
   if (type === "tree" || type === "barrel" || type === "spring") {
     base.r = Number.isFinite(obj?.r) ? Number(obj.r) : defaults.r;
-    base.height = Number.isFinite(obj?.height)
-      ? Number(obj.height)
-      : defaults.height;
+    base.height = Number.isFinite(obj?.height) ? Number(obj.height) : defaults.height;
     return base;
   }
 
   if (type === "wall") {
-    base.width = Number.isFinite(obj?.width)
-      ? Number(obj.width)
-      : defaults.width;
-    base.length = Number.isFinite(obj?.length)
-      ? Number(obj.length)
-      : defaults.length;
-    base.height = Number.isFinite(obj?.height)
-      ? Number(obj.height)
-      : defaults.height;
+    base.width = Number.isFinite(obj?.width) ? Number(obj.width) : defaults.width;
+    base.length = Number.isFinite(obj?.length) ? Number(obj.length) : defaults.length;
+    base.height = Number.isFinite(obj?.height) ? Number(obj.height) : defaults.height;
     return base;
   }
 
@@ -406,12 +371,8 @@ function cloneTrackData(trackData) {
     centerlineWidthProfile: Array.isArray(trackData.centerlineWidthProfile)
       ? trackData.centerlineWidthProfile.map((value) => Number(value) || 0)
       : null,
-    worldScale: Number.isFinite(trackData.worldScale)
-      ? Number(trackData.worldScale)
-      : 1,
-    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(
-      trackData.centerlineSmoothingMode,
-    ),
+    worldScale: Number.isFinite(trackData.worldScale) ? Number(trackData.worldScale) : 1,
+    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(trackData.centerlineSmoothingMode),
   };
 }
 
@@ -446,10 +407,8 @@ function dedupeCheckpointEntries(entries, tolerance = 0.0035) {
   for (const entry of entries) {
     const duplicate = out.some(
       (existing) =>
-        Math.abs(checkpointDeltaFromStart(entry.progress, existing.progress)) <
-          tolerance ||
-        Math.abs(checkpointDeltaFromStart(existing.progress, entry.progress)) <
-          tolerance,
+        Math.abs(checkpointDeltaFromStart(entry.progress, existing.progress)) < tolerance ||
+        Math.abs(checkpointDeltaFromStart(existing.progress, entry.progress)) < tolerance,
     );
     if (!duplicate) out.push(entry);
   }
@@ -459,9 +418,7 @@ function dedupeCheckpointEntries(entries, tolerance = 0.0035) {
 function normalizeCheckpointList(rawCheckpoints, trackData = {}) {
   if (!Array.isArray(rawCheckpoints) || !rawCheckpoints.length) return [];
   const startProgress = checkpointProgressFromAngle(trackData.startAngle || 0);
-  const hasCanonicalProgress = rawCheckpoints.some((cp) =>
-    Number.isFinite(cp?.progress),
-  );
+  const hasCanonicalProgress = rawCheckpoints.some((cp) => Number.isFinite(cp?.progress));
   let entries = rawCheckpoints.map(normalizeCheckpointEntry).filter(Boolean);
   if (!entries.length) return [];
 
@@ -492,19 +449,15 @@ function normalizeCheckpointList(rawCheckpoints, trackData = {}) {
 
 function buildRuntimeCheckpointList(trackData = {}, rawCheckpoints = []) {
   const startProgress = checkpointProgressFromAngle(trackData.startAngle || 0);
-  const intermediates = normalizeCheckpointList(rawCheckpoints, trackData).map(
-    (checkpoint) => ({
-      progress: checkpoint.progress,
-      isStart: false,
-    }),
-  );
+  const intermediates = normalizeCheckpointList(rawCheckpoints, trackData).map((checkpoint) => ({
+    progress: checkpoint.progress,
+    isStart: false,
+  }));
   return [{ progress: startProgress, isStart: true }, ...intermediates];
 }
 
 export function normalizeCenterlineSmoothingMode(raw) {
-  return CENTERLINE_SMOOTHING_MODES.includes(raw)
-    ? raw
-    : DEFAULT_CENTERLINE_SMOOTHING_MODE;
+  return CENTERLINE_SMOOTHING_MODES.includes(raw) ? raw : DEFAULT_CENTERLINE_SMOOTHING_MODE;
 }
 
 function clonePresetData(preset) {
@@ -513,37 +466,23 @@ function clonePresetData(preset) {
     id: preset.id,
     name: preset.name,
     source: preset.source || "local",
-    ownerUserId:
-      typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
-    ownerDisplayName:
-      typeof preset.ownerDisplayName === "string"
-        ? preset.ownerDisplayName
-        : null,
+    ownerUserId: typeof preset.ownerUserId === "string" ? preset.ownerUserId : null,
+    ownerDisplayName: typeof preset.ownerDisplayName === "string" ? preset.ownerDisplayName : null,
     bestLapMs: Number.isFinite(preset.bestLapMs) ? preset.bestLapMs : null,
     bestLapDisplayName:
-      typeof preset.bestLapDisplayName === "string"
-        ? preset.bestLapDisplayName
-        : null,
+      typeof preset.bestLapDisplayName === "string" ? preset.bestLapDisplayName : null,
     bestRaceMs: Number.isFinite(preset.bestRaceMs) ? preset.bestRaceMs : null,
     bestRaceDisplayName:
-      typeof preset.bestRaceDisplayName === "string"
-        ? preset.bestRaceDisplayName
-        : null,
+      typeof preset.bestRaceDisplayName === "string" ? preset.bestRaceDisplayName : null,
     isPublished: Boolean(preset.isPublished),
-    shareToken:
-      typeof preset.shareToken === "string" ? preset.shareToken : null,
+    shareToken: typeof preset.shareToken === "string" ? preset.shareToken : null,
     canDelete: Boolean(preset.canDelete),
     fromDb: Boolean(preset.fromDb),
     track: trackData,
     checkpoints: normalizeCheckpointList(preset.checkpoints || [], trackData),
     worldObjects: (preset.worldObjects || []).map(cloneWorldObject),
     centerlineStrokes: (preset.centerlineStrokes || []).map((stroke) =>
-      stroke.map((p) =>
-        cloneCenterlinePoint(
-          p,
-          Number(preset.track?.centerlineHalfWidth) || 60,
-        ),
-      ),
+      stroke.map((p) => cloneCenterlinePoint(p, Number(preset.track?.centerlineHalfWidth) || 60)),
     ),
     editStack: (preset.editStack || []).map((entry) => ({ ...entry })),
   };
@@ -568,22 +507,16 @@ function normalizeTrackPresetData(raw) {
     return null;
   }
 
-  safeTrack.borderSize = Number.isFinite(safeTrack.borderSize)
-    ? safeTrack.borderSize
-    : 22;
+  safeTrack.borderSize = Number.isFinite(safeTrack.borderSize) ? safeTrack.borderSize : 22;
   safeTrack.centerlineHalfWidth = Number.isFinite(safeTrack.centerlineHalfWidth)
     ? Number(safeTrack.centerlineHalfWidth)
     : 60;
-  safeTrack.centerlineWidthProfile = Array.isArray(
-    safeTrack.centerlineWidthProfile,
-  )
+  safeTrack.centerlineWidthProfile = Array.isArray(safeTrack.centerlineWidthProfile)
     ? safeTrack.centerlineWidthProfile.map((value) =>
         Number.isFinite(value) ? Number(value) : safeTrack.centerlineHalfWidth,
       )
     : null;
-  safeTrack.worldScale = Number.isFinite(safeTrack.worldScale)
-    ? Number(safeTrack.worldScale)
-    : 1;
+  safeTrack.worldScale = Number.isFinite(safeTrack.worldScale) ? Number(safeTrack.worldScale) : 1;
   safeTrack.centerlineSmoothingMode = normalizeCenterlineSmoothingMode(
     safeTrack.centerlineSmoothingMode,
   );
@@ -594,10 +527,7 @@ function normalizeTrackPresetData(raw) {
       typeof raw.name === "string" && raw.name.trim()
         ? raw.name.trim().slice(0, 36)
         : id.toUpperCase(),
-    source:
-      typeof raw.source === "string" && raw.source.trim()
-        ? raw.source.trim()
-        : "local",
+    source: typeof raw.source === "string" && raw.source.trim() ? raw.source.trim() : "local",
     ownerUserId:
       typeof raw.ownerUserId === "string"
         ? raw.ownerUserId
@@ -643,30 +573,21 @@ function normalizeTrackPresetData(raw) {
     fromDb: Boolean(raw.fromDb ?? raw.from_db ?? false),
     track: safeTrack,
     checkpoints: normalizeCheckpointList(raw.checkpoints, safeTrack),
-    worldObjects: Array.isArray(raw.worldObjects)
-      ? raw.worldObjects.map(cloneWorldObject)
-      : [],
+    worldObjects: Array.isArray(raw.worldObjects) ? raw.worldObjects.map(cloneWorldObject) : [],
     centerlineStrokes: Array.isArray(raw.centerlineStrokes)
       ? raw.centerlineStrokes.map((stroke) =>
           Array.isArray(stroke)
-            ? stroke.map((p) =>
-                cloneCenterlinePoint(p, safeTrack.centerlineHalfWidth),
-              )
+            ? stroke.map((p) => cloneCenterlinePoint(p, safeTrack.centerlineHalfWidth))
             : [],
         )
       : [],
-    editStack: Array.isArray(raw.editStack)
-      ? raw.editStack.map((e) => ({ ...e }))
-      : [],
+    editStack: Array.isArray(raw.editStack) ? raw.editStack.map((e) => ({ ...e })) : [],
   };
 }
 
 function normalizeAllTrackPresetCheckpoints() {
   for (const preset of TRACK_PRESETS) {
-    preset.checkpoints = normalizeCheckpointList(
-      preset.checkpoints,
-      preset.track,
-    );
+    preset.checkpoints = normalizeCheckpointList(preset.checkpoints, preset.track);
   }
 }
 
@@ -694,23 +615,16 @@ function applyPersistedTrackEdits() {
   for (const preset of TRACK_PRESETS) {
     const saved = savedById[preset.id];
     if (!saved || typeof saved !== "object") continue;
-    if (saved.track && typeof saved.track === "object")
-      preset.track = cloneTrackData(saved.track);
+    if (saved.track && typeof saved.track === "object") preset.track = cloneTrackData(saved.track);
     if (Array.isArray(saved.checkpoints))
-      preset.checkpoints = normalizeCheckpointList(
-        saved.checkpoints,
-        preset.track,
-      );
+      preset.checkpoints = normalizeCheckpointList(saved.checkpoints, preset.track);
     if (Array.isArray(saved.worldObjects))
       preset.worldObjects = saved.worldObjects.map(cloneWorldObject);
     if (Array.isArray(saved.centerlineStrokes)) {
       preset.centerlineStrokes = saved.centerlineStrokes.map((stroke) =>
         Array.isArray(stroke)
           ? stroke.map((p) =>
-              cloneCenterlinePoint(
-                p,
-                Number(saved.track?.centerlineHalfWidth) || 60,
-              ),
+              cloneCenterlinePoint(p, Number(saved.track?.centerlineHalfWidth) || 60),
             )
           : [],
       );
@@ -752,14 +666,11 @@ function rebuildTrackOptions() {
         canDelete: Boolean(canDelete),
         isPublished: Boolean(isPublished),
         ownerUserId: typeof ownerUserId === "string" ? ownerUserId : null,
-        ownerDisplayName:
-          typeof ownerDisplayName === "string" ? ownerDisplayName : null,
+        ownerDisplayName: typeof ownerDisplayName === "string" ? ownerDisplayName : null,
         bestLapMs: Number.isFinite(bestLapMs) ? bestLapMs : null,
-        bestLapDisplayName:
-          typeof bestLapDisplayName === "string" ? bestLapDisplayName : null,
+        bestLapDisplayName: typeof bestLapDisplayName === "string" ? bestLapDisplayName : null,
         bestRaceMs: Number.isFinite(bestRaceMs) ? bestRaceMs : null,
-        bestRaceDisplayName:
-          typeof bestRaceDisplayName === "string" ? bestRaceDisplayName : null,
+        bestRaceDisplayName: typeof bestRaceDisplayName === "string" ? bestRaceDisplayName : null,
         fromDb: Boolean(fromDb),
         shareToken: typeof shareToken === "string" ? shareToken : null,
       }),
@@ -770,9 +681,7 @@ function rebuildTrackOptions() {
 function upsertTrackPreset(data) {
   const normalized = normalizeTrackPresetData(data);
   if (!normalized) return null;
-  const existingIdx = TRACK_PRESETS.findIndex(
-    (preset) => preset.id === normalized.id,
-  );
+  const existingIdx = TRACK_PRESETS.findIndex((preset) => preset.id === normalized.id);
   if (existingIdx >= 0) TRACK_PRESETS[existingIdx] = normalized;
   else TRACK_PRESETS.push(normalized);
   rebuildTrackOptions();
@@ -786,19 +695,12 @@ export const track = {
   centerlineLoop: Array.isArray(activePreset.track.centerlineLoop)
     ? activePreset.track.centerlineLoop.map((p) => ({ x: p.x, y: p.y }))
     : null,
-  centerlineWidthProfile: Array.isArray(
-    activePreset.track.centerlineWidthProfile,
-  )
-    ? activePreset.track.centerlineWidthProfile.map(
-        (value) => Number(value) || 0,
-      )
+  centerlineWidthProfile: Array.isArray(activePreset.track.centerlineWidthProfile)
+    ? activePreset.track.centerlineWidthProfile.map((value) => Number(value) || 0)
     : null,
 };
 
-export const checkpoints = buildRuntimeCheckpointList(
-  activePreset.track,
-  activePreset.checkpoints,
-);
+export const checkpoints = buildRuntimeCheckpointList(activePreset.track, activePreset.checkpoints);
 
 export const CHECKPOINT_WIDTH_MULTIPLIER = 2;
 
@@ -814,11 +716,7 @@ export function getTrackPresetById(id) {
   return TRACK_PRESETS.find((preset) => preset.id === id) || null;
 }
 
-export function canDeleteTrackPreset(
-  preset,
-  currentUserId,
-  currentUserIsAdmin = false,
-) {
+export function canDeleteTrackPreset(preset, currentUserId, currentUserIsAdmin = false) {
   if (!preset || !preset.fromDb) return false;
   if (!currentUserIsAdmin) {
     if (!currentUserId || preset.ownerUserId !== currentUserId) return false;
@@ -826,16 +724,9 @@ export function canDeleteTrackPreset(
   return !preset.isPublished;
 }
 
-function updateTrackDeleteCapabilities(
-  currentUserId,
-  currentUserIsAdmin = false,
-) {
+function updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin = false) {
   for (const preset of TRACK_PRESETS) {
-    preset.canDelete = canDeleteTrackPreset(
-      preset,
-      currentUserId,
-      currentUserIsAdmin,
-    );
+    preset.canDelete = canDeleteTrackPreset(preset, currentUserId, currentUserIsAdmin);
   }
   rebuildTrackOptions();
 }
@@ -851,44 +742,26 @@ export function setTrackPresetMetadata(
     preset.name = updates.name.trim().slice(0, 36);
   if (typeof updates.ownerUserId === "string" || updates.ownerUserId === null)
     preset.ownerUserId = updates.ownerUserId;
-  if (
-    typeof updates.ownerDisplayName === "string" ||
-    updates.ownerDisplayName === null
-  ) {
+  if (typeof updates.ownerDisplayName === "string" || updates.ownerDisplayName === null) {
     preset.ownerDisplayName = updates.ownerDisplayName;
   }
   if (Number.isFinite(updates.bestLapMs) || updates.bestLapMs === null) {
-    preset.bestLapMs = Number.isFinite(updates.bestLapMs)
-      ? Number(updates.bestLapMs)
-      : null;
+    preset.bestLapMs = Number.isFinite(updates.bestLapMs) ? Number(updates.bestLapMs) : null;
   }
-  if (
-    typeof updates.bestLapDisplayName === "string" ||
-    updates.bestLapDisplayName === null
-  ) {
+  if (typeof updates.bestLapDisplayName === "string" || updates.bestLapDisplayName === null) {
     preset.bestLapDisplayName = updates.bestLapDisplayName;
   }
   if (Number.isFinite(updates.bestRaceMs) || updates.bestRaceMs === null) {
-    preset.bestRaceMs = Number.isFinite(updates.bestRaceMs)
-      ? Number(updates.bestRaceMs)
-      : null;
+    preset.bestRaceMs = Number.isFinite(updates.bestRaceMs) ? Number(updates.bestRaceMs) : null;
   }
-  if (
-    typeof updates.bestRaceDisplayName === "string" ||
-    updates.bestRaceDisplayName === null
-  ) {
+  if (typeof updates.bestRaceDisplayName === "string" || updates.bestRaceDisplayName === null) {
     preset.bestRaceDisplayName = updates.bestRaceDisplayName;
   }
-  if (typeof updates.isPublished === "boolean")
-    preset.isPublished = updates.isPublished;
+  if (typeof updates.isPublished === "boolean") preset.isPublished = updates.isPublished;
   if (typeof updates.shareToken === "string" || updates.shareToken === null)
     preset.shareToken = updates.shareToken;
   if (typeof updates.fromDb === "boolean") preset.fromDb = updates.fromDb;
-  preset.canDelete = canDeleteTrackPreset(
-    preset,
-    currentUserId,
-    currentUserIsAdmin,
-  );
+  preset.canDelete = canDeleteTrackPreset(preset, currentUserId, currentUserIsAdmin);
   rebuildTrackOptions();
   return clonePresetData(preset);
 }
@@ -908,9 +781,7 @@ export function applyTrackPreset(index) {
   });
 
   checkpoints.length = 0;
-  checkpoints.push(
-    ...buildRuntimeCheckpointList(preset.track, preset.checkpoints),
-  );
+  checkpoints.push(...buildRuntimeCheckpointList(preset.track, preset.checkpoints));
 
   worldObjects.length = 0;
   worldObjects.push(...preset.worldObjects.map(cloneWorldObject));
@@ -929,12 +800,9 @@ function appendBridge(points, from, to, spacing = 10) {
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const fromHalfWidth = Number.isFinite(from.halfWidth) ? from.halfWidth : 60;
-    const toHalfWidth = Number.isFinite(to.halfWidth)
-      ? to.halfWidth
-      : fromHalfWidth;
+    const toHalfWidth = Number.isFinite(to.halfWidth) ? to.halfWidth : fromHalfWidth;
     points.push({ x: from.x + dx * t, y: from.y + dy * t });
-    points[points.length - 1].halfWidth =
-      fromHalfWidth + (toHalfWidth - fromHalfWidth) * t;
+    points[points.length - 1].halfWidth = fromHalfWidth + (toHalfWidth - fromHalfWidth) * t;
   }
 }
 
@@ -964,17 +832,11 @@ const CENTERLINE_SMOOTHING_CONFIG = {
 
 export function centerlineSmoothingLabel(mode) {
   const normalized = normalizeCenterlineSmoothingMode(mode);
-  return normalized === "raw"
-    ? "RAW"
-    : normalized === "smooth"
-      ? "SMOOTH"
-      : "LIGHT";
+  return normalized === "raw" ? "RAW" : normalized === "smooth" ? "SMOOTH" : "LIGHT";
 }
 
 function getCenterlineSmoothingConfig(trackDef) {
-  const mode = normalizeCenterlineSmoothingMode(
-    trackDef?.centerlineSmoothingMode,
-  );
+  const mode = normalizeCenterlineSmoothingMode(trackDef?.centerlineSmoothingMode);
   return CENTERLINE_SMOOTHING_CONFIG[mode];
 }
 
@@ -1036,11 +898,7 @@ function simplifyOpenRdp(points, epsilon) {
     let bestIndex = -1;
     let bestDistance = -1;
     for (let i = start + 1; i < end; i++) {
-      const d = pointToSegmentDistanceSquared(
-        points[i],
-        points[start],
-        points[end],
-      );
+      const d = pointToSegmentDistanceSquared(points[i], points[start], points[end]);
       if (d > bestDistance) {
         bestDistance = d;
         bestIndex = i;
@@ -1228,10 +1086,7 @@ function offsetClosedLoop(points, offset, miterLimit = 2.6) {
       }
     }
 
-    const avg = normalizeVec(
-      inNormal.x + outNormal.x,
-      inNormal.y + outNormal.y,
-    );
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
     out[i] = {
       x: curr.x + avg.x * signedOffset,
       y: curr.y + avg.y * signedOffset,
@@ -1274,10 +1129,7 @@ function offsetClosedLoopVariable(points, offsets, miterLimit = 2.6) {
       }
     }
 
-    const avg = normalizeVec(
-      inNormal.x + outNormal.x,
-      inNormal.y + outNormal.y,
-    );
+    const avg = normalizeVec(inNormal.x + outNormal.x, inNormal.y + outNormal.y);
     const fallbackNormal =
       Math.hypot(avg.x, avg.y) > 1e-4
         ? avg
@@ -1291,9 +1143,7 @@ function offsetClosedLoopVariable(points, offsets, miterLimit = 2.6) {
 }
 
 function connectedSegmentsFromStrokes(strokes) {
-  return (strokes || []).filter(
-    (stroke) => Array.isArray(stroke) && stroke.length > 0,
-  );
+  return (strokes || []).filter((stroke) => Array.isArray(stroke) && stroke.length > 0);
 }
 
 export function getConnectedCenterlinePoints(strokes) {
@@ -1331,27 +1181,15 @@ export function regenerateTrackFromCenterlineStrokes(index) {
   if (rawLoop.length < 6) return false;
   const anchor = rawLoop[0];
   const smoothingConfig = getCenterlineSmoothingConfig(preset.track);
-  const {
-    simplifyEpsilon,
-    tinyMoveCutoff,
-    laplacianPasses,
-    laplacianStrength,
-    chaikinIterations,
-  } = smoothingConfig;
+  const { simplifyEpsilon, tinyMoveCutoff, laplacianPasses, laplacianStrength, chaikinIterations } =
+    smoothingConfig;
 
   const simplifiedLoop = simplifyClosedLoop(rawLoop, simplifyEpsilon);
   const prunedLoop = pruneTinyMovesClosed(simplifiedLoop, tinyMoveCutoff);
-  const laplacianLoop = laplacianSmoothClosed(
-    prunedLoop,
-    laplacianPasses,
-    laplacianStrength,
-  );
+  const laplacianLoop = laplacianSmoothClosed(prunedLoop, laplacianPasses, laplacianStrength);
   const smoothedLoop = chaikinSmoothClosed(laplacianLoop, chaikinIterations);
   const loopPoints = resampleClosedLoop(smoothedLoop, 220);
-  const rawHalfWidths = resampleCenterlineHalfWidths(
-    rawLoop,
-    loopPoints.length,
-  );
+  const rawHalfWidths = resampleCenterlineHalfWidths(rawLoop, loopPoints.length);
   if (loopPoints.length > 0 && anchor) {
     let bestIdx = 0;
     let bestDist = Infinity;
@@ -1365,9 +1203,7 @@ export function regenerateTrackFromCenterlineStrokes(index) {
       }
     }
     if (bestIdx > 0) {
-      const rotated = loopPoints
-        .slice(bestIdx)
-        .concat(loopPoints.slice(0, bestIdx));
+      const rotated = loopPoints.slice(bestIdx).concat(loopPoints.slice(0, bestIdx));
       loopPoints.length = 0;
       loopPoints.push(...rotated);
     }
@@ -1415,12 +1251,8 @@ export function regenerateTrackFromCenterlineStrokes(index) {
     cx: Number(cx.toFixed(1)),
     cy: Number(cy.toFixed(1)),
     centerlineHalfWidth: Number(halfWidth.toFixed(1)),
-    centerlineWidthProfile: rawHalfWidths.map((value) =>
-      Number(value.toFixed(1)),
-    ),
-    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(
-      preset.track.centerlineSmoothingMode,
-    ),
+    centerlineWidthProfile: rawHalfWidths.map((value) => Number(value.toFixed(1))),
+    centerlineSmoothingMode: normalizeCenterlineSmoothingMode(preset.track.centerlineSmoothingMode),
     startAngle: 0,
     centerlineLoop: loopPoints.map((p) => ({
       x: Number(p.x.toFixed(1)),
@@ -1447,9 +1279,7 @@ function resampleCenterlineHalfWidths(points, sampleCount) {
   }
   const total = cumulative[points.length];
   if (total <= 1e-6) {
-    const fallback = Number.isFinite(points[0].halfWidth)
-      ? points[0].halfWidth
-      : 60;
+    const fallback = Number.isFinite(points[0].halfWidth) ? points[0].halfWidth : 60;
     return new Array(sampleCount).fill(fallback);
   }
 
@@ -1460,8 +1290,7 @@ function resampleCenterlineHalfWidths(points, sampleCount) {
     while (seg < points.length - 1 && cumulative[seg + 1] < distance) seg++;
     const segStart = cumulative[seg];
     const segEnd = cumulative[seg + 1];
-    const t =
-      segEnd > segStart ? (distance - segStart) / (segEnd - segStart) : 0;
+    const t = segEnd > segStart ? (distance - segStart) / (segEnd - segStart) : 0;
     const a = points[seg];
     const b = points[(seg + 1) % points.length];
     const widthA = Number.isFinite(a.halfWidth) ? a.halfWidth : 60;
@@ -1522,26 +1351,14 @@ function buildPresetFromApiTrack(raw) {
     id: raw.id,
     name: typeof raw.name === "string" ? raw.name : payload.name,
     source: typeof raw.source === "string" ? raw.source : "user",
-    ownerUserId:
-      typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
-    ownerDisplayName:
-      typeof raw.owner_display_name === "string"
-        ? raw.owner_display_name
-        : null,
-    bestLapMs: Number.isFinite(raw.best_lap_ms)
-      ? Number(raw.best_lap_ms)
-      : null,
+    ownerUserId: typeof raw.owner_user_id === "string" ? raw.owner_user_id : null,
+    ownerDisplayName: typeof raw.owner_display_name === "string" ? raw.owner_display_name : null,
+    bestLapMs: Number.isFinite(raw.best_lap_ms) ? Number(raw.best_lap_ms) : null,
     bestLapDisplayName:
-      typeof raw.best_lap_display_name === "string"
-        ? raw.best_lap_display_name
-        : null,
-    bestRaceMs: Number.isFinite(raw.best_race_ms)
-      ? Number(raw.best_race_ms)
-      : null,
+      typeof raw.best_lap_display_name === "string" ? raw.best_lap_display_name : null,
+    bestRaceMs: Number.isFinite(raw.best_race_ms) ? Number(raw.best_race_ms) : null,
     bestRaceDisplayName:
-      typeof raw.best_race_display_name === "string"
-        ? raw.best_race_display_name
-        : null,
+      typeof raw.best_race_display_name === "string" ? raw.best_race_display_name : null,
     isPublished: Boolean(raw.is_published),
     shareToken: typeof raw.share_token === "string" ? raw.share_token : null,
     canDelete: false,
@@ -1589,18 +1406,13 @@ export async function loadTrackPresetFromApi(
   const preset = buildPresetFromApiTrack(rawTrack);
   if (!preset) return null;
   const imported = importTrackPresetData(preset, { persist: false });
-  if (imported)
-    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
+  if (imported) updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
 export async function saveTrackPresetToDb(
   index,
-  {
-    currentUserId = null,
-    currentUserIsAdmin = false,
-    name: requestedName = "",
-  } = {},
+  { currentUserId = null, currentUserIsAdmin = false, name: requestedName = "" } = {},
 ) {
   const presetData = exportTrackPresetData(index);
   const name =
@@ -1610,9 +1422,7 @@ export async function saveTrackPresetToDb(
         ? presetData.name.trim()
         : `Track ${Date.now()}`;
   const savedTrack =
-    presetData.fromDb &&
-    typeof presetData.id === "string" &&
-    presetData.id.trim()
+    presetData.fromDb && typeof presetData.id === "string" && presetData.id.trim()
       ? await updateTrackInDb(presetData.id, { name, trackPayload: presetData })
       : await saveTrackToDb(name, presetData);
   const mergedPreset = {
@@ -1622,13 +1432,9 @@ export async function saveTrackPresetToDb(
     source: savedTrack.source || "user",
     ownerUserId: savedTrack.owner_user_id || null,
     ownerDisplayName: savedTrack.owner_display_name || null,
-    bestLapMs: Number.isFinite(savedTrack.best_lap_ms)
-      ? Number(savedTrack.best_lap_ms)
-      : null,
+    bestLapMs: Number.isFinite(savedTrack.best_lap_ms) ? Number(savedTrack.best_lap_ms) : null,
     bestLapDisplayName: savedTrack.best_lap_display_name || null,
-    bestRaceMs: Number.isFinite(savedTrack.best_race_ms)
-      ? Number(savedTrack.best_race_ms)
-      : null,
+    bestRaceMs: Number.isFinite(savedTrack.best_race_ms) ? Number(savedTrack.best_race_ms) : null,
     bestRaceDisplayName: savedTrack.best_race_display_name || null,
     isPublished: Boolean(savedTrack.is_published),
     shareToken: savedTrack.share_token || null,
@@ -1636,8 +1442,7 @@ export async function saveTrackPresetToDb(
     fromDb: true,
   };
   const imported = importTrackPresetData(mergedPreset, { persist: false });
-  if (imported)
-    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
+  if (imported) updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
@@ -1655,8 +1460,7 @@ export async function loadSharedTrackFromApi(
   if (!preset) return null;
   preset.canDelete = false;
   const imported = importTrackPresetData(preset, { persist: false });
-  if (imported)
-    updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
+  if (imported) updateTrackDeleteCapabilities(currentUserId, currentUserIsAdmin);
   return imported;
 }
 
@@ -1757,9 +1561,7 @@ export const physicsConfig = {
   },
   ai: {
     navProgressSamples: 96,
-    navLaneSamples: [
-      -1.35, -1.1, -0.84, -0.56, -0.28, 0, 0.28, 0.56, 0.84, 1.1, 1.35,
-    ],
+    navLaneSamples: [-1.35, -1.1, -0.84, -0.56, -0.28, 0, 0.28, 0.56, 0.84, 1.1, 1.35],
     navIntersectionLinkRadius: 92,
     navIntersectionHeadingThreshold: 0.18,
     navIntersectionMinSliceGap: 4,

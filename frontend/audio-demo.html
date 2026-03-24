@@ -27,11 +27,7 @@
           Verdana,
           sans-serif;
         background:
-          radial-gradient(
-            circle at top,
-            rgba(89, 195, 195, 0.16),
-            transparent 36%
-          ),
+          radial-gradient(circle at top, rgba(89, 195, 195, 0.16), transparent 36%),
           linear-gradient(180deg, #182132 0%, var(--bg) 58%);
         color: var(--text);
       }
@@ -54,11 +50,7 @@
       }
 
       .panel {
-        background: linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.03),
-          rgba(0, 0, 0, 0.08)
-        );
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.08));
         border: 1px solid var(--panel-edge);
         border-radius: 18px;
         padding: 20px;
@@ -121,8 +113,7 @@
     <main>
       <h1>Carun Audio Demo</h1>
       <p>
-        Use this page to tune the procedural engine, skid, surface, countdown,
-        and impact sounds.
+        Use this page to tune the procedural engine, skid, surface, countdown, and impact sounds.
       </p>
 
       <section class="panel buttons">
@@ -139,36 +130,15 @@
       <section class="panel controls">
         <label>
           <span>Speed <output id="speed-value">0.00</output></span>
-          <input
-            id="speed"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value="0"
-          />
+          <input id="speed" type="range" min="0" max="1" step="0.01" value="0" />
         </label>
         <label>
           <span>Throttle <output id="throttle-value">0.00</output></span>
-          <input
-            id="throttle"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value="0"
-          />
+          <input id="throttle" type="range" min="0" max="1" step="0.01" value="0" />
         </label>
         <label>
           <span>Acceleration <output id="accel-value">0.00</output></span>
-          <input
-            id="acceleration"
-            type="range"
-            min="-1"
-            max="1"
-            step="0.01"
-            value="0"
-          />
+          <input id="acceleration" type="range" min="-1" max="1" step="0.01" value="0" />
         </label>
         <label>
           <span>Skid <output id="skid-value">0.00</output></span>

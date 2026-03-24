@@ -189,10 +189,7 @@ export function nearestDistanceToLoop(point, loop) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const lenSq = Math.max(dx * dx + dy * dy, 1e-8);
-    const t = Math.max(
-      0,
-      Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq),
-    );
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
     const px = a.x + dx * t;
     const py = a.y + dy * t;
     best = Math.min(best, Math.hypot(point.x - px, point.y - py));

@@ -16,8 +16,7 @@ import { nextTaglineSet } from "./taglines.js";
 
 const initialTaglines = nextTaglineSet();
 const buildLabelFromWindow =
-  typeof window !== "undefined" &&
-  typeof window.__CARUN_BUILD_LABEL__ === "string"
+  typeof window !== "undefined" && typeof window.__CARUN_BUILD_LABEL__ === "string"
     ? window.__CARUN_BUILD_LABEL__
     : "v.dev";
 
@@ -202,12 +201,7 @@ function createLapProgressState() {
   };
 }
 
-function createVehicleState({
-  id = "vehicle",
-  x = track.cx,
-  y = track.cy + 205,
-  label = "",
-} = {}) {
+function createVehicleState({ id = "vehicle", x = track.cx, y = track.cy + 205, label = "" } = {}) {
   return {
     id,
     x,
@@ -384,10 +378,7 @@ function pickRivalColorIds(count, blockedColorId, shuffle = false) {
     (colorId) => colorId !== sanitizeCarColor(blockedColorId),
   );
   const orderedPool = shuffle ? shuffleArray(pool) : pool;
-  return Array.from(
-    { length: count },
-    (_, index) => orderedPool[index % orderedPool.length],
-  );
+  return Array.from({ length: count }, (_, index) => orderedPool[index % orderedPool.length]);
 }
 
 function normalizeAiColorIds(profiles, fallbackColors, blockedColorId) {
@@ -440,17 +431,11 @@ export function assignAiRoster(profiles = null) {
     ? Math.max(0, Math.min(AI_OPPONENT_COUNT, rosterProfiles.length))
     : getConfiguredAiOpponentCount();
   const fallbackColors = pickRivalColorIds(rosterSize, state.playerColor);
-  const normalizedColors = normalizeAiColorIds(
-    rosterProfiles,
-    fallbackColors,
-    state.playerColor,
-  );
+  const normalizedColors = normalizeAiColorIds(rosterProfiles, fallbackColors, state.playerColor);
   state.aiRoster = Array.from({ length: rosterSize }, (_, index) => {
     const profile = rosterProfiles[index];
     const name = String(profile?.name || "").trim();
-    const style = AI_DRIVING_STYLE_POOL.includes(profile?.style)
-      ? profile.style
-      : "precise";
+    const style = AI_DRIVING_STYLE_POOL.includes(profile?.style) ? profile.style : "precise";
     const topSpeedMul = Number.isFinite(profile?.topSpeedMul)
       ? Math.max(0.8, Math.min(1, Number(profile.topSpeedMul)))
       : 1;
@@ -467,10 +452,7 @@ export function assignAiRoster(profiles = null) {
       topSpeedMul,
       laneOffset,
       kind: profile?.kind === "remoteHuman" ? "remoteHuman" : "ai",
-      participantId:
-        typeof profile?.participantId === "string"
-          ? profile.participantId
-          : null,
+      participantId: typeof profile?.participantId === "string" ? profile.participantId : null,
       slotId: typeof profile?.slotId === "string" ? profile.slotId : null,
       connected: profile?.connected === false ? false : true,
       externalControl: Boolean(profile?.externalControl),
@@ -599,8 +581,6 @@ facebookLogo.addEventListener("load", () => {
   facebookLogoReady = true;
 });
 facebookLogo.addEventListener("error", () => {
-  console.warn(
-    "Failed to load facebook logo at assets/facebook-svgrepo-com.svg",
-  );
+  console.warn("Failed to load facebook logo at assets/facebook-svgrepo-com.svg");
 });
 facebookLogo.src = "assets/facebook-svgrepo-com.svg";

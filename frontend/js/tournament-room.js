@@ -6,11 +6,7 @@ import {
   sanitizeCarColor,
   trackOptions,
 } from "./parameters.js";
-import {
-  createTournamentRoom,
-  fetchTournamentRoom,
-  joinTournamentRoom,
-} from "./api.js";
+import { createTournamentRoom, fetchTournamentRoom, joinTournamentRoom } from "./api.js";
 import {
   assignAiRoster,
   assignRandomAiRoster,
@@ -49,11 +45,7 @@ function replaceAppUrl(pathname) {
   const url = new URL(window.location.href);
   url.pathname = pathname;
   url.searchParams.delete("track");
-  window.history.replaceState(
-    {},
-    "",
-    `${url.pathname}${url.search ? url.search : ""}${url.hash}`,
-  );
+  window.history.replaceState({}, "", `${url.pathname}${url.search ? url.search : ""}${url.hash}`);
 }
 
 function loadRoomSessions() {
@@ -97,17 +89,14 @@ function roomIsActive() {
 
 function localRoomSlot() {
   return (
-    state.tournamentRoom.slots.find(
-      (slot) => slot.slot_id === state.tournamentRoom.localSlotId,
-    ) || null
+    state.tournamentRoom.slots.find((slot) => slot.slot_id === state.tournamentRoom.localSlotId) ||
+    null
   );
 }
 
 function rivalRoomSlots() {
   const localSlotId = state.tournamentRoom.localSlotId;
-  return state.tournamentRoom.slots.filter(
-    (slot) => slot.slot_id !== localSlotId,
-  );
+  return state.tournamentRoom.slots.filter((slot) => slot.slot_id !== localSlotId);
 }
 
 function rivalIndexBySlotId(slotId) {
@@ -135,18 +124,14 @@ function syncRoomTracks(room) {
   state.tournament.trackOrder = room.tracks
     .map((roomTrack) =>
       trackOptions.findIndex(
-        (preset) =>
-          String(preset.id).toLowerCase() ===
-          String(roomTrack.id).toLowerCase(),
+        (preset) => String(preset.id).toLowerCase() === String(roomTrack.id).toLowerCase(),
       ),
     )
     .filter((index) => index >= 0);
 }
 
 function syncRoomRoster(room) {
-  state.tournamentRoom.slots = Array.isArray(room?.slots)
-    ? [...room.slots]
-    : [];
+  state.tournamentRoom.slots = Array.isArray(room?.slots) ? [...room.slots] : [];
   const localParticipantId = state.tournamentRoom.participantId;
   const localSlot = state.tournamentRoom.slots.find(
     (slot) => slot.participant_id === localParticipantId,
@@ -154,9 +139,7 @@ function syncRoomRoster(room) {
   state.tournamentRoom.localSlotId = localSlot?.slot_id || null;
   state.tournamentRoom.isHost = Boolean(localSlot?.is_host);
 
-  const localName = sanitizeRoomPlayerName(
-    localSlot?.display_name || state.playerName,
-  );
+  const localName = sanitizeRoomPlayerName(localSlot?.display_name || state.playerName);
   state.playerName = localName;
   state.playerColor = sanitizeCarColor(localSlot?.color, state.playerColor);
   savePlayerColor(state.playerColor);
@@ -166,13 +149,9 @@ function syncRoomRoster(room) {
     style: slot.kind === "ai" ? slot.style || "precise" : "precise",
     color: slot.color,
     topSpeedMul:
-      slot.kind === "ai" && Number.isFinite(slot.top_speed_mul)
-        ? Number(slot.top_speed_mul)
-        : 1,
+      slot.kind === "ai" && Number.isFinite(slot.top_speed_mul) ? Number(slot.top_speed_mul) : 1,
     laneOffset:
-      slot.kind === "ai" && Number.isFinite(slot.lane_offset)
-        ? Number(slot.lane_offset)
-        : 0,
+      slot.kind === "ai" && Number.isFinite(slot.lane_offset) ? Number(slot.lane_offset) : 0,
     kind: slot.kind === "human" ? "remoteHuman" : "ai",
     participantId: slot.participant_id || null,
     slotId: slot.slot_id,
@@ -185,14 +164,10 @@ function syncRoomRoster(room) {
 function syncTournamentStateFromRoom(room) {
   state.tournamentRoom.phase = room.phase || "lobby";
   state.tournamentRoom.paused = Boolean(room.paused);
-  state.tournamentRoom.pausedBy =
-    typeof room.paused_by === "string" ? room.paused_by : null;
+  state.tournamentRoom.pausedBy = typeof room.paused_by === "string" ? room.paused_by : null;
   state.tournamentRoom.currentRaceIndex = Number(room.current_race_index) || 0;
-  state.tournamentRoom.scores =
-    room && typeof room.scores === "object" ? { ...room.scores } : {};
-  state.tournamentRoom.raceResults = Array.isArray(room.race_results)
-    ? [...room.race_results]
-    : [];
+  state.tournamentRoom.scores = room && typeof room.scores === "object" ? { ...room.scores } : {};
+  state.tournamentRoom.raceResults = Array.isArray(room.race_results) ? [...room.race_results] : [];
   state.tournament.currentRaceIndex = state.tournamentRoom.currentRaceIndex;
   state.tournament.scores = { ...state.tournamentRoom.scores };
   state.tournament.raceResults = [...state.tournamentRoom.raceResults];
@@ -205,11 +180,7 @@ function currentRoomTrackIndex() {
 
 function startRoomRaceLocally() {
   const trackIndex = currentRoomTrackIndex();
-  if (
-    !Number.isInteger(trackIndex) ||
-    trackIndex < 0 ||
-    trackIndex >= trackOptions.length
-  ) {
+  if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= trackOptions.length) {
     return;
   }
   state.selectedTrackIndex = trackIndex;
@@ -305,10 +276,7 @@ function onRoomSocketMessage(message) {
         x2: Number(mark.x2),
         y2: Number(mark.y2),
         width: Number(mark.width),
-        color:
-          typeof mark.color === "string"
-            ? mark.color
-            : "rgba(20, 20, 20, 0.37)",
+        color: typeof mark.color === "string" ? mark.color : "rgba(20, 20, 20, 0.37)",
       });
     });
   }
@@ -431,8 +399,7 @@ export async function copyTournamentRoomUrl() {
 
 export function leaveTournamentRoom({ resetUrl = true } = {}) {
   closeRoomSocket();
-  if (state.tournamentRoom.roomId)
-    removeRoomSession(state.tournamentRoom.roomId);
+  if (state.tournamentRoom.roomId) removeRoomSession(state.tournamentRoom.roomId);
   state.tournamentRoom.active = false;
   state.tournamentRoom.roomId = null;
   state.tournamentRoom.participantId = null;
@@ -498,9 +465,7 @@ export async function joinTournamentRoomFromPath(roomId) {
 export async function loadTournamentRoomFromPath(roomId) {
   const snapshot = await fetchTournamentRoom(roomId);
   state.tournamentRoom.roomId = snapshot.id;
-  state.tournamentRoom.tracks = Array.isArray(snapshot.tracks)
-    ? [...snapshot.tracks]
-    : [];
+  state.tournamentRoom.tracks = Array.isArray(snapshot.tracks) ? [...snapshot.tracks] : [];
   await joinTournamentRoomFromPath(roomId);
 }
 
@@ -552,10 +517,7 @@ export function canAdvanceHostedTournamentStandings() {
 
 export function allTournamentHumansFinished() {
   if (!roomIsActive()) return state.raceStandings.playerFinishOrder > 0;
-  return (
-    state.raceStandings.playerFinishOrder > 0 &&
-    getExternalHumanRivalCount() === 0
-  );
+  return state.raceStandings.playerFinishOrder > 0 && getExternalHumanRivalCount() === 0;
 }
 
 export function tickTournamentRoom(dt) {

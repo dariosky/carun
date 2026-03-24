@@ -15,32 +15,15 @@ export class EngineSynth {
     this.context = context;
     this.output = createGain(context, 0);
 
-    this.bodyOsc = makeOscillator(
-      context,
-      "triangle",
-      AUDIO_TUNING.engine.idleHz,
-    );
-    this.overtoneOsc = makeOscillator(
-      context,
-      "sawtooth",
-      AUDIO_TUNING.engine.idleHz * 1.98,
-    );
-    this.wobbleOsc = makeOscillator(
-      context,
-      "sine",
-      AUDIO_TUNING.engine.wobbleHz,
-    );
+    this.bodyOsc = makeOscillator(context, "triangle", AUDIO_TUNING.engine.idleHz);
+    this.overtoneOsc = makeOscillator(context, "sawtooth", AUDIO_TUNING.engine.idleHz * 1.98);
+    this.wobbleOsc = makeOscillator(context, "sine", AUDIO_TUNING.engine.wobbleHz);
     this.noiseSource = createNoiseSource(context);
 
     this.bodyGain = createGain(context, AUDIO_TUNING.engine.toneGain);
     this.overtoneGain = createGain(context, AUDIO_TUNING.engine.overtoneGain);
     this.noiseGain = createGain(context, 0);
-    this.engineFilter = createFilter(
-      context,
-      "lowpass",
-      AUDIO_TUNING.engine.cutoffBase,
-      0.9,
-    );
+    this.engineFilter = createFilter(context, "lowpass", AUDIO_TUNING.engine.cutoffBase, 0.9);
     this.noiseFilter = createFilter(context, "bandpass", 1400, 0.7);
     this.wobbleDepth = createGain(context, 0);
 
@@ -108,9 +91,7 @@ export class EngineSynth {
 
     const movingBlend = isMoving ? 1 : 0;
     const targetGain =
-      engineCfg.idleGain +
-      speedCurve * engineCfg.moveGain +
-      throttleAmount * 0.03 * movingBlend;
+      engineCfg.idleGain + speedCurve * engineCfg.moveGain + throttleAmount * 0.03 * movingBlend;
     const roughness =
       engineCfg.noiseGain *
       (0.2 + throttleAmount * 0.9 + Math.abs(accelAmount) * 0.45) *
@@ -121,57 +102,21 @@ export class EngineSynth {
       speedCurve * 2 +
       airAmount * throttleAmount * engineCfg.airborneDetuneCents;
     const wobbleDepth =
-      engineCfg.wobbleDepthCents +
-      throttleAmount * engineCfg.throttleWobbleDepthCents;
+      engineCfg.wobbleDepthCents + throttleAmount * engineCfg.throttleWobbleDepthCents;
 
-    smoothParam(
-      this.bodyOsc.frequency,
-      baseHz,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
-    smoothParam(
-      this.overtoneOsc.frequency,
-      overtoneHz,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
+    smoothParam(this.bodyOsc.frequency, baseHz, time, AUDIO_TUNING.smoothing.medium);
+    smoothParam(this.overtoneOsc.frequency, overtoneHz, time, AUDIO_TUNING.smoothing.medium);
     smoothParam(this.bodyOsc.detune, detune, time, AUDIO_TUNING.smoothing.fast);
-    smoothParam(
-      this.overtoneOsc.detune,
-      detune * 1.15,
-      time,
-      AUDIO_TUNING.smoothing.fast,
-    );
-    smoothParam(
-      this.engineFilter.frequency,
-      cutoff,
-      time,
-      AUDIO_TUNING.smoothing.slow,
-    );
+    smoothParam(this.overtoneOsc.detune, detune * 1.15, time, AUDIO_TUNING.smoothing.fast);
+    smoothParam(this.engineFilter.frequency, cutoff, time, AUDIO_TUNING.smoothing.slow);
     smoothParam(
       this.noiseFilter.frequency,
       900 + speedCurve * 1200 + throttleAmount * 800,
       time,
       AUDIO_TUNING.smoothing.medium,
     );
-    smoothParam(
-      this.noiseGain.gain,
-      roughness,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
-    smoothParam(
-      this.wobbleDepth.gain,
-      wobbleDepth,
-      time,
-      AUDIO_TUNING.smoothing.slow,
-    );
-    smoothParam(
-      this.output.gain,
-      targetGain,
-      time,
-      AUDIO_TUNING.smoothing.medium,
-    );
+    smoothParam(this.noiseGain.gain, roughness, time, AUDIO_TUNING.smoothing.medium);
+    smoothParam(this.wobbleDepth.gain, wobbleDepth, time, AUDIO_TUNING.smoothing.slow);
+    smoothParam(this.output.gain, targetGain, time, AUDIO_TUNING.smoothing.medium);
   }
 }
