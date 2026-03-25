@@ -85,7 +85,7 @@ const EDITOR_TOOLBAR_SECTION_HEIGHT = 38;
 const EDITOR_TOOLBAR_SECTION_LABEL_HEIGHT = 22;
 const EDITOR_DEFAULT_HALF_WIDTH = 60;
 const EDITOR_ZOOM_STEP = 0.1;
-const EDITOR_MIN_WORLD_SCALE = 0.25;
+const EDITOR_MIN_WORLD_SCALE = 0.1;
 const EDITOR_MAX_WORLD_SCALE = 1.75;
 const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
 const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
@@ -1135,13 +1135,13 @@ function updateEditorCursorFromEvent(event) {
   updateEditorCursorFromScreen(screenX, screenY, canvasY);
 }
 
-function updateEditorCursorFromScreen(screenX, screenY, canvasY = null) {
+export function updateEditorCursorFromScreen(screenX, screenY, canvasY = null) {
   const worldScale = clampWorldScale(Number(track.worldScale) || 1);
   state.editor.cursorScreenX = screenX;
   if (canvasY !== null) state.editor.cursorCanvasY = canvasY;
   state.editor.cursorScreenY = screenY;
-  state.editor.cursorX = track.cx + (screenX - track.cx) / worldScale;
-  state.editor.cursorY = track.cy + (screenY - track.cy) / worldScale;
+  state.editor.cursorX = track.cx + (screenX - state.editor.viewOffsetX - track.cx) / worldScale;
+  state.editor.cursorY = track.cy + (screenY - state.editor.viewOffsetY - track.cy) / worldScale;
 }
 
 function rebuildEditorTrackGeometry() {
@@ -1589,40 +1589,10 @@ function startEditorViewPan() {
   state.editor.viewDragLastScreenY = state.editor.cursorScreenY;
 }
 
-function panEditorTrackBy(dx, dy) {
+export function panEditorViewBy(dx, dy) {
   if (state.mode !== "editor") return;
-  const preset = getTrackPreset(state.editor.trackIndex);
-  if (!preset?.track) return;
-  const worldScale = clampWorldScale(Number(preset.track.worldScale) || 1);
-  const worldDx = dx / worldScale;
-  const worldDy = dy / worldScale;
-
-  preset.track.cx += worldDx;
-  preset.track.cy += worldDy;
-
-  if (Array.isArray(preset.track.centerlineLoop)) {
-    preset.track.centerlineLoop.forEach((point) => {
-      point.x += worldDx;
-      point.y += worldDy;
-    });
-  }
-  if (Array.isArray(preset.centerlineStrokes)) {
-    preset.centerlineStrokes.forEach((stroke) => {
-      stroke.forEach((point) => {
-        point.x += worldDx;
-        point.y += worldDy;
-      });
-    });
-  }
-  if (Array.isArray(preset.worldObjects)) {
-    preset.worldObjects.forEach((object) => {
-      if (Number.isFinite(object.x)) object.x += worldDx;
-      if (Number.isFinite(object.y)) object.y += worldDy;
-    });
-  }
-
-  applyTrackPreset(state.editor.trackIndex);
-  setCurbSegments(initCurbSegments());
+  state.editor.viewOffsetX += dx;
+  state.editor.viewOffsetY += dy;
 }
 
 function adjustEditorSmoothing(direction) {
@@ -2948,7 +2918,7 @@ export function initInputHandlers() {
     if (state.mode === "editor" && state.editor.viewDragging) {
       const dx = state.editor.cursorScreenX - state.editor.viewDragLastScreenX;
       const dy = state.editor.cursorScreenY - state.editor.viewDragLastScreenY;
-      panEditorTrackBy(dx, dy);
+      panEditorViewBy(dx, dy);
       state.editor.viewDragLastScreenX = state.editor.cursorScreenX;
       state.editor.viewDragLastScreenY = state.editor.cursorScreenY;
       updateEditorCursorFromScreen(

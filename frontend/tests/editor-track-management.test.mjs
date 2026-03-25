@@ -13,12 +13,14 @@ const {
   removeTrackPresetById,
   trackOptions,
 } = await import("../js/parameters.js");
-const { getTrackWorldScale } = await import("../js/track.js");
+const { getRaceWorldScale, getTrackWorldScale } = await import("../js/track.js");
 const {
   enterEditor,
   getEditorToolbarLayout,
+  panEditorViewBy,
   promptClearEditorTrackRecords,
   promptClearSelectedTrackRecords,
+  updateEditorCursorFromScreen,
 } = await import("../js/menus.js");
 
 test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke order", () => {
@@ -258,7 +260,7 @@ test("track selector clear-records command opens confirmation and clears stored 
   }
 });
 
-test("editor toolbar exposes a pan toggle and track zoom can clamp to 25 percent", () => {
+test("editor toolbar exposes a pan toggle and track zoom can clamp to 10 percent", () => {
   const imported = importTrackPresetData({
     id: "editor-pan-layout",
     name: "EDITOR PAN",
@@ -282,7 +284,49 @@ test("editor toolbar exposes a pan toggle and track zoom can clamp to 25 percent
   const layout = getEditorToolbarLayout();
   assert.equal(layout.panToggle.id, "togglePan");
   assert.ok(layout.panToggle.width > 0);
-  assert.equal(getTrackWorldScale(getTrackPreset(trackIndex).track), 0.25);
+  assert.equal(getTrackWorldScale(getTrackPreset(trackIndex).track), 0.1);
+  assert.equal(getRaceWorldScale(getTrackPreset(trackIndex).track), 0.5);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("editor pan moves the viewport without mutating track geometry", () => {
+  const imported = importTrackPresetData({
+    id: "editor-camera-pan",
+    name: "EDITOR CAMERA PAN",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ worldScale: 0.1 }),
+    checkpoints: [],
+    worldObjects: [{ type: "tree", x: 520, y: 310, r: 24, angle: 0, height: 3 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  const preset = getTrackPreset(trackIndex);
+  const beforeCenter = { x: preset.track.cx, y: preset.track.cy };
+  const beforeLoopPoint = { ...preset.track.centerlineLoop[0] };
+  const beforeObject = { ...preset.worldObjects[0] };
+
+  panEditorViewBy(120, -80);
+
+  assert.equal(state.editor.viewOffsetX, 120);
+  assert.equal(state.editor.viewOffsetY, -80);
+  assert.deepEqual({ x: preset.track.cx, y: preset.track.cy }, beforeCenter);
+  assert.deepEqual(preset.track.centerlineLoop[0], beforeLoopPoint);
+  assert.deepEqual(preset.worldObjects[0], beforeObject);
+
+  updateEditorCursorFromScreen(640, 360);
+  assert.equal(state.editor.cursorX, 640 + (640 - 120 - preset.track.cx) / 0.1);
+  assert.equal(state.editor.cursorY, 360 + (360 + 80 - preset.track.cy) / 0.1);
 
   removeTrackPresetById(imported.id, { removePersisted: false });
 });

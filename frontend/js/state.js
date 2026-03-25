@@ -109,6 +109,10 @@ export const state = {
     time: 0,
     duration: 0.45,
   },
+  raceCamera: {
+    viewOffsetX: 0,
+    viewOffsetY: 0,
+  },
   editor: {
     trackIndex: 0,
     cursorX: track.cx,

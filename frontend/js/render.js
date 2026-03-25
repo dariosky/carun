@@ -57,6 +57,8 @@ import {
   blobRadius,
   drawPath,
   drawStripedCurb,
+  getEditorWorldScale,
+  getRaceWorldScale,
   getTrackWorldScale,
   initCurbSegments,
   normalizeWorldObject,
@@ -361,9 +363,46 @@ function getPreviewTrackData(preset) {
 
 function applyWorldScaleTransform(trackDef = track) {
   const worldScale = getTrackWorldScale(trackDef);
+  applyWorldTransform(trackDef, { worldScale });
+}
+
+function applyWorldTransform(
+  trackDef = track,
+  { worldScale = getTrackWorldScale(trackDef), viewOffsetX = 0, viewOffsetY = 0 } = {},
+) {
+  ctx.translate(viewOffsetX, viewOffsetY);
   ctx.translate(trackDef.cx, trackDef.cy);
   ctx.scale(worldScale, worldScale);
   ctx.translate(-trackDef.cx, -trackDef.cy);
+}
+
+function getViewportCenter() {
+  return {
+    x: WIDTH * 0.5,
+    y: (HEIGHT - TOP_BAR_HEIGHT) * 0.5,
+  };
+}
+
+export function getRaceCameraState(trackDef = track, vehicle = car) {
+  const authoringScale = getTrackWorldScale(trackDef);
+  const worldScale = getRaceWorldScale(trackDef);
+  const scrolling = authoringScale < 0.5;
+  if (!scrolling) {
+    return { worldScale, viewOffsetX: 0, viewOffsetY: 0, scrolling };
+  }
+
+  const viewportCenter = getViewportCenter();
+  const viewOffsetX = viewportCenter.x - (trackDef.cx + (vehicle.x - trackDef.cx) * worldScale);
+  const viewOffsetY = viewportCenter.y - (trackDef.cy + (vehicle.y - trackDef.cy) * worldScale);
+  return { worldScale, viewOffsetX, viewOffsetY, scrolling };
+}
+
+function getEditorCameraState(trackDef = track) {
+  return {
+    worldScale: getEditorWorldScale(trackDef),
+    viewOffsetX: state.editor.viewOffsetX,
+    viewOffsetY: state.editor.viewOffsetY,
+  };
 }
 
 function transformPointByWorldScale(point, trackDef) {
@@ -1355,7 +1394,8 @@ function drawDebugVectors() {
   const originY = physicsRuntime.debug.pivotY;
 
   ctx.save();
-  applyWorldScaleTransform(track);
+  const camera = getRaceCameraState(track);
+  applyWorldTransform(track, camera);
   ctx.lineWidth = 3;
 
   ctx.strokeStyle = "#ffe167";
@@ -1445,8 +1485,9 @@ function drawStartSequenceOverlay() {
   const seq = state.startSequence;
   if (!seq.active && seq.goFlash <= 0) return;
 
-  const cx = track.cx;
-  const cy = track.cy;
+  const viewportCenter = getViewportCenter();
+  const cx = viewportCenter.x;
+  const cy = viewportCenter.y;
 
   if (seq.active) {
     const readyHold = 0.95;
@@ -3083,7 +3124,7 @@ function drawEditor() {
   ctx.fillRect(0, 0, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
   drawPixelNoise();
   ctx.save();
-  applyWorldScaleTransform(track);
+  applyWorldTransform(track, getEditorCameraState(track));
   drawTrack();
   drawEditorOverlay();
   ctx.restore();
@@ -3312,7 +3353,10 @@ export function render() {
     ctx.fillRect(0, 0, WIDTH, HEIGHT - TOP_BAR_HEIGHT);
     drawPixelNoise();
     ctx.save();
-    applyWorldScaleTransform(track);
+    const raceCamera = getRaceCameraState(track);
+    state.raceCamera.viewOffsetX = raceCamera.viewOffsetX;
+    state.raceCamera.viewOffsetY = raceCamera.viewOffsetY;
+    applyWorldTransform(track, raceCamera);
     drawTrack();
     drawParticles(ctx, { layer: "belowCar" });
     drawCar();

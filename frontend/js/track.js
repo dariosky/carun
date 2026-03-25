@@ -47,7 +47,15 @@ function getCenterlineWidthProfile(trackDef = track) {
 export function getTrackWorldScale(trackDef = track) {
   const raw = Number(trackDef?.worldScale);
   if (!Number.isFinite(raw)) return 1;
-  return Math.max(0.25, Math.min(1.75, raw));
+  return Math.max(0.1, Math.min(1.75, raw));
+}
+
+export function getEditorWorldScale(trackDef = track) {
+  return Math.max(0.1, getTrackWorldScale(trackDef));
+}
+
+export function getRaceWorldScale(trackDef = track) {
+  return Math.max(0.5, getTrackWorldScale(trackDef));
 }
 
 export function trackStartAngle(trackDef = track) {

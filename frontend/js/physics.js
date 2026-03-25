@@ -2822,6 +2822,8 @@ export function resetRace() {
   // Reset the runtime track state to the selected preset so transient race-time
   // mutations do not leak into the next start.
   applyTrackPreset(state.selectedTrackIndex);
+  state.raceCamera.viewOffsetX = 0;
+  state.raceCamera.viewOffsetY = 0;
   const spawnAngle = trackStartAngle(track);
   const spawnPoint = pointOnCenterLine(spawnAngle, track);
   const aheadPoint = pointOnCenterLine(spawnAngle + 0.02, track);
