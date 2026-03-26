@@ -36,7 +36,14 @@ import {
   normalizeCenterlineSmoothingMode,
   TOURNAMENT_POINTS,
 } from "./parameters.js";
-import { assignRandomAiRoster, getActiveAiCars, keys, setCurbSegments, state } from "./state.js";
+import {
+  assignRandomAiRoster,
+  getActiveAiCars,
+  keys,
+  setCurbSegments,
+  skidMarks,
+  state,
+} from "./state.js";
 import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
 import { initCurbSegments, surfaceAt, trackProgressAtPoint } from "./track.js";
@@ -1593,6 +1600,13 @@ export function panEditorViewBy(dx, dy) {
   if (state.mode !== "editor") return;
   state.editor.viewOffsetX += dx;
   state.editor.viewOffsetY += dy;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (preset?.track) {
+    preset.track.editorViewOffsetX = state.editor.viewOffsetX;
+    preset.track.editorViewOffsetY = state.editor.viewOffsetY;
+  }
+  track.editorViewOffsetX = state.editor.viewOffsetX;
+  track.editorViewOffsetY = state.editor.viewOffsetY;
 }
 
 function adjustEditorSmoothing(direction) {
@@ -1869,6 +1883,8 @@ export function enterEditor(trackIndex) {
   state.selectedTrackIndex = trackIndex;
   applyTrackPreset(trackIndex);
   setCurbSegments(initCurbSegments());
+  skidMarks.length = 0;
+  state.tournamentRoom.pendingSkidMarks.length = 0;
   state.mode = "editor";
   syncMenuMusicForMode(state.mode);
   state.editor.trackIndex = trackIndex;
@@ -1877,8 +1893,8 @@ export function enterEditor(trackIndex) {
   state.editor.drawing = false;
   state.editor.activeStroke = [];
   state.editor.panMode = false;
-  state.editor.viewOffsetX = 0;
-  state.editor.viewOffsetY = 0;
+  state.editor.viewOffsetX = Number(track.editorViewOffsetX) || 0;
+  state.editor.viewOffsetY = Number(track.editorViewOffsetY) || 0;
   state.editor.viewDragging = false;
   state.editor.toolbar.dragging = false;
   const savedToolbarPosition = loadEditorToolbarPosition();

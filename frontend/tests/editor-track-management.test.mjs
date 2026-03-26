@@ -5,7 +5,7 @@ import { makeTrackData, setupFrontendTestEnv } from "./helpers/frontend-test-env
 
 setupFrontendTestEnv();
 
-const { state } = await import("../js/state.js");
+const { skidMarks, state } = await import("../js/state.js");
 const {
   getTrackPreset,
   importTrackPresetData,
@@ -14,6 +14,7 @@ const {
   trackOptions,
 } = await import("../js/parameters.js");
 const { getRaceWorldScale, getTrackWorldScale } = await import("../js/track.js");
+const { getRaceCameraState } = await import("../js/render.js");
 const {
   enterEditor,
   getEditorToolbarLayout,
@@ -320,6 +321,8 @@ test("editor pan moves the viewport without mutating track geometry", () => {
 
   assert.equal(state.editor.viewOffsetX, 120);
   assert.equal(state.editor.viewOffsetY, -80);
+  assert.equal(preset.track.editorViewOffsetX, 120);
+  assert.equal(preset.track.editorViewOffsetY, -80);
   assert.deepEqual({ x: preset.track.cx, y: preset.track.cy }, beforeCenter);
   assert.deepEqual(preset.track.centerlineLoop[0], beforeLoopPoint);
   assert.deepEqual(preset.worldObjects[0], beforeObject);
@@ -327,6 +330,103 @@ test("editor pan moves the viewport without mutating track geometry", () => {
   updateEditorCursorFromScreen(640, 360);
   assert.equal(state.editor.cursorX, 640 + (640 - 120 - preset.track.cx) / 0.1);
   assert.equal(state.editor.cursorY, 360 + (360 + 80 - preset.track.cy) / 0.1);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("race camera preserves editor pan when zoom is at or above fifty percent", () => {
+  const imported = importTrackPresetData({
+    id: "editor-camera-race-pan",
+    name: "EDITOR CAMERA RACE PAN",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ worldScale: 0.6 }),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+  panEditorViewBy(120, -80);
+
+  const preset = getTrackPreset(trackIndex);
+  const camera = getRaceCameraState(preset.track);
+  assert.equal(camera.scrolling, false);
+  assert.equal(camera.worldScale, 0.6);
+  assert.equal(camera.viewOffsetX, 120);
+  assert.equal(camera.viewOffsetY, -80);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("entering the editor restores the pan stored on the track", () => {
+  const imported = importTrackPresetData({
+    id: "editor-camera-track-pan",
+    name: "EDITOR CAMERA TRACK PAN",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ worldScale: 0.6, editorViewOffsetX: 135, editorViewOffsetY: -70 }),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  assert.equal(state.editor.viewOffsetX, 135);
+  assert.equal(state.editor.viewOffsetY, -70);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("entering the editor clears transient skid marks", () => {
+  const imported = importTrackPresetData({
+    id: "editor-clear-skids",
+    name: "EDITOR CLEAR SKIDS",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  skidMarks.push({
+    points: [
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ],
+    width: 4,
+    life: 1,
+    color: "#000",
+  });
+  state.tournamentRoom.pendingSkidMarks.push({ x1: 0, y1: 0, x2: 1, y2: 1 });
+
+  enterEditor(trackIndex);
+
+  assert.equal(skidMarks.length, 0);
+  assert.equal(state.tournamentRoom.pendingSkidMarks.length, 0);
 
   removeTrackPresetById(imported.id, { removePersisted: false });
 });

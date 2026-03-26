@@ -372,6 +372,12 @@ function cloneTrackData(trackData) {
       ? trackData.centerlineWidthProfile.map((value) => Number(value) || 0)
       : null,
     worldScale: Number.isFinite(trackData.worldScale) ? Number(trackData.worldScale) : 1,
+    editorViewOffsetX: Number.isFinite(trackData.editorViewOffsetX)
+      ? Number(trackData.editorViewOffsetX)
+      : 0,
+    editorViewOffsetY: Number.isFinite(trackData.editorViewOffsetY)
+      ? Number(trackData.editorViewOffsetY)
+      : 0,
     centerlineSmoothingMode: normalizeCenterlineSmoothingMode(trackData.centerlineSmoothingMode),
   };
 }
@@ -517,6 +523,12 @@ function normalizeTrackPresetData(raw) {
       )
     : null;
   safeTrack.worldScale = Number.isFinite(safeTrack.worldScale) ? Number(safeTrack.worldScale) : 1;
+  safeTrack.editorViewOffsetX = Number.isFinite(safeTrack.editorViewOffsetX)
+    ? Number(safeTrack.editorViewOffsetX)
+    : 0;
+  safeTrack.editorViewOffsetY = Number.isFinite(safeTrack.editorViewOffsetY)
+    ? Number(safeTrack.editorViewOffsetY)
+    : 0;
   safeTrack.centerlineSmoothingMode = normalizeCenterlineSmoothingMode(
     safeTrack.centerlineSmoothingMode,
   );

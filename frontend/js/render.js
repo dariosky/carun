@@ -388,7 +388,16 @@ export function getRaceCameraState(trackDef = track, vehicle = car) {
   const worldScale = getRaceWorldScale(trackDef);
   const scrolling = authoringScale < 0.5;
   if (!scrolling) {
-    return { worldScale, viewOffsetX: 0, viewOffsetY: 0, scrolling };
+    return {
+      worldScale,
+      viewOffsetX: Number.isFinite(trackDef.editorViewOffsetX)
+        ? Number(trackDef.editorViewOffsetX)
+        : state.editor.viewOffsetX,
+      viewOffsetY: Number.isFinite(trackDef.editorViewOffsetY)
+        ? Number(trackDef.editorViewOffsetY)
+        : state.editor.viewOffsetY,
+      scrolling,
+    };
   }
 
   const viewportCenter = getViewportCenter();

@@ -101,6 +101,8 @@ export function makeTrackData({
   halfWidth = 60,
   borderSize = 22,
   worldScale = 1,
+  editorViewOffsetX = 0,
+  editorViewOffsetY = 0,
   centerlineSmoothingMode = "light",
 } = {}) {
   return {
@@ -111,6 +113,8 @@ export function makeTrackData({
     centerlineWidthProfile: new Array(8).fill(halfWidth),
     centerlineSmoothingMode,
     worldScale,
+    editorViewOffsetX,
+    editorViewOffsetY,
     startAngle: 0,
     centerlineLoop: [
       { x: cx - 220, y: cy - 120 },
