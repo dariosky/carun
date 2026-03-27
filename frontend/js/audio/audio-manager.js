@@ -17,6 +17,19 @@ const DEFAULT_VEHICLE_STATE = {
   wheelSpinAmount: 0,
 };
 
+const ANIMAL_SPLASH_AUDIO = {
+  rooster: {
+    src: "assets/chicken-splash.mp4",
+    baseVolume: 0.72,
+    poolSize: 3,
+  },
+  sheep: {
+    src: "assets/sheep-splash.mp4",
+    baseVolume: 0.84,
+    poolSize: 3,
+  },
+};
+
 function getAudioContextCtor() {
   if (typeof window === "undefined") return null;
   return window.AudioContext || window.webkitAudioContext || null;
@@ -36,6 +49,7 @@ export class AudioManager {
     this.surfaceSynth = null;
     this.signalSynth = null;
     this.impactSynth = null;
+    this.animalSplashPools = new Map();
     this.started = false;
     this.userGestureBound = false;
     this.lastVehicleState = { ...DEFAULT_VEHICLE_STATE };
@@ -109,6 +123,7 @@ export class AudioManager {
     smoothParam(this.rivalBus.gain, 0, time, AUDIO_TUNING.smoothing.medium);
     this.#applyVehicleState(DEFAULT_VEHICLE_STATE);
     this.#applyRivalVehicleState(DEFAULT_VEHICLE_STATE);
+    this.#stopAnimalSplashPlayers();
   }
 
   async resume() {
@@ -176,6 +191,21 @@ export class AudioManager {
     this.impactSynth.triggerWallBump(intensity * 0.85);
   }
 
+  playAnimalSplash(kind, intensity = 1) {
+    if (!this.started) return;
+    const player = this.#checkoutAnimalSplashPlayer(kind);
+    if (!player) return;
+    const tuning = ANIMAL_SPLASH_AUDIO[kind];
+    const normalizedIntensity = clamp(intensity, 0.45, 1);
+    player.muted = false;
+    player.volume = clamp(tuning.baseVolume * normalizedIntensity, 0, 1);
+    player.currentTime = 0;
+    const playback = player.play();
+    if (playback && typeof playback.catch === "function") {
+      playback.catch(() => {});
+    }
+  }
+
   #applyVehicleState(params) {
     if (!this.context) return;
     const normalized = {
@@ -208,5 +238,44 @@ export class AudioManager {
       wheelSpinAmount: clamp(params.wheelSpinAmount, 0, 1),
     };
     this.rivalEngineSynth.update(normalized);
+  }
+
+  #checkoutAnimalSplashPlayer(kind) {
+    const tuning = ANIMAL_SPLASH_AUDIO[kind];
+    if (!tuning || typeof Audio === "undefined") return null;
+    let pool = this.animalSplashPools.get(kind);
+    if (!pool) {
+      pool = {
+        cursor: 0,
+        players: new Array(Math.max(1, tuning.poolSize || 2))
+          .fill(null)
+          .map(() => this.#createAnimalSplashPlayer(tuning.src)),
+      };
+      this.animalSplashPools.set(kind, pool);
+    }
+    const idlePlayer = pool.players.find((player) => player?.paused !== false);
+    if (idlePlayer) return idlePlayer;
+    const player = pool.players[pool.cursor] || null;
+    pool.cursor = (pool.cursor + 1) % Math.max(pool.players.length, 1);
+    return player;
+  }
+
+  #createAnimalSplashPlayer(src) {
+    const player = new Audio();
+    player.src = src;
+    player.loop = false;
+    player.preload = "auto";
+    player.playsInline = true;
+    return player;
+  }
+
+  #stopAnimalSplashPlayers() {
+    this.animalSplashPools.forEach((pool) => {
+      pool.players.forEach((player) => {
+        if (!player) return;
+        player.pause();
+        player.currentTime = 0;
+      });
+    });
   }
 }

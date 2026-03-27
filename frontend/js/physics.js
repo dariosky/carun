@@ -12,6 +12,7 @@ import {
 import { submitLapResult, submitRaceResult } from "./api.js";
 import {
   emitFinishConfetti,
+  emitBloodSplash,
   emitGrassDust,
   emitHandbrakeSmoke,
   emitWaterSpray,
@@ -45,6 +46,11 @@ import {
   trackProgressAtPoint,
   trackStartAngle,
 } from "./track.js";
+import {
+  getAnimalBehaviorConfig,
+  rebuildAmbientAnimals,
+  updateAmbientAnimals,
+} from "./ambient-animals.js";
 
 let aiCar = aiCars[0];
 let aiLapData = aiLapDataList[0];
@@ -174,6 +180,17 @@ function updateOilCarry(runtime, groundSurfaceName, dt) {
     runtime.oilCarry = 0;
   }
   return runtime.oilCarry;
+}
+
+function updateBloodCarry(runtime, dt) {
+  const duration = Math.max(physicsConfig.constants.bloodCarryDuration || 2.5, 0.01);
+  if (runtime.bloodCarryTime > 0) {
+    runtime.bloodCarryTime = Math.max(0, runtime.bloodCarryTime - dt);
+    runtime.bloodCarry = clamp(runtime.bloodCarryTime / duration, 0, 1);
+  } else {
+    runtime.bloodCarry = 0;
+  }
+  return runtime.bloodCarry;
 }
 
 function getOilSteerSlipStrength(runtime, groundSurfaceName, steerAbs) {
@@ -1910,12 +1927,15 @@ function recordSkids(
   const isRoad = surfaceName === "asphalt" || surfaceName === "curb";
   const speedAbs = Math.abs(forwardSpeed);
   const oilyStrength = surfaceName === "oil" ? 1 : clamp(runtime.oilCarry || 0, 0, 1);
+  const bloodyStrength = clamp(runtime.bloodCarry || 0, 0, 1);
   const oilyMarksActive = oilyStrength > 0.02 && speedAbs > 6;
+  const bloodyMarksActive = bloodyStrength > 0.03 && speedAbs > 6;
   if (
     !isGrass &&
     !isWater &&
     !isOil &&
     !oilyMarksActive &&
+    !bloodyMarksActive &&
     speedAbs < 8 &&
     Math.abs(lateralSpeed) < 8
   )
@@ -1931,18 +1951,29 @@ function recordSkids(
     speedAbs > 30;
   const shouldDrawRoadSkids =
     isRoad && (strongAccel || strongBrake || skidding || handbrakeSkid || driftSkid);
-  if (!isGrass && !isWater && !isOil && !oilyMarksActive && !shouldDrawRoadSkids) return;
+  if (
+    !isGrass &&
+    !isWater &&
+    !isOil &&
+    !oilyMarksActive &&
+    !bloodyMarksActive &&
+    !shouldDrawRoadSkids
+  )
+    return;
 
   const color = oilyMarksActive
     ? "rgba(6, 6, 6, 0.92)"
-    : isGrass
-      ? "rgba(112, 74, 44, 0.40)"
-      : isWater
-        ? "rgba(245, 250, 255, 0.42)"
-        : "rgba(20, 20, 20, 0.37)";
-  const width = isGrass || isWater || isOil || oilyMarksActive ? 2.7 : 2.2;
+    : bloodyMarksActive
+      ? `rgba(164, 14, 20, ${(0.48 + bloodyStrength * 0.34).toFixed(3)})`
+      : isGrass
+        ? "rgba(112, 74, 44, 0.40)"
+        : isWater
+          ? "rgba(245, 250, 255, 0.42)"
+          : "rgba(20, 20, 20, 0.37)";
+  const width = isGrass || isWater || isOil || oilyMarksActive || bloodyMarksActive ? 2.7 : 2.2;
   const wheelIndices =
     !oilyMarksActive &&
+    !bloodyMarksActive &&
     isRoad &&
     (driftSkid || handbrakeSkid || skidding) &&
     !strongAccel &&
@@ -2145,6 +2176,7 @@ function integrateVehicleAirborne(
   const airCfg = physicsConfig.air;
   const carCfg = physicsConfig.car;
   updateOilCarry(runtime, surfaceName, dt);
+  updateBloodCarry(runtime, dt);
   const headingX = Math.cos(vehicle.angle);
   const headingY = Math.sin(vehicle.angle);
   const headingForwardSpeed = vehicle.vx * headingX + vehicle.vy * headingY;
@@ -2242,6 +2274,12 @@ function integrateVehicleGround(
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
   updateOilCarry(runtime, groundSurfaceName, dt);
+  updateBloodCarry(runtime, dt);
+  if (runtime.animalImpactTime > 0) {
+    runtime.animalImpactTime = Math.max(0, runtime.animalImpactTime - dt);
+  } else {
+    runtime.animalImpactDecel = 0;
+  }
   const targetSurface = physicsConfig.surfaces[groundSurfaceName] || physicsConfig.surfaces.asphalt;
   const blendAlpha = flags.SURFACE_BLENDING
     ? clamp(dt / Math.max(constants.surfaceBlendTime, 0.001), 0, 1)
@@ -2287,6 +2325,9 @@ function integrateVehicleGround(
         handbrakeCfg.reverseKillDecel * runtime.input.handbrake * dt,
       );
     }
+  }
+  if (runtime.animalImpactTime > 0 && runtime.animalImpactDecel > 0) {
+    forwardSpeed = moveTowards(forwardSpeed, 0, runtime.animalImpactDecel * dt);
   }
   forwardSpeed *= Math.exp(-carCfg.longDrag * runtime.surface.longDragMul * dt);
 
@@ -2758,12 +2799,16 @@ function resetAiOpponentForRace(index, spawnPoint, headingAngle, startCheckpoint
     aiPhysicsRuntime.recoveryTimer = 0;
     aiPhysicsRuntime.collisionGripTimer = 0;
     aiPhysicsRuntime.impactCooldown = 0;
+    aiPhysicsRuntime.animalImpactTime = 0;
+    aiPhysicsRuntime.animalImpactDecel = 0;
     aiPhysicsRuntime.prevSteerAbs = 0;
     aiPhysicsRuntime.lastGroundedSpeed = 0;
     aiPhysicsRuntime.landingBouncePending = false;
     aiPhysicsRuntime.landingCooldown = 0;
     aiPhysicsRuntime.oilCarry = 0;
     aiPhysicsRuntime.oilCarryTime = 0;
+    aiPhysicsRuntime.bloodCarry = 0;
+    aiPhysicsRuntime.bloodCarryTime = 0;
     aiPhysicsRuntime.mode = "race";
     aiPhysicsRuntime.recoveryMode = "none";
     aiPhysicsRuntime.targetLaneOffset =
@@ -2869,11 +2914,15 @@ export function resetRace() {
   physicsRuntime.recoveryTimer = 0;
   physicsRuntime.collisionGripTimer = 0;
   physicsRuntime.impactCooldown = 0;
+  physicsRuntime.animalImpactTime = 0;
+  physicsRuntime.animalImpactDecel = 0;
   physicsRuntime.lastGroundedSpeed = 0;
   physicsRuntime.landingBouncePending = false;
   physicsRuntime.landingCooldown = 0;
   physicsRuntime.oilCarry = 0;
   physicsRuntime.oilCarryTime = 0;
+  physicsRuntime.bloodCarry = 0;
+  physicsRuntime.bloodCarryTime = 0;
   physicsRuntime.prevSteerAbs = 0;
   physicsRuntime.surface = {
     lateralGripMul: 1,
@@ -2897,6 +2946,7 @@ export function resetRace() {
   });
   skidMarks.length = 0;
   state.tournamentRoom.pendingSkidMarks.length = 0;
+  rebuildAmbientAnimals();
   resetParticles();
   state.finishCelebration.bestLap = false;
   state.finishCelebration.bestRace = false;
@@ -2965,6 +3015,61 @@ function updateAiField(dt) {
     updateAiVehicle(dt);
   });
   resolveRaceFieldCollisions();
+}
+
+function applyAnimalHit(event) {
+  const racer = event?.racer;
+  const vehicle = racer?.vehicle;
+  const runtime = racer?.runtime;
+  if (!vehicle || !runtime) return;
+  const cfg = event?.config || getAnimalBehaviorConfig(event?.animal?.kind);
+  const speed = Math.hypot(vehicle.vx, vehicle.vy);
+  if (speed > 0.001) {
+    const reduction = clamp(
+      (cfg.hitSpeedLossMin || 12) + speed * (cfg.hitSpeedLossMul || 0.2),
+      cfg.hitSpeedLossMin || 12,
+      cfg.hitSpeedLossMax || 42,
+    );
+    const nextSpeed = Math.max(0, speed - reduction);
+    const scale = nextSpeed / speed;
+    vehicle.vx *= scale;
+    vehicle.vy *= scale;
+    vehicle.speed = nextSpeed;
+  }
+  runtime.animalImpactTime = Math.max(runtime.animalImpactTime || 0, cfg.hitSlowdownTime || 0);
+  runtime.animalImpactDecel = Math.max(runtime.animalImpactDecel || 0, cfg.hitSlowdownDecel || 0);
+  runtime.bloodCarry = 1;
+  runtime.bloodCarryTime = Math.max(physicsConfig.constants.bloodCarryDuration || 2.5, 0.01);
+  runtime.collisionGripTimer = Math.max(runtime.collisionGripTimer, 0.12);
+  const bloodStrength = clamp(
+    ((event.speed || speed) / Math.max(physicsConfig.car.maxSpeed, 1)) *
+      (cfg.bloodStrengthMul || 1),
+    cfg.bloodStrengthMin || 0.55,
+    cfg.bloodStrengthMax || 1.2,
+  );
+  emitBloodSplash({
+    x: event.x,
+    y: event.y,
+    inheritVx: vehicle.vx * 0.18,
+    inheritVy: vehicle.vy * 0.18,
+    strength: bloodStrength,
+  });
+  gameAudio.playAnimalSplash(
+    event?.animal?.kind,
+    clamp((event.speed || speed) / Math.max(physicsConfig.car.maxSpeed * 0.65, 1), 0.55, 1),
+  );
+}
+
+function updateAmbientAnimalField(dt) {
+  const racers = [{ vehicle: car, runtime: physicsRuntime }];
+  if (aiOpponentsEnabled()) {
+    getActiveAiCars().forEach((vehicle, index) => {
+      if (rivalUsesExternalControl(index)) return;
+      racers.push({ vehicle, runtime: aiPhysicsRuntimes[index] });
+    });
+  }
+  const hitEvents = updateAmbientAnimals(dt, racers);
+  hitEvents.forEach(applyAnimalHit);
 }
 
 function updateAiCheckpointProgress() {
@@ -3100,6 +3205,7 @@ export function updateRace(dt) {
       airborneAmount: 0,
       wheelSpinAmount: 0,
     });
+    updateAmbientAnimalField(dt);
     return;
   }
 
@@ -3135,6 +3241,7 @@ export function updateRace(dt) {
   if (vehicleIsFlying(car)) {
     integrateAirborneMotion(dt, groundSurfaceName);
     updateAiField(dt);
+    updateAmbientAnimalField(dt);
     if (!lapData.finished) {
       checkCheckpointProgress(car, lapData, {
         blink: true,
@@ -3159,6 +3266,7 @@ export function updateRace(dt) {
   });
 
   updateAiField(dt);
+  updateAmbientAnimalField(dt);
 
   if (!lapData.finished) {
     checkCheckpointProgress(car, lapData, {

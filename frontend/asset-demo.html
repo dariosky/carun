@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carun Asset Demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121721;
+        --panel: #1b2230;
+        --panel-edge: #2f3a50;
+        --text: #f4f0d5;
+        --accent: #f25f5c;
+        --accent-2: #59c3c3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font:
+          16px/1.4 "Trebuchet MS",
+          Verdana,
+          sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(89, 195, 195, 0.16), transparent 36%),
+          linear-gradient(180deg, #182132 0%, var(--bg) 58%);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 2.4rem;
+        letter-spacing: 0.05em;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: rgba(244, 240, 213, 0.8);
+      }
+
+      .panel {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.08));
+        border: 1px solid var(--panel-edge);
+        border-radius: 18px;
+        padding: 20px;
+        margin-bottom: 16px;
+        backdrop-filter: blur(8px);
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px 18px;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+      }
+
+      select,
+      input[type="range"],
+      button {
+        width: 100%;
+        border: 1px solid var(--panel-edge);
+        border-radius: 12px;
+        background: #202938;
+        color: var(--text);
+        padding: 12px 14px;
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .button-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .canvases {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(360px, 1fr);
+        gap: 16px;
+      }
+
+      .canvas-box {
+        display: grid;
+        gap: 10px;
+      }
+
+      canvas {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(155, 233, 255, 0.18);
+        background: rgba(7, 14, 20, 0.6);
+        image-rendering: pixelated;
+      }
+
+      .status {
+        color: var(--accent-2);
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (max-width: 880px) {
+        .canvases {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Carun Asset Demo</h1>
+      <p>
+        Use this page to verify asset extraction, direction rows, frame timing, scale, and shadow
+        alignment.
+      </p>
+
+      <section class="panel controls">
+        <label>
+          <span>Asset</span>
+          <select id="asset-kind"></select>
+        </label>
+        <label>
+          <span>Animation</span>
+          <select id="animation">
+            <option value="idle">Idle</option>
+            <option value="walk">Walk</option>
+          </select>
+        </label>
+        <label>
+          <span>Direction</span>
+          <select id="direction">
+            <option value="front">Front</option>
+            <option value="back">Back</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </label>
+        <label>
+          <span>Background</span>
+          <select id="background">
+            <option value="grass">Grass</option>
+            <option value="asphalt">Asphalt</option>
+            <option value="transparent">Transparent</option>
+          </select>
+        </label>
+        <label>
+          <span>Frame <output id="frame-value">0</output></span>
+          <input id="frame" type="range" min="0" max="5" step="1" value="0" />
+        </label>
+        <label>
+          <span>Scale <output id="scale-value">3.0x</output></span>
+          <input id="scale" type="range" min="1" max="6" step="0.5" value="3" />
+        </label>
+      </section>
+
+      <section class="panel button-row">
+        <button id="toggle-play" type="button">Pause</button>
+        <button id="toggle-shadow" type="button">Shadow: On</button>
+      </section>
+
+      <section class="panel canvases">
+        <div class="canvas-box">
+          <strong>Preview</strong>
+          <canvas id="preview-canvas" width="320" height="320"></canvas>
+        </div>
+        <div class="canvas-box">
+          <strong>Atlas</strong>
+          <canvas id="atlas-canvas" width="640" height="360"></canvas>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="status" id="status">Waiting for asset load...</div>
+      </section>
+    </main>
+    <script src="js/asset-demo.js" type="module"></script>
+  </body>
+</html>

@@ -75,6 +75,7 @@ import {
   endTournamentRoom,
   toggleTournamentRoomPause,
 } from "./tournament-room.js";
+import { ASSET_PLACEABLES, getAssetDefaultRadius, getAssetPlaceable } from "./asset-sprites.js";
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const EDITOR_OBJECT_PLACE_TOOLS = [
@@ -84,6 +85,7 @@ const EDITOR_OBJECT_PLACE_TOOLS = [
   { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
   { id: "spring", label: "Spring", icon: "✹", shortcut: "" },
   { id: "wall", label: "Wall", icon: "▭", shortcut: "L" },
+  { id: "assets", label: "Assets", icon: "A", shortcut: "" },
 ];
 const EDITOR_TOOLBAR_WIDTH = 320;
 const EDITOR_TOOLBAR_TITLE_HEIGHT = 32;
@@ -189,6 +191,7 @@ function syncLatestEditorTarget(preset) {
 
 function setEditorTool(nextTool) {
   state.editor.activeTool = nextTool;
+  if (nextTool !== "asset") state.editor.assetPaletteOpen = false;
 }
 
 function toggleEditorTool(nextTool) {
@@ -362,6 +365,7 @@ export function getEditorToolbarLayout() {
   const objectToolRowY = objectHeader.y + objectHeader.height + 4;
   const objectToolButtonGap = 10;
   const objectToolButtonWidth = (panel.width - 24 - objectToolButtonGap * 2) / 3;
+  const objectToolRows = Math.max(1, Math.ceil(EDITOR_OBJECT_PLACE_TOOLS.length / 3));
   const objectToolButtons = EDITOR_OBJECT_PLACE_TOOLS.map((tool, index) => {
     const row = Math.floor(index / 3);
     const col = index % 3;
@@ -373,7 +377,29 @@ export function getEditorToolbarLayout() {
       height: EDITOR_TOOLBAR_ROW_HEIGHT - 2,
     };
   });
-  const objectSelectTop = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT * 2 + 8;
+  const objectToolsBottom = objectToolRowY + EDITOR_TOOLBAR_ROW_HEIGHT * objectToolRows;
+  const assetPaletteItemHeight = 26;
+  const assetPalette =
+    state.editor.assetPaletteOpen && ASSET_PLACEABLES.length
+      ? {
+          panel: {
+            x: panel.x + 12,
+            y: objectToolsBottom + 4,
+            width: panel.width - 24,
+            height: 22 + ASSET_PLACEABLES.length * (assetPaletteItemHeight + 6) + 6,
+          },
+          items: ASSET_PLACEABLES.map((asset, index) => ({
+            ...asset,
+            id: `asset:${asset.kind}`,
+            x: panel.x + 20,
+            y: objectToolsBottom + 24 + index * (assetPaletteItemHeight + 6),
+            width: panel.width - 40,
+            height: assetPaletteItemHeight,
+          })),
+        }
+      : null;
+  const objectSelectTop =
+    (assetPalette?.panel.y || objectToolsBottom) + (assetPalette?.panel.height || 0) + 8;
   const objectActionTop = objectSelectTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
   const actionY = objectActionTop + 2;
   const iconButtonWidth = 34;
@@ -397,6 +423,7 @@ export function getEditorToolbarLayout() {
     titleBar,
     objectHeader,
     objectToolButtons,
+    assetPalette,
     objectPrev: {
       x: panel.x + 14,
       y: objectSelectTop + 2,
@@ -587,6 +614,12 @@ function editorToolbarActionAt(x, y) {
   for (const row of layout.objectToolButtons) {
     if (pointInRect(x, y, row)) return { type: "action", id: row.id };
   }
+  if (layout.assetPalette?.items) {
+    for (const item of layout.assetPalette.items) {
+      if (pointInRect(x, y, item)) return { type: "action", id: item.id };
+    }
+    if (pointInRect(x, y, layout.assetPalette.panel)) return { type: "panel" };
+  }
   if (pointInRect(x, y, layout.objectDeleteButton))
     return { type: "action", id: layout.objectDeleteButton.id };
   if (pointInRect(x, y, layout.objectSizeDown))
@@ -630,6 +663,9 @@ function editorTopBarActionAt(x, y) {
 }
 
 function editorToolbarActionLabel(actionId) {
+  if (typeof actionId === "string" && actionId.startsWith("asset:")) {
+    return getAssetPlaceable(actionId.slice(6)).label;
+  }
   switch (actionId) {
     case "objectDelete":
       return "Delete";
@@ -645,6 +681,8 @@ function editorToolbarActionLabel(actionId) {
       return "Spring";
     case "wall":
       return "Wall";
+    case "assets":
+      return "Assets";
     case "objectPrev":
       return "Previous Object";
     case "objectNext":
@@ -1291,6 +1329,29 @@ function placeEditorObject(type) {
     };
     triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
     applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+  if (type === "asset") {
+    const assetKind = state.editor.selectedAssetKind || "rooster";
+    const animal = {
+      type: "animal",
+      kind: assetKind,
+      x,
+      y,
+      r: getAssetDefaultRadius(assetKind),
+      angle: 0,
+    };
+    preset.worldObjects.push(animal);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
   }
 }
 
@@ -1523,6 +1584,9 @@ function adjustSelectedObjectSize(direction) {
   if (object.type === "spring") {
     object.r = Math.max(10, Math.min(28, object.r + direction * 2));
   }
+  if (object.type === "animal") {
+    object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
+  }
   if (object.type === "wall") {
     object.length = Math.max(32, Math.min(160, object.length + direction * 8));
   }
@@ -1624,6 +1688,11 @@ function adjustEditorSmoothing(direction) {
 }
 
 function performEditorToolbarAction(actionId) {
+  if (typeof actionId === "string" && actionId.startsWith("asset:")) {
+    state.editor.selectedAssetKind = actionId.slice(6) || "rooster";
+    state.editor.assetPaletteOpen = false;
+    setEditorTool("asset");
+  }
   if (actionId === "objectDelete") deleteSelectedEditorTarget("object");
   if (actionId === "water") toggleEditorTool("pond");
   if (actionId === "oil") toggleEditorTool("oil");
@@ -1631,6 +1700,10 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "tree") toggleEditorTool("tree");
   if (actionId === "spring") toggleEditorTool("spring");
   if (actionId === "wall") toggleEditorTool("wall");
+  if (actionId === "assets") {
+    state.editor.assetPaletteOpen = !state.editor.assetPaletteOpen;
+    if (state.editor.assetPaletteOpen) setEditorTool("asset");
+  }
   if (actionId === "objectPrev") selectEditorObject(-1);
   if (actionId === "objectNext") selectEditorObject(1);
   if (actionId === "objectSizeDown") adjustSelectedObjectSize(-1);
@@ -1889,6 +1962,7 @@ export function enterEditor(trackIndex) {
   syncMenuMusicForMode(state.mode);
   state.editor.trackIndex = trackIndex;
   state.editor.activeTool = "road";
+  state.editor.assetPaletteOpen = false;
   state.editor.roadMode = "segment";
   state.editor.drawing = false;
   state.editor.activeStroke = [];
@@ -2991,6 +3065,9 @@ export function initInputHandlers() {
       state.editor.cursorScreenX,
       state.editor.cursorScreenY,
     );
+    if (!toolbarHit && state.editor.assetPaletteOpen) {
+      state.editor.assetPaletteOpen = false;
+    }
     if (toolbarHit?.type === "drag") {
       state.editor.toolbar.dragging = true;
       state.editor.toolbar.dragOffsetX = state.editor.cursorScreenX - state.editor.toolbar.x;

@@ -72,6 +72,8 @@ import {
 } from "./track.js";
 import { drawAsphaltMaterial, getAsphaltPattern } from "./material.js";
 import { drawParticles, drawScreenParticles } from "./particles.js";
+import { ambientAnimals } from "./ambient-animals.js";
+import { ASSET_PLACEABLES, drawAnimalSprite, getAssetPlaceable } from "./asset-sprites.js";
 
 const TOP_BAR_HEIGHT = 56;
 const TRACK_SEGMENTS = 260;
@@ -497,6 +499,13 @@ function getPreviewBounds(preset, boundaries, curbs) {
       const center = transformPointByWorldScale(obj, trackDef);
       expandBounds(bounds, center.x - radius, center.y - radius);
       expandBounds(bounds, center.x + radius, center.y + radius);
+      continue;
+    }
+    if (obj.type === "animal") {
+      const radius = (Number(obj.r) || 12) * worldScale * 1.35;
+      const center = transformPointByWorldScale(obj, trackDef);
+      expandBounds(bounds, center.x - radius, center.y - radius);
+      expandBounds(bounds, center.x + radius, center.y + radius);
     }
   }
 
@@ -519,6 +528,50 @@ function drawPixelNoise() {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(overlay, 0, 0, WIDTH, HEIGHT);
   ctx.restore();
+}
+
+function drawStaticAnimalObject(object, { shouldFlash = false } = {}) {
+  const direction =
+    Math.abs(Math.cos(object.angle || 0)) > Math.abs(Math.sin(object.angle || 0))
+      ? Math.cos(object.angle || 0) < 0
+        ? "left"
+        : "right"
+      : Math.sin(object.angle || 0) < 0
+        ? "back"
+        : "front";
+  drawAnimalSprite(ctx, {
+    kind: object.kind,
+    x: object.x,
+    y: object.y,
+    radius: object.r,
+    direction,
+    animation: "idle",
+    elapsed: 0,
+  });
+  if (shouldFlash) {
+    ctx.save();
+    ctx.strokeStyle = "#ffe167";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(object.x, object.y, object.r + 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawAmbientAnimals() {
+  for (const animal of ambientAnimals) {
+    if (!animal.active) continue;
+    drawAnimalSprite(ctx, {
+      kind: animal.kind,
+      x: animal.x,
+      y: animal.y,
+      radius: animal.r,
+      direction: animal.facing,
+      animation: animal.speed > 10 ? "walk" : "idle",
+      elapsed: animal.animationTime,
+    });
+  }
 }
 
 function drawDecor(objects = worldObjects) {
@@ -613,6 +666,12 @@ function drawDecor(objects = worldObjects) {
         tracePath(ctx, oilPath);
         ctx.stroke();
       }
+      continue;
+    }
+
+    if (normalized.type === "animal") {
+      if (state.mode === "racing" && objects === worldObjects) continue;
+      drawStaticAnimalObject(normalized, { shouldFlash });
       continue;
     }
 
@@ -1817,26 +1876,28 @@ function selectedObjectValueLabel(preset) {
 function selectedObjectLabel(preset) {
   const objects = preset.worldObjects || [];
   if (!objects.length) return "--";
-  const iconForType = (type) =>
-    type === "pond"
+  const iconForObject = (object) =>
+    object?.type === "pond"
       ? "≈"
-      : type === "oil"
+      : object?.type === "oil"
         ? "●"
-        : type === "barrel"
+        : object?.type === "barrel"
           ? "◉"
-          : type === "tree"
+          : object?.type === "tree"
             ? "♣"
-            : type === "spring"
+            : object?.type === "spring"
               ? "✹"
-              : type === "wall"
+              : object?.type === "wall"
                 ? "▭"
-                : "•";
+                : object?.type === "animal"
+                  ? getAssetPlaceable(object.kind).icon
+                  : "•";
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "object" || !objects[target.objectIndex]) {
     const last = objects[objects.length - 1];
-    return `${objects.length}/${objects.length} ${iconForType(last.type)}`;
+    return `${objects.length}/${objects.length} ${iconForObject(last)}`;
   }
-  return `${target.objectIndex + 1}/${objects.length} ${iconForType(objects[target.objectIndex].type)}`;
+  return `${target.objectIndex + 1}/${objects.length} ${iconForObject(objects[target.objectIndex])}`;
 }
 
 function selectedRoadLabel(preset) {
@@ -1899,11 +1960,13 @@ function drawEditorToolbar() {
       ? state.editor.roadMode === "checkpoint"
         ? "CHECKPOINT"
         : "ROAD"
-      : state.editor.activeTool === "pond"
-        ? "WATER"
-        : state.editor.activeTool === "oil"
-          ? "OIL"
-          : state.editor.activeTool.toUpperCase();
+      : state.editor.activeTool === "asset"
+        ? getAssetPlaceable(state.editor.selectedAssetKind).label.toUpperCase()
+        : state.editor.activeTool === "pond"
+          ? "WATER"
+          : state.editor.activeTool === "oil"
+            ? "OIL"
+            : state.editor.activeTool.toUpperCase();
   const toolbarHeaderLabel = state.editor.toolbar.hoverLabel || activeToolLabel;
 
   ctx.save();
@@ -1961,12 +2024,47 @@ function drawEditorToolbar() {
       (row.id === "barrel" && state.editor.activeTool === "barrel") ||
       (row.id === "tree" && state.editor.activeTool === "tree") ||
       (row.id === "spring" && state.editor.activeTool === "spring") ||
-      (row.id === "wall" && state.editor.activeTool === "wall");
+      (row.id === "wall" && state.editor.activeTool === "wall") ||
+      (row.id === "assets" &&
+        (state.editor.activeTool === "asset" || state.editor.assetPaletteOpen));
     drawToolbarButton(row, "", { active });
     ctx.fillStyle = "#dff7ff";
     ctx.font = "bold 20px Verdana";
     ctx.textAlign = "center";
     ctx.fillText(row.icon, row.x + row.width * 0.5, row.y + 22);
+  }
+
+  if (layout.assetPalette?.panel) {
+    ctx.save();
+    ctx.fillStyle = "rgba(9, 18, 24, 0.96)";
+    ctx.strokeStyle = "rgba(155, 233, 255, 0.28)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(
+      layout.assetPalette.panel.x,
+      layout.assetPalette.panel.y,
+      layout.assetPalette.panel.width,
+      layout.assetPalette.panel.height,
+      8,
+    );
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#9cb9c8";
+    ctx.font = "bold 11px Verdana";
+    ctx.textAlign = "left";
+    ctx.fillText("ASSETS", layout.assetPalette.panel.x + 10, layout.assetPalette.panel.y + 15);
+    for (const item of layout.assetPalette.items) {
+      const active = state.editor.selectedAssetKind === item.kind;
+      drawToolbarButton(item, "", { active });
+      ctx.fillStyle = "#dff7ff";
+      ctx.font = "bold 16px Verdana";
+      ctx.textAlign = "left";
+      ctx.fillText(item.icon, item.x + 10, item.y + 17);
+      ctx.fillStyle = "#f4fbff";
+      ctx.font = "bold 12px Verdana";
+      ctx.fillText(item.label, item.x + 30, item.y + 17);
+    }
+    ctx.restore();
   }
 
   drawToolbarButton(layout.objectPrev, "‹");
@@ -3368,6 +3466,7 @@ export function render() {
     applyWorldTransform(track, raceCamera);
     drawTrack();
     drawParticles(ctx, { layer: "belowCar" });
+    drawAmbientAnimals();
     drawCar();
     drawParticles(ctx, { layer: "aboveCar" });
     ctx.restore();

@@ -259,6 +259,28 @@ export function emitGrassDust({
   });
 }
 
+export function emitBloodSplash({ x, y, strength = 1, inheritVx = 0, inheritVy = 0 } = {}) {
+  emitBurst({
+    x,
+    y,
+    count: Math.max(8, Math.round(14 * strength)),
+    speedMin: 42,
+    speedMax: 170,
+    lifeMin: 0.28,
+    lifeMax: 0.72,
+    sizeMin: 3,
+    sizeMax: 8,
+    colors: ["rgba(166, 15, 19, 0.95)", "rgba(124, 0, 5, 0.90)", "rgba(201, 48, 42, 0.85)"],
+    drag: 2.8,
+    gravity: 52,
+    inheritVx,
+    inheritVy,
+    spread: Math.PI * 1.55,
+    kind: "blood",
+    layer: "aboveCar",
+  });
+}
+
 export function drawParticles(ctx, { layer = null } = {}) {
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
@@ -281,6 +303,10 @@ export function drawParticles(ctx, { layer = null } = {}) {
       ctx.fillRect(-p.size * 0.65, -p.size * 0.32, p.size * 1.3, p.size * 0.64);
     } else if (p.kind === "spray") {
       ctx.fillRect(-p.size * 0.7, -p.size * 0.45, p.size * 1.4, p.size * 0.9);
+    } else if (p.kind === "blood") {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size * 0.7, p.size * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       ctx.beginPath();
       ctx.arc(0, 0, p.size * 0.5, 0, Math.PI * 2);

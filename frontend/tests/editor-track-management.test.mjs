@@ -472,3 +472,40 @@ test("editor toolbar exposes oil placement and preserves imported oil blobs", ()
 
   removeTrackPresetById(imported.id, { removePersisted: false });
 });
+
+test("editor toolbar exposes grouped assets and lists rooster in the asset palette", () => {
+  const imported = importTrackPresetData({
+    id: "editor-assets-layout",
+    name: "EDITOR ASSETS",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "rooster", x: 560, y: 330, r: 12, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  let layout = getEditorToolbarLayout();
+  assert.ok(layout.objectToolButtons.some((button) => button.id === "assets"));
+
+  state.editor.assetPaletteOpen = true;
+  layout = getEditorToolbarLayout();
+  assert.ok(layout.assetPalette);
+  assert.ok(layout.assetPalette.items.some((item) => item.kind === "rooster"));
+  assert.ok(layout.assetPalette.items.some((item) => item.kind === "sheep"));
+
+  const preset = getTrackPreset(trackIndex);
+  assert.equal(preset.worldObjects[0]?.type, "animal");
+  assert.equal(preset.worldObjects[0]?.kind, "rooster");
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});

@@ -6,6 +6,7 @@ import {
   saveTrackToDb,
   updateTrackInDb,
 } from "./api.js";
+import { getAssetDefaultRadius } from "./asset-sprites.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -29,6 +30,7 @@ const OBJECT_DEFAULTS = {
   wall: { height: 1, width: 18, length: 90, angle: 0 },
   pond: { angle: 0 },
   oil: { angle: 0 },
+  animal: { kind: "rooster", r: 24, angle: 0 },
 };
 
 export function sanitizePlayerName(raw) {
@@ -342,6 +344,13 @@ function cloneWorldObject(obj) {
   if (type === "tree" || type === "barrel" || type === "spring") {
     base.r = Number.isFinite(obj?.r) ? Number(obj.r) : defaults.r;
     base.height = Number.isFinite(obj?.height) ? Number(obj.height) : defaults.height;
+    return base;
+  }
+
+  if (type === "animal") {
+    base.kind =
+      typeof obj?.kind === "string" && obj.kind.trim() ? obj.kind.trim().toLowerCase() : "rooster";
+    base.r = Number.isFinite(obj?.r) ? Number(obj.r) : getAssetDefaultRadius(base.kind);
     return base;
   }
 
@@ -1708,6 +1717,7 @@ export const physicsConfig = {
   constants: {
     surfaceBlendTime: 0.1,
     oilCarryDuration: 3,
+    bloodCarryDuration: 2.6,
     oilSteerThreshold: 0.03,
     oilGripFloor: 0.02,
     oilInertiaCarry: 0.985,

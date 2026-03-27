@@ -119,6 +119,7 @@ const {
   updateRace,
 } = await import("../js/physics.js");
 const { gameAudio } = await import("../js/game-audio.js");
+const { ambientAnimals } = await import("../js/ambient-animals.js");
 const {
   findNearestTrackNavNode,
   findSpringTrigger,
@@ -319,6 +320,121 @@ test("legacy world objects gain default heights and wall defaults", () => {
   assert.equal(oil.ry, 44);
 
   removeTrackPresetById(imported.id);
+});
+
+test("resetRace rebuilds authored rooster actors and rooster hits apply blood carry", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const originalPlayAnimalSplash = gameAudio.playAnimalSplash;
+  const splashCalls = [];
+  const imported = importTrackPresetData({
+    id: "vertical-rooster-hit",
+    name: "VERTICAL ROOSTER HIT",
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "rooster", x: 648, y: 565, r: 12, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  state.selectedTrackIndex = trackIndex;
+  gameAudio.playAnimalSplash = (kind, intensity) => {
+    splashCalls.push({ kind, intensity });
+  };
+
+  try {
+    applyTrackPreset(trackIndex);
+    resetRace();
+
+    assert.equal(ambientAnimals.length, 1);
+    assert.equal(ambientAnimals[0].kind, "rooster");
+    state.startSequence.active = false;
+    physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+    car.x = ambientAnimals[0].x - 8;
+    car.y = ambientAnimals[0].y;
+    car.vx = 92;
+    car.vy = 0;
+    car.angle = 0;
+    car.speed = 92;
+    physicsRuntime.prevForwardSpeed = 92;
+
+    updateRace(1 / 60);
+
+    assert.equal(ambientAnimals[0].active, false);
+    assert.ok(physicsRuntime.bloodCarry > 0.9);
+    assert.equal(splashCalls.length, 1);
+    assert.equal(splashCalls[0].kind, "rooster");
+    assert.ok(splashCalls[0].intensity >= 0.55);
+    const speedAfterHit = car.speed;
+
+    updateRace(1 / 60);
+
+    assert.ok(car.speed <= speedAfterHit);
+    assert.ok(skidMarks.some((mark) => mark.color.includes("164, 14, 20")));
+  } finally {
+    gameAudio.playAnimalSplash = originalPlayAnimalSplash;
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    if (restoreIndex >= 0) applyTrackPreset(restoreIndex);
+  }
+});
+
+test("sheep hits slow the car harder than rooster hits", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const originalPlayAnimalSplash = gameAudio.playAnimalSplash;
+  const splashCalls = [];
+  const imported = importTrackPresetData({
+    id: "vertical-sheep-hit",
+    name: "VERTICAL SHEEP HIT",
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "sheep", x: 648, y: 565, r: 30, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  state.selectedTrackIndex = trackIndex;
+  gameAudio.playAnimalSplash = (kind, intensity) => {
+    splashCalls.push({ kind, intensity });
+  };
+
+  try {
+    applyTrackPreset(trackIndex);
+    resetRace();
+
+    assert.equal(ambientAnimals.length, 1);
+    assert.equal(ambientAnimals[0].kind, "sheep");
+    state.startSequence.active = false;
+    physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+    car.x = ambientAnimals[0].x - 8;
+    car.y = ambientAnimals[0].y;
+    car.vx = 92;
+    car.vy = 0;
+    car.angle = 0;
+    car.speed = 92;
+    physicsRuntime.prevForwardSpeed = 92;
+
+    updateRace(1 / 60);
+
+    assert.equal(ambientAnimals[0].active, false);
+    assert.ok(car.speed < 72);
+    assert.ok(physicsRuntime.bloodCarry > 0.9);
+    assert.equal(splashCalls.length, 1);
+    assert.equal(splashCalls[0].kind, "sheep");
+    assert.ok(splashCalls[0].intensity >= 0.55);
+  } finally {
+    gameAudio.playAnimalSplash = originalPlayAnimalSplash;
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    if (restoreIndex >= 0) applyTrackPreset(restoreIndex);
+  }
 });
 
 test("legacy checkpoint angles migrate to editable progress checkpoints", () => {

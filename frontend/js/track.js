@@ -10,6 +10,7 @@ import {
   checkpoints,
   physicsConfig,
 } from "./parameters.js";
+import { getAssetDefaultRadius } from "./asset-sprites.js";
 import { clamp, normalizeVec, signedAngleBetween } from "./utils.js";
 import {
   cleanOffsetLoop,
@@ -2033,6 +2034,17 @@ export function normalizeWorldObject(obj) {
         rx: Number.isFinite(obj.rx) ? Number(obj.rx) : 78,
         ry: Number.isFinite(obj.ry) ? Number(obj.ry) : 44,
         seed: Number.isFinite(obj.seed) ? Number(obj.seed) : 0,
+      };
+    case "animal":
+      return {
+        ...obj,
+        type: "animal",
+        kind:
+          typeof obj.kind === "string" && obj.kind.trim()
+            ? obj.kind.trim().toLowerCase()
+            : "rooster",
+        angle,
+        r: Number.isFinite(obj.r) ? Number(obj.r) : getAssetDefaultRadius(obj.kind),
       };
     default:
       return { ...obj, angle };
