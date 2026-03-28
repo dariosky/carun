@@ -385,6 +385,13 @@ function getViewportCenter() {
   };
 }
 
+function transformWorldPointToViewport(point, cameraState, trackDef = track) {
+  return {
+    x: cameraState.viewOffsetX + trackDef.cx + (point.x - trackDef.cx) * cameraState.worldScale,
+    y: cameraState.viewOffsetY + trackDef.cy + (point.y - trackDef.cy) * cameraState.worldScale,
+  };
+}
+
 export function getRaceCameraState(trackDef = track, vehicle = car) {
   const authoringScale = getTrackWorldScale(trackDef);
   const worldScale = getRaceWorldScale(trackDef);
@@ -1420,12 +1427,13 @@ function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } 
 
 function drawCar() {
   const activeAiCars = getActiveAiCars();
+  const showDriverLabels = state.startSequence.active;
   const vehicles = [
     {
       vehicle: car,
       accent: playerAccentColor(),
       blink: true,
-      label: state.playerName,
+      label: showDriverLabels ? state.playerName : "",
     },
   ];
   if (aiOpponentsEnabled()) {
@@ -1433,7 +1441,7 @@ function drawCar() {
       vehicles.push({
         vehicle,
         accent: rivalAccentColor(index),
-        label: vehicle.label,
+        label: showDriverLabels ? vehicle.label : "",
       });
     });
   }
@@ -1554,8 +1562,31 @@ function drawStartSequenceOverlay() {
   if (!seq.active && seq.goFlash <= 0) return;
 
   const viewportCenter = getViewportCenter();
-  const cx = viewportCenter.x;
-  const cy = viewportCenter.y;
+  const overlayCenter = { ...viewportCenter };
+  const cameraState = getRaceCameraState(track);
+  const overlayBounds = {
+    left: overlayCenter.x - 165,
+    right: overlayCenter.x + 165,
+    top: overlayCenter.y - 136,
+    bottom: overlayCenter.y + 94,
+  };
+  const vehicleBoundsPaddingX = 36;
+  const vehicleBoundsPaddingY = 34;
+  const startGridCovered = [car, ...getActiveAiCars()].some((vehicle) => {
+    const screenPoint = transformWorldPointToViewport(vehicle, cameraState, track);
+    return (
+      screenPoint.x >= overlayBounds.left - vehicleBoundsPaddingX &&
+      screenPoint.x <= overlayBounds.right + vehicleBoundsPaddingX &&
+      screenPoint.y >= overlayBounds.top - vehicleBoundsPaddingY &&
+      screenPoint.y <= overlayBounds.bottom + vehicleBoundsPaddingY
+    );
+  });
+  if (startGridCovered) {
+    overlayCenter.y = 154;
+  }
+
+  const cx = overlayCenter.x;
+  const cy = overlayCenter.y;
 
   if (seq.active) {
     const readyHold = 0.95;
