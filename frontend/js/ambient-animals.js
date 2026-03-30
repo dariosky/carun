@@ -4,6 +4,8 @@ import { pickAnimalDirection } from "./asset-sprites.js";
 
 const ANIMAL_KIND_CONFIG = {
   rooster: {
+    threatResponse: "flee",
+    preferredSurfaces: ["grass", "curb"],
     homeRadius: 132,
     threatDistance: 220,
     immediateThreatDistance: 54,
@@ -27,6 +29,8 @@ const ANIMAL_KIND_CONFIG = {
     bloodStrengthMul: 1,
   },
   sheep: {
+    threatResponse: "flee",
+    preferredSurfaces: ["grass", "curb"],
     homeRadius: 170,
     threatDistance: 250,
     immediateThreatDistance: 66,
@@ -48,6 +52,34 @@ const ANIMAL_KIND_CONFIG = {
     bloodStrengthMin: 0.85,
     bloodStrengthMax: 1.5,
     bloodStrengthMul: 1.35,
+  },
+  bull: {
+    threatResponse: "charge",
+    preferredSurfaces: ["grass"],
+    homeRadius: 156,
+    threatDistance: 176,
+    immediateThreatDistance: 84,
+    wanderSpeed: 9,
+    grassSeekSpeed: 15,
+    chargeSpeed: 104,
+    recoverSpeed: 34,
+    collisionRadius: 24,
+    idleDurationMin: 1.8,
+    idleDurationMax: 3.4,
+    wanderDurationMin: 1.2,
+    wanderDurationMax: 2.2,
+    chargeDurationMin: 0.82,
+    chargeDurationMax: 1.28,
+    recoverDurationMin: 0.34,
+    recoverDurationMax: 0.52,
+    impactCooldown: 0.42,
+    hitResponse: "ram",
+    hitKnockbackMin: 30,
+    hitKnockbackMax: 82,
+    hitKnockbackMul: 0.58,
+    hitSlowdownTime: 0.2,
+    hitSlowdownDecel: 1100,
+    gripDisruptTime: 0.18,
   },
 };
 
@@ -74,7 +106,15 @@ export function getAnimalBehaviorConfig(kind = "rooster") {
   return getAnimalConfig(kind);
 }
 
-function getSurfaceScore(surfaceName) {
+function getSurfaceScore(surfaceName, mode = "wander") {
+  if (mode === "charge") {
+    if (surfaceName === "grass") return 0.2;
+    if (surfaceName === "curb") return 0.08;
+    if (surfaceName === "asphalt") return 0.05;
+    if (surfaceName === "oil") return -1.25;
+    if (surfaceName === "water") return -2.8;
+    return -0.5;
+  }
   if (surfaceName === "grass") return 1.8;
   if (surfaceName === "curb") return 0.45;
   if (surfaceName === "asphalt") return -0.95;
@@ -98,15 +138,17 @@ function chooseDirectionAngle(animal, preferredAngle, mode, objects) {
     const resolved = resolveObjectCollisions(probeX, probeY, 0, objects);
     const blocked = Math.hypot(resolved.x - probeX, resolved.y - probeY) > 0.01;
     const homeDistance = Math.hypot(probeX - animal.homeX, probeY - animal.homeY);
-    const alignScore = Math.cos(angle - preferredAngle) * (mode === "flee" ? 1.8 : 1.25);
+    const alignScore =
+      Math.cos(angle - preferredAngle) *
+      (mode === "flee" ? 1.8 : mode === "charge" ? 2.4 : mode === "recover" ? 1.55 : 1.25);
     const homePenalty =
       homeDistance > cfg.homeRadius ? (homeDistance - cfg.homeRadius) / cfg.homeRadius : 0;
     const score =
       alignScore +
-      getSurfaceScore(surface) -
-      homePenalty * 1.15 -
-      (blocked ? 1.7 : 0) +
-      (surface === "grass" && mode !== "idle" ? 0.35 : 0);
+      getSurfaceScore(surface, mode) -
+      homePenalty * (mode === "charge" ? 0.4 : 1.15) -
+      (blocked ? (mode === "charge" ? 2.25 : 1.7) : 0) +
+      (surface === "grass" && mode !== "idle" && mode !== "charge" ? 0.35 : 0);
     if (score > bestScore) {
       bestScore = score;
       bestAngle = angle;
@@ -129,6 +171,20 @@ function scheduleAnimalMode(animal, mode, objects, threatAngle = null) {
     const baseAngle = Number.isFinite(threatAngle) ? threatAngle : animal.moveAngle;
     animal.modeTimer = rangeFromHash(seed, cfg.fleeDurationMin, cfg.fleeDurationMax);
     animal.targetSpeed = cfg.fleeSpeed;
+    animal.moveAngle = chooseDirectionAngle(animal, baseAngle, mode, objects);
+    return;
+  }
+  if (mode === "charge") {
+    const baseAngle = Number.isFinite(threatAngle) ? threatAngle : animal.moveAngle;
+    animal.modeTimer = rangeFromHash(seed, cfg.chargeDurationMin, cfg.chargeDurationMax);
+    animal.targetSpeed = cfg.chargeSpeed;
+    animal.moveAngle = chooseDirectionAngle(animal, baseAngle, mode, objects);
+    return;
+  }
+  if (mode === "recover") {
+    const baseAngle = Number.isFinite(threatAngle) ? threatAngle : animal.moveAngle + Math.PI;
+    animal.modeTimer = rangeFromHash(seed, cfg.recoverDurationMin, cfg.recoverDurationMax);
+    animal.targetSpeed = cfg.recoverSpeed;
     animal.moveAngle = chooseDirectionAngle(animal, baseAngle, mode, objects);
     return;
   }
@@ -167,6 +223,7 @@ function createAmbientAnimalState(object, index) {
     seed,
     active: true,
     hitTime: 0,
+    contactCooldown: 0,
   };
 }
 
@@ -174,6 +231,7 @@ function getThreat(animal, racers) {
   let best = null;
   let bestScore = Infinity;
   const cfg = getAnimalConfig(animal.kind);
+  const isChargeAnimal = (cfg.threatResponse || "flee") === "charge";
   for (const racer of racers) {
     const vehicle = racer?.vehicle;
     if (!vehicle) continue;
@@ -182,10 +240,19 @@ function getThreat(animal, racers) {
     const dy = animal.y - vehicle.y;
     const dist = Math.hypot(dx, dy);
     if (dist > cfg.threatDistance) continue;
+    const awayAngle = Math.atan2(dy, dx);
+    const towardAngle = awayAngle + Math.PI;
+    if (isChargeAnimal) {
+      if (dist < bestScore) {
+        bestScore = dist;
+        best = { racer, distance: dist, awayAngle, towardAngle, speed };
+      }
+      continue;
+    }
     if (dist < cfg.immediateThreatDistance) {
       if (dist < bestScore) {
         bestScore = dist;
-        best = { racer, distance: dist, awayAngle: Math.atan2(dy, dx) };
+        best = { racer, distance: dist, awayAngle, towardAngle, speed };
       }
       continue;
     }
@@ -197,10 +264,16 @@ function getThreat(animal, racers) {
     const score = dist / Math.max(towardAnimal, 0.15);
     if (score < bestScore) {
       bestScore = score;
-      best = { racer, distance: dist, awayAngle: Math.atan2(dy, dx) };
+      best = { racer, distance: dist, awayAngle, towardAngle, speed };
     }
   }
   return best;
+}
+
+function prefersCalmSurface(cfg, surface) {
+  const preferredSurfaces = Array.isArray(cfg.preferredSurfaces) ? cfg.preferredSurfaces : null;
+  if (!preferredSurfaces?.length) return surface === "grass" || surface === "curb";
+  return preferredSurfaces.includes(surface);
 }
 
 function stepAnimalMotion(animal, dt, objects) {
@@ -248,18 +321,38 @@ function updateAmbientAnimal(animal, dt, racers, objects) {
     animal.hitTime += dt;
     return;
   }
+  if (animal.contactCooldown > 0) {
+    animal.contactCooldown = Math.max(0, animal.contactCooldown - dt);
+  }
 
   const surface = surfaceAtForTrack(animal.x, animal.y, track, objects);
   const threat = getThreat(animal, racers);
+  const cfg = getAnimalConfig(animal.kind);
+  const threatResponse = cfg.threatResponse || "flee";
+  if (animal.mode === "recover") {
+    animal.modeTimer -= dt;
+  }
   if (threat) {
-    scheduleAnimalMode(animal, "flee", objects, threat.awayAngle);
-  } else {
+    if (threatResponse === "charge") {
+      if (animal.mode !== "recover" || animal.modeTimer <= 0) {
+        if (animal.mode !== "charge") {
+          scheduleAnimalMode(animal, "charge", objects, threat.towardAngle);
+        } else {
+          animal.targetSpeed = cfg.chargeSpeed;
+          animal.moveAngle = chooseDirectionAngle(animal, threat.towardAngle, "charge", objects);
+          animal.modeTimer = Math.max(animal.modeTimer, 0.16);
+        }
+      }
+    } else {
+      scheduleAnimalMode(animal, "flee", objects, threat.awayAngle);
+    }
+  } else if (animal.mode !== "recover") {
     animal.modeTimer -= dt;
     if (animal.modeTimer <= 0) {
       const modeSeed = animal.seed + animal.decisionIndex * 1.13;
-      if (surface !== "grass" && surface !== "curb") {
+      if (!prefersCalmSurface(cfg, surface)) {
         scheduleAnimalMode(animal, "grassSeek", objects, null);
-      } else if (hash01(modeSeed) < 0.34) {
+      } else if (hash01(modeSeed) < (animal.kind === "bull" ? 0.56 : 0.34)) {
         scheduleAnimalMode(animal, "idle", objects, null);
       } else {
         scheduleAnimalMode(animal, "wander", objects, null);
@@ -273,15 +366,16 @@ function updateAmbientAnimal(animal, dt, racers, objects) {
     return;
   }
 
-  if (animal.mode === "grassSeek" && surface === "grass") {
+  if (animal.mode === "grassSeek" && prefersCalmSurface(cfg, surface)) {
     animal.modeTimer = Math.min(animal.modeTimer, 0.18);
   }
 
   stepAnimalMotion(animal, dt, objects);
 }
 
-function detectAnimalHit(animal, racers) {
+function detectAnimalHit(animal, racers, objects) {
   if (!animal.active) return null;
+  if (animal.contactCooldown > 0) return null;
   const cfg = getAnimalConfig(animal.kind);
   for (const racer of racers) {
     const vehicle = racer?.vehicle;
@@ -293,15 +387,25 @@ function detectAnimalHit(animal, racers) {
     if (dist > cfg.collisionRadius + carRadius) continue;
     const speed = Math.hypot(vehicle.vx, vehicle.vy);
     if (speed < 8) continue;
-    animal.active = false;
-    animal.hitTime = 0;
+    const impactAngle = Math.atan2(dy, dx);
+    if (cfg.hitResponse === "ram") {
+      animal.contactCooldown = cfg.impactCooldown || 0.4;
+      scheduleAnimalMode(animal, "recover", objects, impactAngle + Math.PI);
+      animal.speed = Math.max(animal.speed, cfg.recoverSpeed || 28);
+    } else {
+      animal.active = false;
+      animal.hitTime = 0;
+    }
     return {
       animal,
       racer,
       speed,
+      animalSpeed: animal.speed,
       x: animal.x,
       y: animal.y,
       config: cfg,
+      impactAngle,
+      impactType: cfg.hitResponse === "ram" ? "ram" : "splash",
     };
   }
   return null;
@@ -320,7 +424,7 @@ export function updateAmbientAnimals(dt, racers = [], objects = worldObjects) {
   const hitEvents = [];
   for (const animal of ambientAnimals) {
     updateAmbientAnimal(animal, dt, racers, objects);
-    const hit = detectAnimalHit(animal, racers);
+    const hit = detectAnimalHit(animal, racers, objects);
     if (hit) hitEvents.push(hit);
   }
   return hitEvents;

@@ -96,6 +96,8 @@ const EDITOR_DEFAULT_HALF_WIDTH = 60;
 const EDITOR_ZOOM_STEP = 0.1;
 const EDITOR_MIN_WORLD_SCALE = 0.1;
 const EDITOR_MAX_WORLD_SCALE = 1.75;
+const EDITOR_MIN_ANIMAL_RADIUS = 8;
+const EDITOR_MAX_ANIMAL_RADIUS = 40;
 const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
 const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
 
@@ -1585,7 +1587,10 @@ function adjustSelectedObjectSize(direction) {
     object.r = Math.max(10, Math.min(28, object.r + direction * 2));
   }
   if (object.type === "animal") {
-    object.r = Math.max(8, Math.min(22, object.r + direction * 1.5));
+    object.r = Math.max(
+      EDITOR_MIN_ANIMAL_RADIUS,
+      Math.min(EDITOR_MAX_ANIMAL_RADIUS, object.r + direction * 1.5),
+    );
   }
   if (object.type === "wall") {
     object.length = Math.max(32, Math.min(160, object.length + direction * 8));

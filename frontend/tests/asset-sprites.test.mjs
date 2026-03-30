@@ -11,6 +11,7 @@ const { ASSET_PLACEABLES, getAnimalFrame, pickAnimalDirection } =
 test("asset placeables expose rooster in the grouped asset list", () => {
   assert.ok(ASSET_PLACEABLES.some((asset) => asset.kind === "rooster"));
   assert.ok(ASSET_PLACEABLES.some((asset) => asset.kind === "sheep"));
+  assert.ok(ASSET_PLACEABLES.some((asset) => asset.kind === "bull"));
 });
 
 test("rooster atlas frame selection uses stable clip rows and frame counts", () => {
@@ -80,6 +81,40 @@ test("rooster atlas frame selection uses stable clip rows and frame counts", () 
     sy: 128,
     sw: 32,
     sh: 32,
+  });
+
+  const bullWalkLeft = getAnimalFrame("bull", {
+    animation: "walk",
+    direction: "left",
+    frameIndex: 5,
+  });
+  assert.deepEqual(bullWalkLeft, {
+    animation: "walk",
+    direction: "left",
+    frameIndex: 5,
+    frameCount: 6,
+    frameDuration: 0.14,
+    sx: 320,
+    sy: 128,
+    sw: 64,
+    sh: 64,
+  });
+
+  const bullIdleBack = getAnimalFrame("bull", {
+    animation: "idle",
+    direction: "back",
+    frameIndex: 6,
+  });
+  assert.deepEqual(bullIdleBack, {
+    animation: "idle",
+    direction: "back",
+    frameIndex: 2,
+    frameCount: 4,
+    frameDuration: 0.18,
+    sx: 128,
+    sy: 320,
+    sw: 64,
+    sh: 64,
   });
 });
 

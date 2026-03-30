@@ -502,6 +502,7 @@ test("editor toolbar exposes grouped assets and lists rooster in the asset palet
   assert.ok(layout.assetPalette);
   assert.ok(layout.assetPalette.items.some((item) => item.kind === "rooster"));
   assert.ok(layout.assetPalette.items.some((item) => item.kind === "sheep"));
+  assert.ok(layout.assetPalette.items.some((item) => item.kind === "bull"));
 
   const preset = getTrackPreset(trackIndex);
   assert.equal(preset.worldObjects[0]?.type, "animal");

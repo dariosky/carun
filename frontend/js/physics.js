@@ -3017,12 +3017,58 @@ function updateAiField(dt) {
   resolveRaceFieldCollisions();
 }
 
+function applyBullRamHit(event, vehicle, runtime, cfg) {
+  const impactSpeed = Math.max(Number(event?.speed) || Math.hypot(vehicle.vx, vehicle.vy), 0);
+  const impactAngle = Number.isFinite(event?.impactAngle) ? event.impactAngle : vehicle.angle;
+  let normalX = Math.cos(impactAngle);
+  let normalY = Math.sin(impactAngle);
+  const bullMoveAngle = event?.animal?.mode === "charge" ? event?.animal?.moveAngle : null;
+  if (Number.isFinite(bullMoveAngle)) {
+    const bullX = Math.cos(bullMoveAngle);
+    const bullY = Math.sin(bullMoveAngle);
+    const blend = 0.7;
+    normalX = normalX * (1 - blend) + bullX * blend;
+    normalY = normalY * (1 - blend) + bullY * blend;
+    const normalLength = Math.hypot(normalX, normalY) || 1;
+    normalX /= normalLength;
+    normalY /= normalLength;
+  }
+  const tangentX = -normalY;
+  const tangentY = normalX;
+  const normalSpeed = vehicle.vx * normalX + vehicle.vy * normalY;
+  const tangentSpeed = vehicle.vx * tangentX + vehicle.vy * tangentY;
+  const bullSpeed = Math.max(Number(event?.animalSpeed) || 0, 0);
+  const knockback = clamp(
+    (cfg.hitKnockbackMin || 30) + bullSpeed * (cfg.hitKnockbackMul || 0.58),
+    cfg.hitKnockbackMin || 30,
+    cfg.hitKnockbackMax || 82,
+  );
+  const nextNormalSpeed = Math.max(Math.abs(normalSpeed) * 0.16, knockback);
+  const nextTangentSpeed = tangentSpeed * 0.58;
+  vehicle.vx = normalX * nextNormalSpeed + tangentX * nextTangentSpeed;
+  vehicle.vy = normalY * nextNormalSpeed + tangentY * nextTangentSpeed;
+  vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
+  runtime.animalImpactTime = Math.max(runtime.animalImpactTime || 0, cfg.hitSlowdownTime || 0);
+  runtime.animalImpactDecel = Math.max(runtime.animalImpactDecel || 0, cfg.hitSlowdownDecel || 0);
+  runtime.collisionGripTimer = Math.max(runtime.collisionGripTimer, cfg.gripDisruptTime || 0.18);
+  runtime.bloodCarry = 0;
+  runtime.bloodCarryTime = 0;
+  gameAudio.playAnimalSplash(
+    event?.animal?.kind,
+    clamp(impactSpeed / Math.max(physicsConfig.car.maxSpeed * 0.65, 1), 0.55, 1),
+  );
+}
+
 function applyAnimalHit(event) {
   const racer = event?.racer;
   const vehicle = racer?.vehicle;
   const runtime = racer?.runtime;
   if (!vehicle || !runtime) return;
   const cfg = event?.config || getAnimalBehaviorConfig(event?.animal?.kind);
+  if (event?.impactType === "ram") {
+    applyBullRamHit(event, vehicle, runtime, cfg);
+    return;
+  }
   const speed = Math.hypot(vehicle.vx, vehicle.vy);
   if (speed > 0.001) {
     const reduction = clamp(

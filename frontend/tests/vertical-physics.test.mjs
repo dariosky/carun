@@ -437,6 +437,132 @@ test("sheep hits slow the car harder than rooster hits", () => {
   }
 });
 
+test("bulls charge nearby cars on proximity alone", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const imported = importTrackPresetData({
+    id: "vertical-bull-charge",
+    name: "VERTICAL BULL CHARGE",
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "bull", x: 648, y: 565, r: 36, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  state.selectedTrackIndex = trackIndex;
+
+  try {
+    applyTrackPreset(trackIndex);
+    resetRace();
+
+    assert.equal(ambientAnimals.length, 1);
+    assert.equal(ambientAnimals[0].kind, "bull");
+    state.startSequence.active = false;
+    physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+    car.x = ambientAnimals[0].x - 120;
+    car.y = ambientAnimals[0].y;
+    car.vx = 0;
+    car.vy = 0;
+    car.angle = 0;
+    car.speed = 0;
+    physicsRuntime.prevForwardSpeed = 0;
+
+    updateRace(1 / 30);
+
+    assert.equal(ambientAnimals[0].mode, "charge");
+    assert.ok(ambientAnimals[0].targetSpeed >= 96);
+  } finally {
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    if (restoreIndex >= 0) applyTrackPreset(restoreIndex);
+  }
+});
+
+test("bull hits stay non-lethal and faster bulls knock the car back harder", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const originalPlayAnimalSplash = gameAudio.playAnimalSplash;
+  const splashCalls = [];
+  const imported = importTrackPresetData({
+    id: "vertical-bull-hit",
+    name: "VERTICAL BULL HIT",
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "bull", x: 648, y: 565, r: 36, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  state.selectedTrackIndex = trackIndex;
+  gameAudio.playAnimalSplash = (kind, intensity) => {
+    splashCalls.push({ kind, intensity });
+  };
+
+  function runBullHit(bullSpeed) {
+    applyTrackPreset(trackIndex);
+    resetRace();
+    state.startSequence.active = false;
+    physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+    const bull = ambientAnimals[0];
+    bull.mode = "charge";
+    bull.speed = bullSpeed;
+    bull.targetSpeed = bullSpeed;
+    bull.moveAngle = 0;
+    bull.contactCooldown = 0;
+    car.x = bull.x - 18;
+    car.y = bull.y;
+    car.vx = 72;
+    car.vy = 0;
+    car.angle = 0;
+    car.speed = 72;
+    physicsRuntime.prevForwardSpeed = 72;
+
+    updateRace(1 / 60);
+
+    return {
+      vx: car.vx,
+      vy: car.vy,
+      bullActive: bull.active,
+      bullMode: bull.mode,
+      bullCooldown: bull.contactCooldown,
+      bloodCarry: physicsRuntime.bloodCarry,
+    };
+  }
+
+  try {
+    const slowHit = runBullHit(18);
+    const fastHit = runBullHit(92);
+
+    assert.equal(slowHit.bullActive, true);
+    assert.equal(fastHit.bullActive, true);
+    assert.equal(splashCalls.length, 2);
+    assert.equal(splashCalls[0]?.kind, "bull");
+    assert.equal(splashCalls[1]?.kind, "bull");
+    assert.ok(splashCalls[0]?.intensity >= 0.55);
+    assert.ok(splashCalls[1]?.intensity >= 0.55);
+    assert.equal(slowHit.bloodCarry, 0);
+    assert.equal(fastHit.bloodCarry, 0);
+    assert.ok(slowHit.bullCooldown > 0);
+    assert.ok(fastHit.bullCooldown > 0);
+    assert.equal(fastHit.bullMode, "recover");
+    assert.ok(slowHit.vx < 0);
+    assert.ok(fastHit.vx < slowHit.vx - 10);
+    assert.ok(Math.abs(fastHit.vx) > Math.abs(slowHit.vx));
+  } finally {
+    gameAudio.playAnimalSplash = originalPlayAnimalSplash;
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    if (restoreIndex >= 0) applyTrackPreset(restoreIndex);
+  }
+});
+
 test("legacy checkpoint angles migrate to editable progress checkpoints", () => {
   const originalTrackId = trackOptions[0]?.id || null;
   const imported = importTrackPresetData({

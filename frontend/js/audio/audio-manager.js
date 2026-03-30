@@ -28,6 +28,11 @@ const ANIMAL_SPLASH_AUDIO = {
     baseVolume: 0.84,
     poolSize: 3,
   },
+  bull: {
+    src: "assets/bull-splash.mp4",
+    baseVolume: 0.88,
+    poolSize: 2,
+  },
 };
 
 function getAudioContextCtor() {
