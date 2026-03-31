@@ -59,6 +59,219 @@ export function getRaceWorldScale(trackDef = track) {
   return Math.max(0.5, getTrackWorldScale(trackDef));
 }
 
+function getTerrainGridInfo(trackDef = track) {
+  const cellSize = Math.max(12, Number(trackDef?.terrainCellSize) || 56);
+  const cols = Math.max(0, Math.round(Number(trackDef?.terrainCols) || 0));
+  const rows = Math.max(0, Math.round(Number(trackDef?.terrainRows) || 0));
+  const heights = Array.isArray(trackDef?.terrainHeights) ? trackDef.terrainHeights : [];
+  if (!cols || !rows || heights.length < cols * rows) return null;
+  return {
+    cellSize,
+    cols,
+    rows,
+    originX: Number(trackDef?.terrainOriginX) || 0,
+    originY: Number(trackDef?.terrainOriginY) || 0,
+    heights,
+  };
+}
+
+function terrainGridIndex(grid, col, row) {
+  return row * grid.cols + col;
+}
+
+function sampleTerrainGrid(grid, col, row) {
+  const clampedCol = clamp(Math.round(col), 0, grid.cols - 1);
+  const clampedRow = clamp(Math.round(row), 0, grid.rows - 1);
+  return Number(grid.heights[terrainGridIndex(grid, clampedCol, clampedRow)]) || 0;
+}
+
+export function terrainHeightAt(x, y, trackDef = track) {
+  const grid = getTerrainGridInfo(trackDef);
+  if (!grid) return 0;
+  const localX = (x - grid.originX) / grid.cellSize;
+  const localY = (y - grid.originY) / grid.cellSize;
+  const col0 = clamp(Math.floor(localX), 0, grid.cols - 1);
+  const row0 = clamp(Math.floor(localY), 0, grid.rows - 1);
+  const col1 = clamp(col0 + 1, 0, grid.cols - 1);
+  const row1 = clamp(row0 + 1, 0, grid.rows - 1);
+  const tx = clamp(localX - col0, 0, 1);
+  const ty = clamp(localY - row0, 0, 1);
+  const h00 = sampleTerrainGrid(grid, col0, row0);
+  const h10 = sampleTerrainGrid(grid, col1, row0);
+  const h01 = sampleTerrainGrid(grid, col0, row1);
+  const h11 = sampleTerrainGrid(grid, col1, row1);
+  const top = h00 + (h10 - h00) * tx;
+  const bottom = h01 + (h11 - h01) * tx;
+  return top + (bottom - top) * ty;
+}
+
+export function terrainGradientAt(x, y, trackDef = track) {
+  const grid = getTerrainGridInfo(trackDef);
+  if (!grid) return { x: 0, y: 0 };
+  const sampleStep = Math.max(grid.cellSize * 0.5, 12);
+  const dx =
+    (terrainHeightAt(x + sampleStep, y, trackDef) - terrainHeightAt(x - sampleStep, y, trackDef)) /
+    Math.max(sampleStep * 2, 1e-6);
+  const dy =
+    (terrainHeightAt(x, y + sampleStep, trackDef) - terrainHeightAt(x, y - sampleStep, trackDef)) /
+    Math.max(sampleStep * 2, 1e-6);
+  return { x: dx, y: dy };
+}
+
+function pointInsideRectFootprint(x, y, object, tolerance = 0) {
+  const dx = x - object.x;
+  const dy = y - object.y;
+  const cos = Math.cos(object.angle || 0);
+  const sin = Math.sin(object.angle || 0);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  return (
+    Math.abs(localX) <= object.length * 0.5 + tolerance &&
+    Math.abs(localY) <= object.width * 0.5 + tolerance
+  );
+}
+
+function rectLocalPoint(x, y, object) {
+  const dx = x - object.x;
+  const dy = y - object.y;
+  const cos = Math.cos(object.angle || 0);
+  const sin = Math.sin(object.angle || 0);
+  return {
+    x: dx * cos + dy * sin,
+    y: -dx * sin + dy * cos,
+  };
+}
+
+function rampSupportHeightAt(x, y, ramp) {
+  if (!pointInsideRectFootprint(x, y, ramp)) return null;
+  const local = rectLocalPoint(x, y, ramp);
+  const t = clamp((local.x + ramp.length * 0.5) / Math.max(ramp.length, 1), 0, 1);
+  return ramp.baseHeight + (ramp.height - ramp.baseHeight) * t;
+}
+
+function rampGradientAt(ramp) {
+  const grade = (ramp.height - ramp.baseHeight) / Math.max(ramp.length, 1);
+  return {
+    x: Math.cos(ramp.angle || 0) * grade,
+    y: Math.sin(ramp.angle || 0) * grade,
+  };
+}
+
+export const VEHICLE_SUPPORT_SAMPLE_DISTANCE = 24;
+
+function supportCandidateFromObject(x, y, object) {
+  if (object.type === "bridgeDeck" && pointInsideRectFootprint(x, y, object)) {
+    return {
+      height: object.height,
+      visualHeight: object.height,
+      kind: "bridgeDeck",
+      surface: "asphalt",
+      gradient: { x: 0, y: 0 },
+      object,
+    };
+  }
+  if (object.type === "ramp") {
+    const height = rampSupportHeightAt(x, y, object);
+    if (height === null) return null;
+    return {
+      height,
+      visualHeight: height,
+      kind: "ramp",
+      surface: "asphalt",
+      gradient: rampGradientAt(object),
+      object,
+    };
+  }
+  return null;
+}
+
+export function getSupportInfoAt(
+  x,
+  y,
+  currentZ = 0,
+  trackDef = track,
+  objects = worldObjects,
+  { maxStepUp = null } = {},
+) {
+  const slopeCfg = physicsConfig.slopes || {};
+  const climbLimit =
+    maxStepUp === null ? Number(slopeCfg.maxStepUp) || 0.48 : Math.max(0, Number(maxStepUp) || 0);
+  const terrainHeight = terrainHeightAt(x, y, trackDef);
+  const terrainGradient = terrainGradientAt(x, y, trackDef);
+  let best = {
+    height: terrainHeight,
+    visualHeight: 0,
+    baseTerrainHeight: terrainHeight,
+    kind: "terrain",
+    surface: surfaceAtForTrack(x, y, trackDef, objects),
+    gradient: terrainGradient,
+    object: null,
+  };
+  const attachLimit = currentZ + climbLimit;
+
+  for (const raw of objects) {
+    const object = normalizeWorldObject(raw);
+    if (!object) continue;
+    const candidate = supportCandidateFromObject(x, y, object);
+    if (!candidate) continue;
+    if (candidate.height > attachLimit + 1e-6) continue;
+    if (candidate.height > best.height + 1e-6) {
+      best = {
+        ...candidate,
+        baseTerrainHeight: terrainHeight,
+      };
+    }
+  }
+
+  return best;
+}
+
+export function getVehicleSupportProfile(
+  vehicle,
+  trackDef = track,
+  objects = worldObjects,
+  { sampleDistance = VEHICLE_SUPPORT_SAMPLE_DISTANCE } = {},
+) {
+  const headingX = Math.cos(vehicle?.angle || 0);
+  const headingY = Math.sin(vehicle?.angle || 0);
+  const distance = Math.max(0, Number(sampleDistance) || 0);
+  const currentZ = Number(vehicle?.z) || 0;
+  const center = getSupportInfoAt(
+    Number(vehicle?.x) || 0,
+    Number(vehicle?.y) || 0,
+    currentZ,
+    trackDef,
+    objects,
+  );
+  const front = getSupportInfoAt(
+    (Number(vehicle?.x) || 0) + headingX * distance,
+    (Number(vehicle?.y) || 0) + headingY * distance,
+    currentZ,
+    trackDef,
+    objects,
+  );
+  const rear = getSupportInfoAt(
+    (Number(vehicle?.x) || 0) - headingX * distance,
+    (Number(vehicle?.y) || 0) - headingY * distance,
+    currentZ,
+    trackDef,
+    objects,
+  );
+  const visualHeights = [front.visualHeight, center.visualHeight, rear.visualHeight].map((value) =>
+    Math.max(0, Number(value) || 0),
+  );
+  const heights = [front.height, center.height, rear.height].map((value) =>
+    Math.max(0, Number(value) || 0),
+  );
+  return {
+    front,
+    center,
+    rear,
+    maxHeight: Math.max(...heights),
+    maxVisualHeight: Math.max(...visualHeights),
+  };
+}
+
 export function trackStartAngle(trackDef = track) {
   if (Number.isFinite(trackDef.startAngle)) return trackDef.startAngle;
   return 0;
@@ -1940,6 +2153,15 @@ function getSurface(x, y, trackDef = track) {
   return "asphalt";
 }
 
+function baseSurfaceAtForTrack(x, y, trackDef = track, objects = worldObjects) {
+  if (pondSlowdownAt(x, y, objects)) return "water";
+  if (oilSlipAt(x, y, objects)) return "oil";
+  const surface = getSurface(x, y, trackDef);
+  if (surface === "grass" || surface === "innerGrass") return "grass";
+  if (surface === "curb") return "curb";
+  return "asphalt";
+}
+
 export function pondSlowdownAt(x, y, objects = worldObjects) {
   for (const obj of objects) {
     if (obj.type !== "pond") continue;
@@ -1971,21 +2193,21 @@ export function oilSlipAt(x, y, objects = worldObjects) {
 }
 
 export function surfaceAt(x, y) {
-  if (pondSlowdownAt(x, y)) return "water";
-  if (oilSlipAt(x, y)) return "oil";
-  const surface = getSurface(x, y);
-  if (surface === "grass" || surface === "innerGrass") return "grass";
-  if (surface === "curb") return "curb";
-  return "asphalt";
+  for (const raw of worldObjects) {
+    const object = normalizeWorldObject(raw);
+    if (!object) continue;
+    if (object.type === "ramp" && pointInsideRectFootprint(x, y, object)) return "asphalt";
+  }
+  return baseSurfaceAtForTrack(x, y, track, worldObjects);
 }
 
 export function surfaceAtForTrack(x, y, trackDef = track, objects = worldObjects) {
-  if (pondSlowdownAt(x, y, objects)) return "water";
-  if (oilSlipAt(x, y, objects)) return "oil";
-  const surface = getSurface(x, y, trackDef);
-  if (surface === "grass" || surface === "innerGrass") return "grass";
-  if (surface === "curb") return "curb";
-  return "asphalt";
+  for (const raw of objects) {
+    const object = normalizeWorldObject(raw);
+    if (!object) continue;
+    if (object.type === "ramp" && pointInsideRectFootprint(x, y, object)) return "asphalt";
+  }
+  return baseSurfaceAtForTrack(x, y, trackDef, objects);
 }
 
 export function normalizeWorldObject(obj) {
@@ -2025,6 +2247,27 @@ export function normalizeWorldObject(obj) {
         length: Number.isFinite(obj.length) ? Number(obj.length) : 90,
         height: Number.isFinite(obj.height) ? Number(obj.height) : 2.5,
       };
+    case "ramp":
+      return {
+        ...obj,
+        type: "ramp",
+        angle,
+        width: Number.isFinite(obj.width) ? Number(obj.width) : 56,
+        length: Number.isFinite(obj.length) ? Number(obj.length) : 160,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 2.4,
+        baseHeight: Number.isFinite(obj.baseHeight) ? Number(obj.baseHeight) : 0,
+        thickness: Number.isFinite(obj.thickness) ? Number(obj.thickness) : 10,
+      };
+    case "bridgeDeck":
+      return {
+        ...obj,
+        type: "bridgeDeck",
+        angle,
+        width: Number.isFinite(obj.width) ? Number(obj.width) : 68,
+        length: Number.isFinite(obj.length) ? Number(obj.length) : 180,
+        height: Number.isFinite(obj.height) ? Number(obj.height) : 2.4,
+        thickness: Number.isFinite(obj.thickness) ? Number(obj.thickness) : 16,
+      };
     case "pond":
     case "oil":
       return {
@@ -2056,22 +2299,23 @@ export function getObjectHeight(obj) {
   return Number.isFinite(normalized?.height) ? normalized.height : 0;
 }
 
-export function getSolidObjects(objects = worldObjects) {
+export function getSolidObjects(objects = worldObjects, { includeRamps = false } = {}) {
   return objects
     .map(normalizeWorldObject)
-    .filter((obj) => obj && (obj.type === "tree" || obj.type === "barrel" || obj.type === "wall"));
+    .filter(
+      (obj) =>
+        obj &&
+        (obj.type === "tree" ||
+          obj.type === "barrel" ||
+          obj.type === "wall" ||
+          (includeRamps && obj.type === "ramp")),
+    );
 }
 
 export function pointInsideWallFootprint(x, y, wall) {
   const normalized = normalizeWorldObject(wall);
   if (!normalized || normalized.type !== "wall") return false;
-  const dx = x - normalized.x;
-  const dy = y - normalized.y;
-  const cos = Math.cos(normalized.angle);
-  const sin = Math.sin(normalized.angle);
-  const localX = dx * cos + dy * sin;
-  const localY = -dx * sin + dy * cos;
-  return Math.abs(localX) <= normalized.length * 0.5 && Math.abs(localY) <= normalized.width * 0.5;
+  return pointInsideRectFootprint(x, y, normalized);
 }
 
 export function findSpringTrigger(x, y, objects = worldObjects) {
@@ -2156,7 +2400,82 @@ function resolveWallCollision(rx, ry, obj, carRadius) {
   };
 }
 
-export function resolveObjectCollisions(x, y, carZ = 0, objects = worldObjects) {
+function resolveRampCollision(rx, ry, obj, carRadius, carZ = 0, previous = null) {
+  const dx = rx - obj.x;
+  const dy = ry - obj.y;
+  const cos = Math.cos(obj.angle);
+  const sin = Math.sin(obj.angle);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  const halfLength = obj.length * 0.5;
+  const halfWidth = obj.width * 0.5;
+  const clampedX = clamp(localX, -halfLength, halfLength);
+  const clampedY = clamp(localY, -halfWidth, halfWidth);
+  const deltaX = localX - clampedX;
+  const deltaY = localY - clampedY;
+  const distSq = deltaX * deltaX + deltaY * deltaY;
+
+  if (distSq > carRadius * carRadius) return null;
+
+  let normalLocalX = 0;
+  let normalLocalY = 0;
+  let push = 0;
+  if (distSq > 1e-8) {
+    const dist = Math.sqrt(distSq);
+    normalLocalX = deltaX / dist;
+    normalLocalY = deltaY / dist;
+    push = carRadius - dist + 0.25;
+  } else {
+    const distToLength = halfLength - Math.abs(localX);
+    const distToWidth = halfWidth - Math.abs(localY);
+    if (distToLength < distToWidth) {
+      normalLocalX = localX >= 0 ? 1 : -1;
+      push = distToLength + carRadius + 0.25;
+    } else {
+      normalLocalY = localY >= 0 ? 1 : -1;
+      push = distToWidth + carRadius + 0.25;
+    }
+  }
+
+  const previousLocal = previous
+    ? rectLocalPoint(previous.x, previous.y, obj)
+    : { x: localX, y: localY };
+  const insideCurrentRamp =
+    Math.abs(localX) <= halfLength + 1e-6 && Math.abs(localY) <= halfWidth + 1e-6;
+  const enteredFromLowFace =
+    previousLocal.x < -halfLength - 1e-6 &&
+    Math.abs(previousLocal.y) <= halfWidth + carRadius &&
+    localX <= halfLength + carRadius;
+  const stayedInsideRamp =
+    Math.abs(previousLocal.x) <= halfLength + 1e-6 && Math.abs(previousLocal.y) <= halfWidth + 1e-6;
+  const allowedRampInterior = insideCurrentRamp && (enteredFromLowFace || stayedInsideRamp);
+  const lowFaceOpen = normalLocalX < -0.5 && (enteredFromLowFace || stayedInsideRamp);
+  const topExitOpen = normalLocalX > 0.5 && Number(carZ) >= obj.height - 0.28;
+  if (allowedRampInterior || lowFaceOpen || topExitOpen) return null;
+
+  const nextLocalX = localX + normalLocalX * push;
+  const nextLocalY = localY + normalLocalY * push;
+  const worldPushX = nextLocalX * cos - nextLocalY * sin;
+  const worldPushY = nextLocalX * sin + nextLocalY * cos;
+  const normalX = normalLocalX * cos - normalLocalY * sin;
+  const normalY = normalLocalX * sin + normalLocalY * cos;
+
+  return {
+    x: obj.x + worldPushX,
+    y: obj.y + worldPushY,
+    normalX,
+    normalY,
+    hitType: "ramp",
+  };
+}
+
+export function resolveObjectCollisions(
+  x,
+  y,
+  carZ = 0,
+  objects = worldObjects,
+  { previous = null } = {},
+) {
   let rx = x;
   let ry = y;
   let hit = false;
@@ -2168,12 +2487,14 @@ export function resolveObjectCollisions(x, y, carZ = 0, objects = worldObjects) 
   for (let pass = 0; pass < 3; pass++) {
     let pushed = false;
 
-    for (const obj of getSolidObjects(objects)) {
+    for (const obj of getSolidObjects(objects, { includeRamps: true })) {
       if (carZ >= getObjectHeight(obj)) continue;
       const resolved =
         obj.type === "wall"
           ? resolveWallCollision(rx, ry, obj, carRadius)
-          : resolveCircleCollision(rx, ry, obj, carRadius);
+          : obj.type === "ramp"
+            ? resolveRampCollision(rx, ry, obj, carRadius, carZ, previous)
+            : resolveCircleCollision(rx, ry, obj, carRadius);
       if (!resolved) continue;
 
       hit = true;

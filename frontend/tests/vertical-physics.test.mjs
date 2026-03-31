@@ -125,12 +125,14 @@ const {
   findNearestTrackNavNode,
   findSpringTrigger,
   getTrackNavigationGraph,
+  getSupportInfoAt,
   pointOnCenterLine,
   pointInsideWallFootprint,
   resolveObjectCollisions,
   surfaceAt,
   trackFrameAtAngle,
   trackProgressAtPoint,
+  getVehicleSupportProfile,
 } = await import("../js/track.js");
 
 function getObjectByType(objects, type) {
@@ -710,6 +712,134 @@ test("spring detection returns only matching spring footprints", () => {
   const spring = { type: "spring", x: 240, y: 210, r: 18, height: 0.4 };
   assert.ok(findSpringTrigger(248, 214, [spring]));
   assert.equal(findSpringTrigger(280, 214, [spring]), null);
+});
+
+test("support selection separates bridge decks from ground and ramps attach progressively", () => {
+  const objects = [
+    { type: "bridgeDeck", x: 420, y: 240, length: 180, width: 68, angle: 0, height: 2.4 },
+    {
+      type: "ramp",
+      x: 240,
+      y: 240,
+      length: 160,
+      width: 56,
+      angle: 0,
+      baseHeight: 0,
+      height: 2.4,
+    },
+  ];
+
+  const underBridge = getSupportInfoAt(420, 240, 0, track, objects);
+  assert.equal(underBridge.kind, "terrain");
+  assert.equal(underBridge.height, 0);
+
+  const onBridge = getSupportInfoAt(420, 240, 2.4, track, objects);
+  assert.equal(onBridge.kind, "bridgeDeck");
+  assert.equal(onBridge.surface, "asphalt");
+  assert.ok(Math.abs(onBridge.height - 2.4) < 1e-6);
+
+  const onRampLow = getSupportInfoAt(180, 240, 0, track, objects);
+  assert.equal(onRampLow.kind, "ramp");
+  assert.ok(onRampLow.height > 0 && onRampLow.height < 1);
+
+  const onRampHigh = getSupportInfoAt(290, 240, 2.1, track, objects);
+  assert.equal(onRampHigh.kind, "ramp");
+  assert.ok(onRampHigh.height > 1.2);
+});
+
+test("vehicle support profile promotes ramped bridge entry above center support", () => {
+  const objects = [
+    { type: "bridgeDeck", x: 420, y: 240, length: 180, width: 68, angle: 0, height: 2.4 },
+    {
+      type: "ramp",
+      x: 250,
+      y: 240,
+      length: 160,
+      width: 56,
+      angle: 0,
+      baseHeight: 0,
+      height: 2.4,
+    },
+  ];
+  const vehicle = {
+    x: 318,
+    y: 240,
+    angle: 0,
+    z: 2.15,
+  };
+
+  const center = getSupportInfoAt(vehicle.x, vehicle.y, vehicle.z, track, objects);
+  const profile = getVehicleSupportProfile(vehicle, track, objects);
+
+  assert.equal(center.kind, "ramp");
+  assert.ok(center.height < 2.4);
+  assert.equal(profile.front.kind, "bridgeDeck");
+  assert.ok(Math.abs(profile.maxVisualHeight - 2.4) < 1e-6);
+  assert.ok(profile.maxVisualHeight > center.visualHeight);
+});
+
+test("ramps stay open on the low face and solid on the high face and sides", () => {
+  const ramp = {
+    type: "ramp",
+    x: 240,
+    y: 240,
+    length: 160,
+    width: 56,
+    angle: 0,
+    baseHeight: 0,
+    height: 2.4,
+  };
+
+  const lowFaceEntry = resolveObjectCollisions(164, 240, 0, [ramp], {
+    previous: { x: 150, y: 240 },
+  });
+  assert.equal(lowFaceEntry.hit, false);
+
+  const lowFaceInterior = resolveObjectCollisions(220, 240, 0, [ramp], {
+    previous: { x: 164, y: 240 },
+  });
+  assert.equal(lowFaceInterior.hit, false);
+
+  const highFaceHit = resolveObjectCollisions(316, 240, 0, [ramp], {
+    previous: { x: 330, y: 240 },
+  });
+  assert.equal(highFaceHit.hit, true);
+  assert.equal(highFaceHit.hitType, "ramp");
+
+  const sideHit = resolveObjectCollisions(240, 272, 0, [ramp], {
+    previous: { x: 240, y: 282 },
+  });
+  assert.equal(sideHit.hit, true);
+  assert.equal(sideHit.hitType, "ramp");
+
+  const highFaceTopExit = resolveObjectCollisions(316, 240, 2.2, [ramp], {
+    previous: { x: 306, y: 240 },
+  });
+  assert.equal(highFaceTopExit.hit, false);
+});
+
+test("grounded elevation increases vehicle scale on elevated decks", () => {
+  resetRace();
+  state.startSequence.active = false;
+  worldObjects.length = 0;
+  worldObjects.push({
+    type: "bridgeDeck",
+    x: car.x,
+    y: car.y,
+    length: 180,
+    width: 80,
+    angle: car.angle,
+    height: 2.4,
+  });
+  car.z = 2.4;
+  car.supportZ = 2.4;
+  car.airborne = false;
+
+  updateRace(0.016);
+
+  assert.ok(car.supportZ > 2);
+  assert.ok(car.visualScale > 1.14);
+  assert.equal(car.airborne, false);
 });
 
 test("updateRace launches on spring and disables steering while airborne", () => {

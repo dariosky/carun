@@ -14,7 +14,8 @@ const {
   trackOptions,
 } = await import("../js/parameters.js");
 const { getRaceWorldScale, getTrackWorldScale } = await import("../js/track.js");
-const { getRaceCameraState } = await import("../js/render.js");
+const { compareRaceSceneItems, computeTerrainCellShade, getRaceCameraState } =
+  await import("../js/render.js");
 const {
   beginEditorCanvasInteraction,
   deleteActiveEditorSelection,
@@ -587,6 +588,104 @@ test("editor toolbar exposes oil placement and preserves imported oil blobs", ()
   assert.equal(preset.worldObjects[0]?.ry, 36);
 
   removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("terrain tool paints a persisted heightfield and right click lowers it", () => {
+  const imported = importTrackPresetData({
+    id: "terrain-brush-local",
+    name: "TERRAIN BRUSH",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((entry) => entry.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+  state.editor.activeTool = "terrain";
+
+  const preset = getTrackPreset(trackIndex);
+  const point = editorWorldToScreen(preset.track, preset.track.cx + 40, preset.track.cy + 20);
+  updateEditorCursorFromScreen(point.x, point.y, point.y);
+  assert.equal(beginEditorCanvasInteraction(0), true);
+  updateEditorCanvasInteraction();
+  endEditorCanvasInteraction();
+
+  const raised = getTrackPreset(trackIndex);
+  assert.ok(Array.isArray(raised.track.terrainHeights));
+  assert.ok(raised.track.terrainHeights.some((value) => Number(value) > 0));
+  const raisedSum = raised.track.terrainHeights.reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0,
+  );
+
+  updateEditorCursorFromScreen(point.x, point.y, point.y);
+  assert.equal(beginEditorCanvasInteraction(2), true);
+  updateEditorCanvasInteraction();
+  endEditorCanvasInteraction();
+
+  const lowered = getTrackPreset(trackIndex);
+  const loweredSum = lowered.track.terrainHeights.reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0,
+  );
+  assert.ok(loweredSum < raisedSum);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("terrain hillshade favors slopes rising toward the top-right light and darkens the opposite", () => {
+  const lit = computeTerrainCellShade({
+    height: 0,
+    rightHeight: 1.2,
+    downHeight: -1.2,
+    cellSize: 56,
+    surface: "world",
+    editor: true,
+  });
+  const shadowed = computeTerrainCellShade({
+    height: 0,
+    rightHeight: -1.2,
+    downHeight: 1.2,
+    cellSize: 56,
+    surface: "world",
+    editor: true,
+  });
+  const flat = computeTerrainCellShade({
+    height: 0,
+    rightHeight: 0,
+    downHeight: 0,
+    cellSize: 56,
+    surface: "world",
+    editor: true,
+  });
+
+  assert.ok(lit.highlightAlpha > lit.shadowAlpha);
+  assert.ok(shadowed.shadowAlpha > shadowed.highlightAlpha);
+  assert.equal(flat.highlightAlpha, 0);
+  assert.equal(flat.shadowAlpha, 0);
+});
+
+test("race scene sorts bridge decks and vehicles by height before actor overlays", () => {
+  const items = [
+    { kind: "vehicleBody", z: 0, y: 240 },
+    { kind: "bridgeTop", z: 2.4, y: 240 },
+    { kind: "vehicleShadow", z: 2.4, y: 240 },
+    { kind: "vehicleBody", z: 2.4, y: 240 },
+  ].sort(compareRaceSceneItems);
+
+  assert.deepEqual(
+    items.map((item) => item.kind),
+    ["vehicleBody", "bridgeTop", "vehicleShadow", "vehicleBody"],
+  );
 });
 
 test("editor toolbar exposes grouped assets and lists rooster in the asset palette", () => {

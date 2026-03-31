@@ -69,6 +69,7 @@ import {
   unlockMenuMusic,
 } from "./audio.js";
 import { emitFinishConfetti } from "./particles.js";
+import { clamp } from "./utils.js";
 import {
   allTournamentHumansFinished,
   canAdvanceHostedTournamentStandings,
@@ -87,11 +88,14 @@ import { ASSET_PLACEABLES, getAssetDefaultRadius, getAssetPlaceable } from "./as
 
 const EDITOR_TOP_BAR_HEIGHT = 56;
 const EDITOR_OBJECT_PLACE_TOOLS = [
+  { id: "terrain", label: "Terrain", icon: "▲", shortcut: "G" },
   { id: "water", label: "Water", icon: "≈", shortcut: "W" },
   { id: "oil", label: "Oil", icon: "●", shortcut: "O" },
   { id: "barrel", label: "Barrel", icon: "◉", shortcut: "B" },
   { id: "tree", label: "Tree", icon: "♣", shortcut: "T" },
   { id: "spring", label: "Spring", icon: "✹", shortcut: "" },
+  { id: "ramp", label: "Ramp", icon: "◭", shortcut: "R" },
+  { id: "bridgeDeck", label: "Bridge", icon: "⌷", shortcut: "H" },
   { id: "wall", label: "Wall", icon: "▭", shortcut: "L" },
   { id: "assets", label: "Assets", icon: "A", shortcut: "" },
 ];
@@ -115,9 +119,100 @@ const EDITOR_ROAD_ANCHOR_MIN_SPACING = 36;
 const EDITOR_ROAD_ANCHOR_TARGET_COUNT = 10;
 const EDITOR_ROAD_ANCHOR_FALLOFF_MUL = 1.25;
 const EDITOR_ROAD_REBUILD_THROTTLE_MS = 24;
+const EDITOR_TERRAIN_HEIGHT_CLAMP = 6;
 
 function clampWorldScale(value) {
   return Math.max(EDITOR_MIN_WORLD_SCALE, Math.min(EDITOR_MAX_WORLD_SCALE, value));
+}
+
+function clampTerrainBrushSize(value) {
+  return Math.max(24, Math.min(220, Number(value) || 72));
+}
+
+function clampTerrainBrushStrength(value) {
+  return Math.max(0.2, Math.min(3, Number(value) || 1));
+}
+
+function clampTerrainBrushHardness(value) {
+  return Math.max(0.1, Math.min(0.95, Number(value) || 0.62));
+}
+
+function ensureTerrainGrid(trackData) {
+  if (!trackData) return null;
+  const existingCols = Math.max(0, Math.round(Number(trackData.terrainCols) || 0));
+  const existingRows = Math.max(0, Math.round(Number(trackData.terrainRows) || 0));
+  const heights = Array.isArray(trackData.terrainHeights) ? trackData.terrainHeights : [];
+  if (existingCols && existingRows && heights.length >= existingCols * existingRows) {
+    return {
+      cols: existingCols,
+      rows: existingRows,
+      cellSize: Math.max(24, Number(trackData.terrainCellSize) || 56),
+      originX: Number(trackData.terrainOriginX) || 0,
+      originY: Number(trackData.terrainOriginY) || 0,
+      heights,
+    };
+  }
+  const cellSize = Math.max(24, Number(trackData.terrainCellSize) || 56);
+  const cols = Math.max(2, Math.ceil(canvas.width / cellSize) + 2);
+  const rows = Math.max(2, Math.ceil(canvas.height / cellSize) + 2);
+  trackData.terrainCellSize = cellSize;
+  trackData.terrainCols = cols;
+  trackData.terrainRows = rows;
+  trackData.terrainOriginX = -cellSize;
+  trackData.terrainOriginY = -cellSize;
+  trackData.terrainHeights = new Array(cols * rows).fill(0);
+  trackData.terrainBrushSize = clampTerrainBrushSize(trackData.terrainBrushSize);
+  trackData.terrainBrushStrength = clampTerrainBrushStrength(trackData.terrainBrushStrength);
+  trackData.terrainBrushHardness = clampTerrainBrushHardness(trackData.terrainBrushHardness);
+  return {
+    cols,
+    rows,
+    cellSize,
+    originX: trackData.terrainOriginX,
+    originY: trackData.terrainOriginY,
+    heights: trackData.terrainHeights,
+  };
+}
+
+function paintTerrainAtCursor(preset, direction = 1) {
+  const trackData = preset?.track;
+  const grid = ensureTerrainGrid(trackData);
+  if (!grid) return false;
+  const brushRadius = clampTerrainBrushSize(trackData.terrainBrushSize);
+  const brushStrength = clampTerrainBrushStrength(trackData.terrainBrushStrength);
+  const hardness = clampTerrainBrushHardness(trackData.terrainBrushHardness);
+  const cx = state.editor.cursorX;
+  const cy = state.editor.cursorY;
+  const radiusSq = brushRadius * brushRadius;
+  let changed = false;
+
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      const x = grid.originX + col * grid.cellSize;
+      const y = grid.originY + row * grid.cellSize;
+      const dx = x - cx;
+      const dy = y - cy;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > radiusSq) continue;
+      const dist = Math.sqrt(distSq);
+      const falloff = clamp(1 - dist / Math.max(brushRadius, 1), 0, 1);
+      const shaped = Math.pow(falloff, Math.max(0.15, 1 - hardness + 0.12));
+      const index = row * grid.cols + col;
+      const previous = Number(grid.heights[index]) || 0;
+      const next = clamp(
+        previous + shaped * direction * brushStrength * 0.06,
+        -EDITOR_TERRAIN_HEIGHT_CLAMP,
+        EDITOR_TERRAIN_HEIGHT_CLAMP,
+      );
+      if (Math.abs(next - previous) > 1e-6) {
+        grid.heights[index] = next;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) applyTrackPreset(state.editor.trackIndex);
+  return changed;
 }
 
 function clearEditorDragSession() {
@@ -210,7 +305,12 @@ function pointInsideBlobObject(x, y, obj, tolerance = 0) {
 function pointInsideExpandedWall(x, y, wall, tolerance) {
   if (pointInsideWallFootprint(x, y, wall)) return true;
   const normalized = normalizeWorldObject(wall);
-  if (!normalized || normalized.type !== "wall") return false;
+  if (
+    !normalized ||
+    (normalized.type !== "wall" && normalized.type !== "ramp" && normalized.type !== "bridgeDeck")
+  ) {
+    return false;
+  }
   const dx = x - normalized.x;
   const dy = y - normalized.y;
   const cos = Math.cos(normalized.angle);
@@ -238,7 +338,7 @@ function pickEditorObjectAt(x, y, preset) {
       hit = Math.hypot(x - object.x, y - object.y) <= object.r + tolerance;
     } else if (object.type === "pond" || object.type === "oil") {
       hit = pointInsideBlobObject(x, y, object, tolerance);
-    } else if (object.type === "wall") {
+    } else if (object.type === "wall" || object.type === "ramp" || object.type === "bridgeDeck") {
       hit = pointInsideExpandedWall(x, y, object, tolerance);
     }
     if (hit) return { kind: "object", objectIndex: index };
@@ -592,7 +692,10 @@ export function getEditorToolbarLayout() {
   const roadActionY = roadActionTop + 2;
   const roadStepperWidth = 138;
   const roadSmoothTop = roadActionTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
-  const zoomTop = roadSmoothTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
+  const terrainTop = roadSmoothTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const terrainRow2Top = terrainTop + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const terrainRow3Top = terrainRow2Top + EDITOR_TOOLBAR_SECTION_HEIGHT;
+  const zoomTop = terrainRow3Top + EDITOR_TOOLBAR_SECTION_HEIGHT + 14;
   panel.height = zoomTop + EDITOR_TOOLBAR_SECTION_HEIGHT + 20 - panel.y;
   const selectorDeleteX = panel.x + panel.width - 12 - iconButtonWidth;
   const selectorNextX = selectorDeleteX - 8 - 30;
@@ -773,6 +876,84 @@ export function getEditorToolbarLayout() {
       width: 58,
       height: 28,
     },
+    terrainSizeLabel: {
+      x: panel.x + 14,
+      y: terrainTop,
+      width: 76,
+      height: 28,
+    },
+    terrainSizeDown: {
+      x: panel.x + 112,
+      y: terrainTop + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushSizeDown",
+    },
+    terrainSizeValue: {
+      x: panel.x + 148,
+      y: terrainTop,
+      width: 58,
+      height: 28,
+    },
+    terrainSizeUp: {
+      x: panel.x + panel.width - 40,
+      y: terrainTop + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushSizeUp",
+    },
+    terrainStrengthLabel: {
+      x: panel.x + 14,
+      y: terrainRow2Top,
+      width: 76,
+      height: 28,
+    },
+    terrainStrengthDown: {
+      x: panel.x + 112,
+      y: terrainRow2Top + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushStrengthDown",
+    },
+    terrainStrengthValue: {
+      x: panel.x + 148,
+      y: terrainRow2Top,
+      width: 58,
+      height: 28,
+    },
+    terrainStrengthUp: {
+      x: panel.x + panel.width - 40,
+      y: terrainRow2Top + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushStrengthUp",
+    },
+    terrainHardnessLabel: {
+      x: panel.x + 14,
+      y: terrainRow3Top,
+      width: 76,
+      height: 28,
+    },
+    terrainHardnessDown: {
+      x: panel.x + 112,
+      y: terrainRow3Top + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushHardnessDown",
+    },
+    terrainHardnessValue: {
+      x: panel.x + 148,
+      y: terrainRow3Top,
+      width: 58,
+      height: 28,
+    },
+    terrainHardnessUp: {
+      x: panel.x + panel.width - 40,
+      y: terrainRow3Top + 2,
+      width: 30,
+      height: 24,
+      id: "terrainBrushHardnessUp",
+    },
     panToggle: {
       x: panel.x + 14,
       y: zoomTop + 2,
@@ -826,6 +1007,18 @@ function editorToolbarActionAt(x, y) {
   if (pointInRect(x, y, layout.roadSizeUp)) return { type: "action", id: layout.roadSizeUp.id };
   if (pointInRect(x, y, layout.roadSmoothPrev)) return { type: "action", id: "roadSmoothPrev" };
   if (pointInRect(x, y, layout.roadSmoothNext)) return { type: "action", id: "roadSmoothNext" };
+  if (pointInRect(x, y, layout.terrainSizeDown))
+    return { type: "action", id: layout.terrainSizeDown.id };
+  if (pointInRect(x, y, layout.terrainSizeUp))
+    return { type: "action", id: layout.terrainSizeUp.id };
+  if (pointInRect(x, y, layout.terrainStrengthDown))
+    return { type: "action", id: layout.terrainStrengthDown.id };
+  if (pointInRect(x, y, layout.terrainStrengthUp))
+    return { type: "action", id: layout.terrainStrengthUp.id };
+  if (pointInRect(x, y, layout.terrainHardnessDown))
+    return { type: "action", id: layout.terrainHardnessDown.id };
+  if (pointInRect(x, y, layout.terrainHardnessUp))
+    return { type: "action", id: layout.terrainHardnessUp.id };
   if (pointInRect(x, y, layout.zoomOut)) return { type: "action", id: "zoomOut" };
   if (pointInRect(x, y, layout.zoomIn)) return { type: "action", id: "zoomIn" };
   if (pointInRect(x, y, layout.panToggle)) return { type: "action", id: layout.panToggle.id };
@@ -849,6 +1042,8 @@ function editorToolbarActionLabel(actionId) {
   switch (actionId) {
     case "objectDelete":
       return "Delete";
+    case "terrain":
+      return "Terrain";
     case "water":
       return "Water";
     case "oil":
@@ -859,6 +1054,10 @@ function editorToolbarActionLabel(actionId) {
       return "Tree";
     case "spring":
       return "Spring";
+    case "ramp":
+      return "Ramp";
+    case "bridgeDeck":
+      return "Bridge";
     case "wall":
       return "Wall";
     case "assets":
@@ -905,6 +1104,18 @@ function editorToolbarActionLabel(actionId) {
       return "Smoothing -";
     case "roadSmoothNext":
       return "Smoothing +";
+    case "terrainBrushSizeDown":
+      return "Terrain Size -";
+    case "terrainBrushSizeUp":
+      return "Terrain Size +";
+    case "terrainBrushStrengthDown":
+      return "Terrain Power -";
+    case "terrainBrushStrengthUp":
+      return "Terrain Power +";
+    case "terrainBrushHardnessDown":
+      return "Terrain Hard -";
+    case "terrainBrushHardnessUp":
+      return "Terrain Hard +";
     case "zoomOut":
       return "Zoom Out";
     case "zoomIn":
@@ -1488,6 +1699,55 @@ function placeEditorObject(type) {
     applyTrackPreset(state.editor.trackIndex);
     return;
   }
+  if (type === "ramp") {
+    const ramp = {
+      type: "ramp",
+      x,
+      y,
+      width: 56,
+      length: 160,
+      angle: 0,
+      baseHeight: 0,
+      height: 2.4,
+      thickness: 10,
+    };
+    preset.worldObjects.push(ramp);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
+  if (type === "bridgeDeck") {
+    const bridgeDeck = {
+      type: "bridgeDeck",
+      x,
+      y,
+      width: 68,
+      length: 180,
+      angle: 0,
+      height: 2.4,
+      thickness: 16,
+    };
+    preset.worldObjects.push(bridgeDeck);
+    preset.editStack.push({
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    });
+    state.editor.latestEditTarget = {
+      kind: "object",
+      objectIndex: preset.worldObjects.length - 1,
+    };
+    triggerEditorSelectionFlash("object", preset.worldObjects.length - 1);
+    applyTrackPreset(state.editor.trackIndex);
+    return;
+  }
   if (type === "wall") {
     const wall = {
       type: "wall",
@@ -1783,6 +2043,14 @@ function adjustSelectedObjectSize(direction) {
   if (object.type === "wall") {
     object.length = Math.max(32, Math.min(160, object.length + direction * 8));
   }
+  if (object.type === "ramp") {
+    object.length = Math.max(64, Math.min(240, object.length + direction * 10));
+    object.width = Math.max(34, Math.min(120, object.width + direction * 4));
+  }
+  if (object.type === "bridgeDeck") {
+    object.length = Math.max(72, Math.min(260, object.length + direction * 10));
+    object.width = Math.max(42, Math.min(130, object.width + direction * 4));
+  }
   state.editor.latestEditTarget = target;
   applyTrackPreset(state.editor.trackIndex);
 }
@@ -1844,6 +2112,36 @@ function adjustEditorZoom(direction) {
   const next = clampWorldScale(Number((current + direction * EDITOR_ZOOM_STEP).toFixed(2)));
   if (next === current) return;
   preset.track.worldScale = next;
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustTerrainBrushSize(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  preset.track.terrainBrushSize = clampTerrainBrushSize(
+    (Number(preset.track.terrainBrushSize) || 72) + direction * 12,
+  );
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustTerrainBrushStrength(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  preset.track.terrainBrushStrength = clampTerrainBrushStrength(
+    (Number(preset.track.terrainBrushStrength) || 1) + direction * 0.2,
+  );
+  applyTrackPreset(state.editor.trackIndex);
+}
+
+function adjustTerrainBrushHardness(direction) {
+  if (state.mode !== "editor") return;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset?.track) return;
+  preset.track.terrainBrushHardness = clampTerrainBrushHardness(
+    (Number(preset.track.terrainBrushHardness) || 0.62) + direction * 0.08,
+  );
   applyTrackPreset(state.editor.trackIndex);
 }
 
@@ -1937,13 +2235,21 @@ function applyRoadAnchorDrag(preset, { forceRebuild = false } = {}) {
   return true;
 }
 
-export function beginEditorCanvasInteraction() {
+export function beginEditorCanvasInteraction(mouseButton = 0) {
   if (state.mode !== "editor") return false;
   const preset = getTrackPreset(state.editor.trackIndex);
   if (!preset) return false;
 
   if (state.editor.panMode) {
     startEditorViewPan();
+    return true;
+  }
+
+  if (state.editor.activeTool === "terrain") {
+    state.editor.drawing = true;
+    state.editor.activeStroke = [];
+    state.editor.terrainPaintDirection = mouseButton === 2 ? -1 : 1;
+    paintTerrainAtCursor(preset, state.editor.terrainPaintDirection);
     return true;
   }
 
@@ -2002,6 +2308,9 @@ export function updateEditorCanvasInteraction() {
   }
 
   if (!state.editor.drawing) return false;
+  if (state.editor.activeTool === "terrain") {
+    return paintTerrainAtCursor(preset, state.editor.terrainPaintDirection || 1);
+  }
   const points = state.editor.activeStroke;
   const last = points[points.length - 1];
   const x = state.editor.cursorX;
@@ -2028,6 +2337,11 @@ export function endEditorCanvasInteraction() {
 
   if (!state.editor.drawing) return false;
   state.editor.drawing = false;
+  state.editor.terrainPaintDirection = 0;
+  if (state.editor.activeTool === "terrain") {
+    state.editor.activeStroke = [];
+    return true;
+  }
   const stroke = state.editor.activeStroke;
   state.editor.activeStroke = [];
   if (stroke.length < 2) return true;
@@ -2096,11 +2410,14 @@ function performEditorToolbarAction(actionId) {
     setEditorTool("asset");
   }
   if (actionId === "objectDelete") deleteSelectedEditorTarget("object");
+  if (actionId === "terrain") toggleEditorTool("terrain");
   if (actionId === "water") toggleEditorTool("pond");
   if (actionId === "oil") toggleEditorTool("oil");
   if (actionId === "barrel") toggleEditorTool("barrel");
   if (actionId === "tree") toggleEditorTool("tree");
   if (actionId === "spring") toggleEditorTool("spring");
+  if (actionId === "ramp") toggleEditorTool("ramp");
+  if (actionId === "bridgeDeck") toggleEditorTool("bridgeDeck");
   if (actionId === "wall") toggleEditorTool("wall");
   if (actionId === "assets") {
     state.editor.assetPaletteOpen = !state.editor.assetPaletteOpen;
@@ -2127,6 +2444,12 @@ function performEditorToolbarAction(actionId) {
   if (actionId === "roadSizeUp") adjustSelectedRoadWidth(1);
   if (actionId === "roadSmoothPrev") adjustEditorSmoothing(-1);
   if (actionId === "roadSmoothNext") adjustEditorSmoothing(1);
+  if (actionId === "terrainBrushSizeDown") adjustTerrainBrushSize(-1);
+  if (actionId === "terrainBrushSizeUp") adjustTerrainBrushSize(1);
+  if (actionId === "terrainBrushStrengthDown") adjustTerrainBrushStrength(-1);
+  if (actionId === "terrainBrushStrengthUp") adjustTerrainBrushStrength(1);
+  if (actionId === "terrainBrushHardnessDown") adjustTerrainBrushHardness(-1);
+  if (actionId === "terrainBrushHardnessUp") adjustTerrainBrushHardness(1);
   if (actionId === "zoomOut") adjustEditorZoom(-1);
   if (actionId === "zoomIn") adjustEditorZoom(1);
   if (actionId === "togglePan") setEditorPanMode(!state.editor.panMode);
@@ -3154,6 +3477,11 @@ function onKeyDown(e) {
       toggleEditorTool("tree");
       return;
     }
+    if (key === "g") {
+      if (e.repeat) return;
+      toggleEditorTool("terrain");
+      return;
+    }
     if (key === "w") {
       if (e.repeat) return;
       toggleEditorTool("pond");
@@ -3174,12 +3502,22 @@ function onKeyDown(e) {
       toggleEditorTool("wall");
       return;
     }
+    if (key === "r") {
+      if (e.repeat) return;
+      toggleEditorTool("ramp");
+      return;
+    }
+    if (key === "j") {
+      if (e.repeat) return;
+      toggleEditorTool("bridgeDeck");
+      return;
+    }
     if (key === "h") {
       if (e.repeat) return;
       setEditorPanMode(!state.editor.panMode);
       return;
     }
-    if (key === "r") {
+    if (key === "enter") {
       startEditorRace();
       return;
     }
@@ -3434,6 +3772,9 @@ export function initInputHandlers() {
       state.editor.toolbar.hoverLabel = "";
     }
   });
+  window.addEventListener("contextmenu", (event) => {
+    if (state.mode === "editor" && state.editor.activeTool === "terrain") event.preventDefault();
+  });
   window.addEventListener("mousedown", (event) => {
     void unlockMenuMusic();
     if (state.mode === "tournamentLobby" && event.button === 0) {
@@ -3452,8 +3793,14 @@ export function initInputHandlers() {
         return;
       }
     }
-    if (state.mode !== "editor" || event.button !== 0) return;
+    if (
+      state.mode !== "editor" ||
+      (event.button !== 0 && !(state.editor.activeTool === "terrain" && event.button === 2))
+    ) {
+      return;
+    }
     updateEditorCursorFromEvent(event);
+    if (state.editor.activeTool === "terrain" && event.button === 2) event.preventDefault();
     const toolbarHit = editorToolbarActionAt(
       state.editor.cursorScreenX,
       state.editor.cursorScreenY,
@@ -3480,10 +3827,15 @@ export function initInputHandlers() {
       performEditorTopBarAction(topBarAction);
       return;
     }
-    beginEditorCanvasInteraction();
+    beginEditorCanvasInteraction(event.button);
   });
   window.addEventListener("mouseup", (event) => {
-    if (state.mode !== "editor" || event.button !== 0) return;
+    if (
+      state.mode !== "editor" ||
+      (event.button !== 0 && !(state.editor.activeTool === "terrain" && event.button === 2))
+    ) {
+      return;
+    }
     if (state.editor.toolbar.dragging) {
       state.editor.toolbar.dragging = false;
       clampEditorToolbarPosition();

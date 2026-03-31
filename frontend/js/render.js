@@ -52,7 +52,7 @@ import {
 } from "./menus.js";
 import { getFinishCelebrationStandings, getRacePosition, getRaceStandings } from "./physics.js";
 import { tournamentRoomActive } from "./tournament-room.js";
-import { formatTime } from "./utils.js";
+import { clamp, formatTime } from "./utils.js";
 import {
   checkpointFrame,
   blobRadius,
@@ -61,6 +61,7 @@ import {
   getEditorWorldScale,
   getRaceWorldScale,
   getTrackWorldScale,
+  getVehicleSupportProfile,
   initCurbSegments,
   normalizeWorldObject,
   pointOnCenterLine,
@@ -582,7 +583,280 @@ function drawAmbientAnimals() {
   }
 }
 
-function drawDecor(objects = worldObjects) {
+const TERRAIN_LIGHT_DIR = Object.freeze({
+  x: 1 / Math.sqrt(2),
+  y: -1 / Math.sqrt(2),
+});
+
+export function computeTerrainCellShade({
+  height = 0,
+  rightHeight = 0,
+  downHeight = 0,
+  cellSize = 56,
+  surface = "world",
+  editor = false,
+} = {}) {
+  const safeCellSize = Math.max(1, cellSize);
+  const dx = (rightHeight - height) / safeCellSize;
+  const dy = (downHeight - height) / safeCellSize;
+  const slopeMagnitude = Math.hypot(dx, dy);
+  const lightResponse = dx * TERRAIN_LIGHT_DIR.x + dy * TERRAIN_LIGHT_DIR.y;
+  const normalizedLight = clamp(lightResponse * 13, -1, 1);
+  const baseStrength = surface === "asphalt" ? 0.34 : 0.56;
+  const editorBoost = editor ? 0.26 : 0;
+  const strength = clamp(
+    slopeMagnitude * 15 + Math.abs(height) * (surface === "asphalt" ? 0.08 : 0.12),
+    0,
+    1,
+  );
+  const contrast = 0.28 + strength * 0.72;
+  return {
+    dx,
+    dy,
+    lightResponse: normalizedLight,
+    highlightAlpha: Math.max(0, normalizedLight) * (baseStrength + editorBoost) * contrast,
+    shadowAlpha: Math.max(0, -normalizedLight) * (baseStrength + editorBoost + 0.12) * contrast,
+  };
+}
+
+function drawTerrainHeightOverlay(trackDef = track, { surface = "world", editor = false } = {}) {
+  const cols = Math.max(0, Math.round(Number(trackDef.terrainCols) || 0));
+  const rows = Math.max(0, Math.round(Number(trackDef.terrainRows) || 0));
+  const heights = Array.isArray(trackDef.terrainHeights) ? trackDef.terrainHeights : [];
+  if (!cols || !rows || heights.length < cols * rows) return;
+  const cellSize = Math.max(24, Number(trackDef.terrainCellSize) || 56);
+  const originX = Number(trackDef.terrainOriginX) || 0;
+  const originY = Number(trackDef.terrainOriginY) || 0;
+  for (let row = 0; row < rows - 1; row++) {
+    for (let col = 0; col < cols - 1; col++) {
+      const index = row * cols + col;
+      const h = Number(heights[index]) || 0;
+      const right = Number(heights[index + 1]) || 0;
+      const down = Number(heights[index + cols]) || 0;
+      const shading = computeTerrainCellShade({
+        height: h,
+        rightHeight: right,
+        downHeight: down,
+        cellSize,
+        surface,
+        editor,
+      });
+      const x = originX + col * cellSize;
+      const y = originY + row * cellSize;
+
+      if (shading.highlightAlpha > 0.01) {
+        ctx.fillStyle =
+          surface === "asphalt"
+            ? `rgba(255, 249, 214, ${Math.min(0.36, shading.highlightAlpha).toFixed(3)})`
+            : `rgba(255, 239, 150, ${Math.min(0.58, shading.highlightAlpha).toFixed(3)})`;
+        ctx.fillRect(x, y, cellSize, cellSize);
+      }
+      if (shading.shadowAlpha > 0.01) {
+        ctx.fillStyle =
+          surface === "asphalt"
+            ? `rgba(10, 14, 20, ${Math.min(0.34, shading.shadowAlpha).toFixed(3)})`
+            : `rgba(8, 24, 12, ${Math.min(0.52, shading.shadowAlpha).toFixed(3)})`;
+        ctx.fillRect(x, y, cellSize, cellSize);
+      }
+    }
+  }
+}
+
+function elevatedPoint(x, y, height) {
+  const liftPx = (physicsConfig.air?.liftPxPerMeter || 7.5) * Math.max(0, height);
+  return { x, y: y - liftPx };
+}
+
+function fillPolygon(points, fillStyle, strokeStyle = null, lineWidth = 1.5) {
+  if (!points?.length) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.closePath();
+  ctx.fillStyle = fillStyle;
+  ctx.fill();
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function projectRectCorners(object, topHeight, bottomHeight = 0) {
+  const halfLength = object.length * 0.5;
+  const halfWidth = object.width * 0.5;
+  const cos = Math.cos(object.angle || 0);
+  const sin = Math.sin(object.angle || 0);
+  const worldPoint = (localX, localY) => ({
+    x: object.x + localX * cos - localY * sin,
+    y: object.y + localX * sin + localY * cos,
+  });
+  const corners = [
+    { localX: -halfLength, localY: -halfWidth, top: bottomHeight, bottom: 0 },
+    { localX: halfLength, localY: -halfWidth, top: topHeight, bottom: 0 },
+    { localX: halfLength, localY: halfWidth, top: topHeight, bottom: 0 },
+    { localX: -halfLength, localY: halfWidth, top: bottomHeight, bottom: 0 },
+  ];
+  return corners.map((corner) => {
+    const base = worldPoint(corner.localX, corner.localY);
+    return {
+      top: elevatedPoint(base.x, base.y, corner.top),
+      bottom: elevatedPoint(base.x, base.y, corner.bottom),
+    };
+  });
+}
+
+function averagePointY(points = []) {
+  if (!points.length) return 0;
+  return points.reduce((sum, point) => sum + point.y, 0) / points.length;
+}
+
+function getBridgeDeckGeometry(object) {
+  const normalized = normalizeWorldObject(object);
+  const halfLength = normalized.length * 0.5;
+  const halfWidth = normalized.width * 0.5;
+  const top = [
+    elevatedPoint(
+      normalized.x -
+        halfLength * Math.cos(normalized.angle) +
+        halfWidth * Math.sin(normalized.angle),
+      normalized.y -
+        halfLength * Math.sin(normalized.angle) -
+        halfWidth * Math.cos(normalized.angle),
+      normalized.height,
+    ),
+    elevatedPoint(
+      normalized.x +
+        halfLength * Math.cos(normalized.angle) +
+        halfWidth * Math.sin(normalized.angle),
+      normalized.y +
+        halfLength * Math.sin(normalized.angle) -
+        halfWidth * Math.cos(normalized.angle),
+      normalized.height,
+    ),
+    elevatedPoint(
+      normalized.x +
+        halfLength * Math.cos(normalized.angle) -
+        halfWidth * Math.sin(normalized.angle),
+      normalized.y +
+        halfLength * Math.sin(normalized.angle) +
+        halfWidth * Math.cos(normalized.angle),
+      normalized.height,
+    ),
+    elevatedPoint(
+      normalized.x -
+        halfLength * Math.cos(normalized.angle) -
+        halfWidth * Math.sin(normalized.angle),
+      normalized.y -
+        halfLength * Math.sin(normalized.angle) +
+        halfWidth * Math.cos(normalized.angle),
+      normalized.height,
+    ),
+  ];
+  const bottom = top.map((point) => ({ x: point.x, y: point.y + normalized.thickness }));
+  return {
+    normalized,
+    top,
+    bottom,
+    lowerSide: [top[2], top[3], bottom[3], bottom[2]],
+    rightSide: [top[1], top[2], bottom[2], bottom[1]],
+  };
+}
+
+function drawBridgeDeckBottom(bottom) {
+  fillPolygon(bottom, "rgba(10, 14, 18, 0.16)");
+}
+
+function drawBridgeDeckSides(lowerSide, rightSide) {
+  fillPolygon(lowerSide, "rgba(88, 96, 104, 0.92)", "rgba(16, 20, 24, 0.45)");
+  fillPolygon(rightSide, "rgba(68, 74, 82, 0.92)", "rgba(16, 20, 24, 0.45)");
+}
+
+function drawBridgeDeckTop(top, selected = false) {
+  fillPolygon(top, "#6d7075", selected ? "#ffe167" : "rgba(255,255,255,0.16)", selected ? 3 : 1.5);
+  ctx.save();
+  ctx.strokeStyle = "#f2f5f8";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([12, 8]);
+  ctx.beginPath();
+  ctx.moveTo(top[0].x, top[0].y + 2);
+  ctx.lineTo(top[1].x, top[1].y + 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBridgeDeckObject(object, selected = false) {
+  const { top, bottom, lowerSide, rightSide } = getBridgeDeckGeometry(object);
+  drawBridgeDeckBottom(bottom);
+  drawBridgeDeckSides(lowerSide, rightSide);
+  drawBridgeDeckTop(top, selected);
+}
+
+const RACE_SCENE_KIND_PRIORITY = Object.freeze({
+  bridgeBottom: 0,
+  bridgeSide: 1,
+  bridgeTop: 2,
+  vehicleShadow: 3,
+  vehicleBody: 4,
+  vehicleLabel: 5,
+});
+
+export function compareRaceSceneItems(a, b) {
+  const aZ = Number(a?.z) || 0;
+  const bZ = Number(b?.z) || 0;
+  if (aZ !== bZ) return aZ - bZ;
+
+  const aPriority = RACE_SCENE_KIND_PRIORITY[a?.kind] ?? Number.MAX_SAFE_INTEGER;
+  const bPriority = RACE_SCENE_KIND_PRIORITY[b?.kind] ?? Number.MAX_SAFE_INTEGER;
+  if (aPriority !== bPriority) return aPriority - bPriority;
+
+  const aY = Number(a?.y) || 0;
+  const bY = Number(b?.y) || 0;
+  if (aY !== bY) return aY - bY;
+  return 0;
+}
+
+function pointInsideObjectFootprint(x, y, object, tolerance = 0) {
+  const dx = x - object.x;
+  const dy = y - object.y;
+  const cos = Math.cos(object.angle || 0);
+  const sin = Math.sin(object.angle || 0);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  return (
+    Math.abs(localX) <= object.length * 0.5 + tolerance &&
+    Math.abs(localY) <= object.width * 0.5 + tolerance
+  );
+}
+
+function drawRampObject(object, selected = false) {
+  const normalized = normalizeWorldObject(object);
+  const corners = projectRectCorners(normalized, normalized.height, normalized.baseHeight || 0);
+  const top = corners.map((corner) => corner.top);
+  const bottom = corners.map((corner) => corner.bottom);
+  fillPolygon(bottom, "rgba(10, 14, 18, 0.12)");
+  fillPolygon(
+    [top[2], top[3], bottom[3], bottom[2]],
+    "rgba(114, 88, 64, 0.9)",
+    "rgba(18, 16, 14, 0.45)",
+  );
+  fillPolygon(
+    [top[1], top[2], bottom[2], bottom[1]],
+    "rgba(142, 108, 82, 0.92)",
+    "rgba(22, 18, 14, 0.45)",
+  );
+  fillPolygon(top, "#8c755b", selected ? "#ffe167" : "rgba(255,255,255,0.16)", selected ? 3 : 1.5);
+  ctx.save();
+  ctx.strokeStyle = "#f2f5f8";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(top[0].x, top[0].y);
+  ctx.lineTo(top[1].x, top[1].y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDecor(objects = worldObjects, { includeBridgeDecks = true } = {}) {
   const flash = state.editor.selectionFlash;
   const selectedObjectIndex =
     state.mode === "editor" && state.editor.latestEditTarget?.kind === "object"
@@ -600,6 +874,17 @@ function drawDecor(objects = worldObjects) {
       flash.index === index &&
       flash.time > 0 &&
       Math.floor(flash.time / 0.08) % 2 === 0;
+    if (normalized.type === "bridgeDeck") {
+      if (!includeBridgeDecks) continue;
+      drawBridgeDeckObject(normalized, shouldFlash);
+      continue;
+    }
+
+    if (normalized.type === "ramp") {
+      drawRampObject(normalized, shouldFlash);
+      continue;
+    }
+
     if (normalized.type === "tree") {
       const angle = normalized.angle || 0;
       const lift = normalized.height * 5;
@@ -984,6 +1269,10 @@ function drawTrackSurface(trackDef, boundaries, segments, showCurbs, objects = w
     ctx.clip("evenodd");
   }
   drawAsphaltMaterial(ctx, asphaltBounds);
+  drawTerrainHeightOverlay(trackDef, {
+    surface: "asphalt",
+    editor: state.mode === "editor",
+  });
   ctx.restore();
 
   if (showCurbs) {
@@ -1302,7 +1591,7 @@ function drawEditorHiddenCurbOverlay(segments) {
   drawRuns(segments.inner || [], ["rgba(208, 92, 255, 0.95)", "rgba(66, 188, 255, 0.95)"]);
 }
 
-function drawTrack() {
+function drawTrack({ includeBridgeDecks = true } = {}) {
   const boundaries = getTrackBoundariesCached(track, TRACK_SEGMENTS);
   const showCurbs = state.mode !== "editor" || state.editor.showCurbs;
   drawTrackSurface(track, boundaries, curbSegments, showCurbs, worldObjects);
@@ -1317,7 +1606,7 @@ function drawTrack() {
     drawVertexAsterisks(boundaries.inner);
   }
 
-  drawDecor();
+  drawDecor(worldObjects, { includeBridgeDecks });
   drawSkidMarks();
   if (boundaries.center.length) {
     drawRoadDetails(track);
@@ -1350,30 +1639,60 @@ function traceKartOutlinePath() {
   ctx.closePath();
 }
 
-function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } = {}) {
+function getVehicleRenderState(vehicle) {
+  const airCfg = physicsConfig.air;
+  const supportProfile = getVehicleSupportProfile(vehicle, track, worldObjects);
+  const supportHeight = Math.max(0, vehicle.renderZ || 0);
+  const airborneHeight = Math.max(0, (vehicle.z || 0) - (vehicle.supportZ || 0));
+  const supportLiftPx = supportHeight * airCfg.liftPxPerMeter;
+  const airborneLiftPx = airborneHeight * airCfg.liftPxPerMeter;
+  const bodySortHeight = Math.max(
+    airborneHeight > 0 ? Number(vehicle.z) || 0 : supportHeight,
+    supportProfile.maxVisualHeight,
+  );
+  return {
+    scale: Math.max(1, vehicle.visualScale || 1),
+    supportProfile,
+    supportHeight,
+    airborneHeight,
+    bodySortHeight,
+    supportLiftPx,
+    airborneLiftPx,
+    screenLiftPx: supportLiftPx + airborneLiftPx,
+    shadowSpread: 1 + supportHeight * 0.018 + airborneHeight * 0.05,
+    shadowBaseScale: 1.11 * (1 + supportHeight * 0.018 + airborneHeight * 0.05),
+    shadowFloorSquash: 1 + airborneHeight * 0.02,
+  };
+}
+
+function drawVehicleShadow(vehicle, renderState) {
+  ctx.save();
+  ctx.translate(vehicle.x, vehicle.y - renderState.supportLiftPx + 10);
+  ctx.rotate(vehicle.angle + Math.PI * 0.5);
+  ctx.scale(
+    renderState.shadowBaseScale,
+    renderState.shadowBaseScale * renderState.shadowFloorSquash,
+  );
+  ctx.fillStyle = `rgba(6, 8, 12, ${Math.max(0.18, 0.42 - renderState.airborneHeight * 0.045).toFixed(3)})`;
+  traceKartOutlinePath();
+  ctx.fill();
+  ctx.scale(0.9, 0.9);
+  ctx.fillStyle = `rgba(0, 0, 0, ${Math.max(0.12, 0.26 - renderState.airborneHeight * 0.032).toFixed(3)})`;
+  traceKartOutlinePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawVehicleBody(vehicle, { accent = "#d22525", blink = false } = {}, renderState) {
   const blinkActive = blink && state.checkpointBlink.time > 0;
   let blinkT = 0;
   if (blinkActive) {
     blinkT = state.checkpointBlink.time / Math.max(state.checkpointBlink.duration, 0.0001);
   }
-
-  const airCfg = physicsConfig.air;
-  const scale = Math.max(1, vehicle.visualScale || 1);
-  const screenLiftPx = Math.max(0, vehicle.z) * airCfg.liftPxPerMeter;
-
   ctx.save();
-  ctx.translate(vehicle.x, vehicle.y + 7);
-  ctx.scale(1 + Math.max(0, vehicle.z) * 0.015, 0.5);
-  ctx.fillStyle = `rgba(10, 12, 18, ${Math.max(0.08, 0.26 - vehicle.z * 0.025).toFixed(3)})`;
-  ctx.beginPath();
-  ctx.arc(0, 0, 18, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  ctx.translate(vehicle.x, vehicle.y - screenLiftPx);
+  ctx.translate(vehicle.x, vehicle.y - renderState.screenLiftPx);
   ctx.rotate(vehicle.angle + Math.PI * 0.5);
-  ctx.scale(scale, scale);
+  ctx.scale(renderState.scale, renderState.scale);
 
   if (blinkActive) {
     const pulse = 0.5 + 0.5 * Math.sin((1 - blinkT) * Math.PI * 7);
@@ -1383,10 +1702,9 @@ function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } 
   }
 
   ctx.save();
-  ctx.scale(1.11, 1.11);
   traceKartOutlinePath();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.stroke();
@@ -1396,17 +1714,13 @@ function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } 
     const spriteWidth = 30;
     const spriteLength = 56;
     ctx.drawImage(kartSprite, -spriteWidth * 0.5, -spriteLength * 0.5, spriteWidth, spriteLength);
-    ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.92;
-    ctx.fillRect(-8, -24, 16, 7);
-    ctx.globalAlpha = 1;
   } else {
     traceKartOutlinePath();
     ctx.fillStyle = "#243541";
     ctx.fill();
     traceKartOutlinePath();
     ctx.strokeStyle = accent;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.stroke();
@@ -1415,20 +1729,30 @@ function drawVehicle(vehicle, { accent = "#d22525", blink = false, label = "" } 
   }
 
   ctx.restore();
-
-  if (label) {
-    ctx.save();
-    ctx.fillStyle = "#f4fbff";
-    ctx.font = "bold 12px Verdana";
-    ctx.textAlign = "center";
-    ctx.fillText(label, vehicle.x, vehicle.y - screenLiftPx - 18);
-    ctx.restore();
-  }
 }
 
-function drawCar() {
+function drawVehicleLabel(vehicle, label, renderState) {
+  if (!label) return;
+  const alpha = getDriverLabelAlpha();
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "#f4fbff";
+  ctx.font = "bold 12px Verdana";
+  ctx.textAlign = "center";
+  ctx.fillText(label, vehicle.x, vehicle.y - renderState.screenLiftPx - 18);
+  ctx.restore();
+}
+
+function getDriverLabelAlpha() {
+  if (state.startSequence.active) return 1;
+  const fadeDuration = Math.max(0.001, Number(state.startSequence.labelFadeDuration) || 0);
+  return Math.max(0, Math.min(1, (Number(state.startSequence.labelFadeTime) || 0) / fadeDuration));
+}
+
+function getRaceVehicleEntries() {
   const activeAiCars = getActiveAiCars();
-  const showDriverLabels = state.startSequence.active;
+  const showDriverLabels = getDriverLabelAlpha() > 0;
   const vehicles = [
     {
       vehicle: car,
@@ -1446,11 +1770,65 @@ function drawCar() {
       });
     });
   }
-  vehicles
-    .sort((a, b) => a.vehicle.y + a.vehicle.z - (b.vehicle.y + b.vehicle.z))
-    .forEach(({ vehicle, accent, blink = false, label }) => {
-      drawVehicle(vehicle, { accent, blink, label });
+  return vehicles;
+}
+
+function buildRaceSceneItems() {
+  const items = [];
+
+  for (const object of worldObjects) {
+    const normalized = normalizeWorldObject(object);
+    if (!normalized || normalized.type !== "bridgeDeck") continue;
+    const geometry = getBridgeDeckGeometry(normalized);
+    items.push({
+      kind: "bridgeBottom",
+      z: 0,
+      y: averagePointY(geometry.bottom),
+      draw: () => drawBridgeDeckBottom(geometry.bottom),
     });
+    items.push({
+      kind: "bridgeSide",
+      z: Math.max(0, normalized.height - 0.001),
+      y: averagePointY(geometry.lowerSide),
+      draw: () => drawBridgeDeckSides(geometry.lowerSide, geometry.rightSide),
+    });
+    items.push({
+      kind: "bridgeTop",
+      z: Math.max(0, normalized.height),
+      y: averagePointY(geometry.top),
+      draw: () => drawBridgeDeckTop(geometry.top, false),
+    });
+  }
+
+  getRaceVehicleEntries().forEach(({ vehicle, accent, blink = false, label }) => {
+    const renderState = getVehicleRenderState(vehicle);
+    items.push({
+      kind: "vehicleShadow",
+      z: renderState.supportHeight,
+      y: vehicle.y - renderState.supportLiftPx + 10,
+      draw: () => drawVehicleShadow(vehicle, renderState),
+    });
+    items.push({
+      kind: "vehicleBody",
+      z: renderState.bodySortHeight,
+      y: vehicle.y - renderState.screenLiftPx,
+      draw: () => drawVehicleBody(vehicle, { accent, blink }, renderState),
+    });
+    if (label) {
+      items.push({
+        kind: "vehicleLabel",
+        z: renderState.bodySortHeight,
+        y: vehicle.y - renderState.screenLiftPx - 18,
+        draw: () => drawVehicleLabel(vehicle, label, renderState),
+      });
+    }
+  });
+
+  return items.sort(compareRaceSceneItems);
+}
+
+function drawRaceScene() {
+  buildRaceSceneItems().forEach((item) => item.draw());
 }
 
 function drawDebugVectors() {
@@ -1899,7 +2277,9 @@ function selectedObjectValueLabel(preset) {
     if (!object) return "--";
     if (object.type === "pond" || object.type === "oil")
       return `${Math.round(object.rx)}x${Math.round(object.ry)}`;
-    if (object.type === "wall") return `${Math.round(object.length)}x${Math.round(object.width)}`;
+    if (object.type === "wall" || object.type === "ramp" || object.type === "bridgeDeck") {
+      return `${Math.round(object.length)}x${Math.round(object.width)}`;
+    }
     if (Number.isFinite(object.r)) return `${Math.round(object.r)}`;
   }
   return "--";
@@ -1921,9 +2301,13 @@ function selectedObjectLabel(preset) {
               ? "✹"
               : object?.type === "wall"
                 ? "▭"
-                : object?.type === "animal"
-                  ? getAssetPlaceable(object.kind).icon
-                  : "•";
+                : object?.type === "ramp"
+                  ? "◭"
+                  : object?.type === "bridgeDeck"
+                    ? "⌷"
+                    : object?.type === "animal"
+                      ? getAssetPlaceable(object.kind).icon
+                      : "•";
   const target = state.editor.latestEditTarget;
   if (target?.kind !== "object" || !objects[target.objectIndex]) {
     const last = objects[objects.length - 1];
@@ -1985,6 +2369,9 @@ function drawEditorToolbar() {
   const checkpointLabel = selectedCheckpointLabel(preset);
   const roadWidth = selectedRoadWidthLabel(preset);
   const smoothingText = centerlineSmoothingLabel(preset.track.centerlineSmoothingMode);
+  const terrainSizeText = `${Math.round(Number(preset.track.terrainBrushSize) || 72)}`;
+  const terrainStrengthText = `${(Number(preset.track.terrainBrushStrength) || 1).toFixed(1)}x`;
+  const terrainHardnessText = `${Math.round((Number(preset.track.terrainBrushHardness) || 0.62) * 100)}%`;
   const zoomText = `${Math.round(getTrackWorldScale(preset.track) * 100)}%`;
   const activeToolLabel = state.editor.panMode
     ? "PAN"
@@ -1992,13 +2379,15 @@ function drawEditorToolbar() {
       ? state.editor.roadMode === "checkpoint"
         ? "CHECKPOINT"
         : "ROAD"
-      : state.editor.activeTool === "asset"
-        ? getAssetPlaceable(state.editor.selectedAssetKind).label.toUpperCase()
-        : state.editor.activeTool === "pond"
-          ? "WATER"
-          : state.editor.activeTool === "oil"
-            ? "OIL"
-            : state.editor.activeTool.toUpperCase();
+      : state.editor.activeTool === "terrain"
+        ? "TERRAIN"
+        : state.editor.activeTool === "asset"
+          ? getAssetPlaceable(state.editor.selectedAssetKind).label.toUpperCase()
+          : state.editor.activeTool === "pond"
+            ? "WATER"
+            : state.editor.activeTool === "oil"
+              ? "OIL"
+              : state.editor.activeTool.toUpperCase();
   const toolbarHeaderLabel = state.editor.toolbar.hoverLabel || activeToolLabel;
 
   ctx.save();
@@ -2051,11 +2440,14 @@ function drawEditorToolbar() {
 
   for (const row of layout.objectToolButtons) {
     const active =
+      (row.id === "terrain" && state.editor.activeTool === "terrain") ||
       (row.id === "water" && state.editor.activeTool === "pond") ||
       (row.id === "oil" && state.editor.activeTool === "oil") ||
       (row.id === "barrel" && state.editor.activeTool === "barrel") ||
       (row.id === "tree" && state.editor.activeTool === "tree") ||
       (row.id === "spring" && state.editor.activeTool === "spring") ||
+      (row.id === "ramp" && state.editor.activeTool === "ramp") ||
+      (row.id === "bridgeDeck" && state.editor.activeTool === "bridgeDeck") ||
       (row.id === "wall" && state.editor.activeTool === "wall") ||
       (row.id === "assets" &&
         (state.editor.activeTool === "asset" || state.editor.assetPaletteOpen));
@@ -2203,6 +2595,45 @@ function drawEditorToolbar() {
     smoothingText,
     layout.roadSmoothValue.x + layout.roadSmoothValue.width * 0.5,
     layout.roadSmoothValue.y + 17,
+  );
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Terrain", layout.terrainSizeLabel.x, layout.terrainSizeLabel.y + 18);
+  drawToolbarButton(layout.terrainSizeDown, "‹");
+  drawToolbarButton(layout.terrainSizeUp, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    terrainSizeText,
+    layout.terrainSizeValue.x + layout.terrainSizeValue.width * 0.5,
+    layout.terrainSizeValue.y + 17,
+  );
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Power", layout.terrainStrengthLabel.x, layout.terrainStrengthLabel.y + 18);
+  drawToolbarButton(layout.terrainStrengthDown, "‹");
+  drawToolbarButton(layout.terrainStrengthUp, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    terrainStrengthText,
+    layout.terrainStrengthValue.x + layout.terrainStrengthValue.width * 0.5,
+    layout.terrainStrengthValue.y + 17,
+  );
+
+  ctx.fillStyle = "#f0f8ff";
+  ctx.textAlign = "left";
+  ctx.fillText("Hard", layout.terrainHardnessLabel.x, layout.terrainHardnessLabel.y + 18);
+  drawToolbarButton(layout.terrainHardnessDown, "‹");
+  drawToolbarButton(layout.terrainHardnessUp, "›");
+  ctx.fillStyle = "#d7ebf7";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    terrainHardnessText,
+    layout.terrainHardnessValue.x + layout.terrainHardnessValue.width * 0.5,
+    layout.terrainHardnessValue.y + 17,
   );
 
   ctx.fillStyle = "#f0f8ff";
@@ -3259,6 +3690,18 @@ function drawEditorOverlay() {
 
   const cx = state.editor.cursorX;
   const cy = state.editor.cursorY;
+  if (state.editor.activeTool === "terrain") {
+    const radius = Math.max(24, Number(preset.track?.terrainBrushSize) || 72);
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 225, 103, 0.95)";
+    ctx.fillStyle = "rgba(255, 225, 103, 0.08)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle =
     state.editor.roadMode === "checkpoint"
@@ -3287,6 +3730,7 @@ function drawEditor() {
   drawPixelNoise();
   ctx.save();
   applyWorldTransform(track, getEditorCameraState(track));
+  drawTerrainHeightOverlay(track, { surface: "world", editor: true });
   drawTrack();
   drawEditorOverlay();
   ctx.restore();
@@ -3519,10 +3963,11 @@ export function render() {
     state.raceCamera.viewOffsetX = raceCamera.viewOffsetX;
     state.raceCamera.viewOffsetY = raceCamera.viewOffsetY;
     applyWorldTransform(track, raceCamera);
-    drawTrack();
+    drawTerrainHeightOverlay(track, { surface: "world", editor: false });
+    drawTrack({ includeBridgeDecks: false });
     drawParticles(ctx, { layer: "belowCar" });
     drawAmbientAnimals();
-    drawCar();
+    drawRaceScene();
     drawParticles(ctx, { layer: "aboveCar" });
     ctx.restore();
     drawDebugVectors();

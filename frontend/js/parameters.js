@@ -28,6 +28,8 @@ const OBJECT_DEFAULTS = {
   barrel: { height: 1, r: 12, angle: 0 },
   spring: { height: 0.4, r: 16, angle: 0 },
   wall: { height: 1, width: 18, length: 90, angle: 0 },
+  ramp: { height: 2.4, baseHeight: 0, width: 56, length: 160, angle: 0, thickness: 10 },
+  bridgeDeck: { height: 2.4, width: 68, length: 180, angle: 0, thickness: 16 },
   pond: { angle: 0 },
   oil: { angle: 0 },
   animal: { kind: "rooster", r: 24, angle: 0 },
@@ -279,6 +281,10 @@ export function getSettingsItems(authenticated) {
 const TRACK_EDITS_STORAGE_KEY = "carun.trackEdits.v1";
 export const CENTERLINE_SMOOTHING_MODES = ["raw", "light", "smooth"];
 export const DEFAULT_CENTERLINE_SMOOTHING_MODE = "light";
+const DEFAULT_TERRAIN_CELL_SIZE = 56;
+const DEFAULT_TERRAIN_BRUSH_SIZE = 72;
+const DEFAULT_TERRAIN_BRUSH_STRENGTH = 1;
+const DEFAULT_TERRAIN_BRUSH_HARDNESS = 0.62;
 const TRACK_PRESETS = [
   {
     id: "bootstrap",
@@ -302,6 +308,15 @@ const TRACK_PRESETS = [
       worldScale: 1,
       centerlineSmoothingMode: DEFAULT_CENTERLINE_SMOOTHING_MODE,
       startAngle: 0,
+      terrainCellSize: DEFAULT_TERRAIN_CELL_SIZE,
+      terrainCols: 0,
+      terrainRows: 0,
+      terrainOriginX: 0,
+      terrainOriginY: 0,
+      terrainHeights: [],
+      terrainBrushSize: DEFAULT_TERRAIN_BRUSH_SIZE,
+      terrainBrushStrength: DEFAULT_TERRAIN_BRUSH_STRENGTH,
+      terrainBrushHardness: DEFAULT_TERRAIN_BRUSH_HARDNESS,
     },
     checkpoints: [
       { angle: 0 },
@@ -368,7 +383,32 @@ function cloneWorldObject(obj) {
     return base;
   }
 
+  if (type === "ramp") {
+    base.width = Number.isFinite(obj?.width) ? Number(obj.width) : defaults.width;
+    base.length = Number.isFinite(obj?.length) ? Number(obj.length) : defaults.length;
+    base.height = Number.isFinite(obj?.height) ? Number(obj.height) : defaults.height;
+    base.baseHeight = Number.isFinite(obj?.baseHeight)
+      ? Number(obj.baseHeight)
+      : defaults.baseHeight;
+    base.thickness = Number.isFinite(obj?.thickness) ? Number(obj.thickness) : defaults.thickness;
+    return base;
+  }
+
+  if (type === "bridgeDeck") {
+    base.width = Number.isFinite(obj?.width) ? Number(obj.width) : defaults.width;
+    base.length = Number.isFinite(obj?.length) ? Number(obj.length) : defaults.length;
+    base.height = Number.isFinite(obj?.height) ? Number(obj.height) : defaults.height;
+    base.thickness = Number.isFinite(obj?.thickness) ? Number(obj.thickness) : defaults.thickness;
+    return base;
+  }
+
   return base;
+}
+
+function cloneTerrainHeights(trackData) {
+  return Array.isArray(trackData?.terrainHeights)
+    ? trackData.terrainHeights.map((value) => (Number.isFinite(value) ? Number(value) : 0))
+    : [];
 }
 
 function cloneTrackData(trackData) {
@@ -388,6 +428,31 @@ function cloneTrackData(trackData) {
       ? Number(trackData.editorViewOffsetY)
       : 0,
     centerlineSmoothingMode: normalizeCenterlineSmoothingMode(trackData.centerlineSmoothingMode),
+    terrainCellSize: Number.isFinite(trackData.terrainCellSize)
+      ? Number(trackData.terrainCellSize)
+      : DEFAULT_TERRAIN_CELL_SIZE,
+    terrainCols: Number.isFinite(trackData.terrainCols)
+      ? Math.max(0, Math.round(trackData.terrainCols))
+      : 0,
+    terrainRows: Number.isFinite(trackData.terrainRows)
+      ? Math.max(0, Math.round(trackData.terrainRows))
+      : 0,
+    terrainOriginX: Number.isFinite(trackData.terrainOriginX)
+      ? Number(trackData.terrainOriginX)
+      : 0,
+    terrainOriginY: Number.isFinite(trackData.terrainOriginY)
+      ? Number(trackData.terrainOriginY)
+      : 0,
+    terrainHeights: cloneTerrainHeights(trackData),
+    terrainBrushSize: Number.isFinite(trackData.terrainBrushSize)
+      ? Number(trackData.terrainBrushSize)
+      : DEFAULT_TERRAIN_BRUSH_SIZE,
+    terrainBrushStrength: Number.isFinite(trackData.terrainBrushStrength)
+      ? Number(trackData.terrainBrushStrength)
+      : DEFAULT_TERRAIN_BRUSH_STRENGTH,
+    terrainBrushHardness: Number.isFinite(trackData.terrainBrushHardness)
+      ? Number(trackData.terrainBrushHardness)
+      : DEFAULT_TERRAIN_BRUSH_HARDNESS,
   };
 }
 
@@ -1520,16 +1585,33 @@ export const physicsConfig = {
     maxJumpHeight: 4,
     bounceRestitution: 0.22,
     minBounceVz: 1.4,
-    visualScalePerMeter: 0.06,
-    liftPxPerMeter: 7.5,
+    visualScalePerMeter: 0.0616,
+    liftPxPerMeter: 9.5,
+  },
+  slopes: {
+    gravityAccel: 720,
+    uphillEnginePenalty: 0.96,
+    downhillEngineBoost: 0.34,
+    uphillTopSpeedPenalty: 0.38,
+    downhillTopSpeedBoost: 0.24,
+    lateralGripPenalty: 0.28,
+    detachDropHeight: 0.4,
+    maxStepUp: 0.48,
+    landingSnapHeight: 0.2,
   },
   objects: {
     treeHeight: 3,
     barrelHeight: 1,
     springHeight: 0.4,
     wallHeight: 2.5,
+    rampHeight: 2.4,
+    bridgeDeckHeight: 2.4,
     wallThicknessDefault: 18,
     springRadiusDefault: 16,
+    rampLengthDefault: 160,
+    rampWidthDefault: 56,
+    bridgeDeckLengthDefault: 180,
+    bridgeDeckWidthDefault: 68,
   },
   carToCar: {
     bodyLengthMul: 1.32,

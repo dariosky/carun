@@ -1,5 +1,6 @@
 import {
   CHECKPOINT_WIDTH_MULTIPLIER,
+  HEIGHT,
   applyTrackPreset,
   getCarColorHex,
   physicsConfig,
@@ -8,6 +9,7 @@ import {
   setTrackPresetMetadata,
   track,
   trackOptions,
+  WIDTH,
 } from "./parameters.js";
 import { submitLapResult, submitRaceResult } from "./api.js";
 import {
@@ -39,7 +41,10 @@ import {
   checkpointProgress,
   findSpringTrigger,
   findNearestTrackNavNode,
+  getRaceWorldScale,
+  getSupportInfoAt,
   getTrackNavigationGraph,
+  getTrackWorldScale,
   resolveObjectCollisions,
   surfaceAt,
   trackFrameAtProgress,
@@ -56,6 +61,7 @@ let aiCar = aiCars[0];
 let aiLapData = aiLapDataList[0];
 let aiPhysicsRuntime = aiPhysicsRuntimes[0];
 let aiOpponentIndex = 0;
+const RACE_TOP_BAR_HEIGHT = 56;
 
 function selectAiOpponent(index) {
   aiOpponentIndex = index;
@@ -150,11 +156,33 @@ function smoothInputValue(current, target, dt) {
 }
 
 function vehicleIsFlying(vehicle = car) {
-  return Boolean(vehicle?.airborne) || Number(vehicle?.z) > 0.001;
+  return Boolean(vehicle?.airborne) || Number(vehicle?.z) > Number(vehicle?.supportZ || 0) + 0.001;
+}
+
+function computeVehicleVisualScale(height = 0) {
+  const airCfg = physicsConfig.air;
+  return Math.min(1.5, 1 + Math.max(Number(height) || 0, 0) * airCfg.visualScalePerMeter);
 }
 
 function getVehicleSurfaceAt(vehicle = car, groundSurfaceName = surfaceAt(vehicle.x, vehicle.y)) {
   return vehicleIsFlying(vehicle) ? "flying" : groundSurfaceName;
+}
+
+function getVehicleSupport(vehicle = car) {
+  return getSupportInfoAt(vehicle.x, vehicle.y, Number(vehicle?.z) || 0);
+}
+
+function syncVehicleSupportHeight(
+  vehicle = car,
+  runtime = physicsRuntime,
+  support = getVehicleSupport(vehicle),
+) {
+  vehicle.supportZ = support.height;
+  if (!vehicle.airborne) vehicle.z = support.height;
+  vehicle.renderZ = support.visualHeight;
+  runtime.debug.supportZ = support.height;
+  runtime.debug.renderZ = support.visualHeight;
+  return support;
 }
 
 function isPenaltySurface(surfaceName) {
@@ -964,6 +992,8 @@ function applyAiSoftReset(graph) {
   aiCar.vy = Math.sin(aiCar.angle) * aiCfg.softResetForwardSpeed;
   aiCar.speed = aiCfg.softResetForwardSpeed;
   aiCar.z = 0;
+  aiCar.supportZ = 0;
+  aiCar.renderZ = 0;
   aiCar.vz = 0;
   aiCar.airborne = false;
   aiCar.airTime = 0;
@@ -992,6 +1022,7 @@ function applyAiSoftReset(graph) {
   aiPhysicsRuntime.steeringRate = 0;
   aiPhysicsRuntime.collisionGripTimer = 0;
   aiPhysicsRuntime.replanCooldown = 0;
+  syncVehicleSupportHeight(aiCar, aiPhysicsRuntime);
 }
 
 function setAiInputTargets(dt, { throttle = 0, brake = 0, steer = 0, handbrake = 0 }) {
@@ -1803,6 +1834,96 @@ function getVehicleCollisionSupportPoint(shape, dirX, dirY) {
   };
 }
 
+function getRaceViewportState(trackDef = track, cameraVehicle = car) {
+  const authoringScale = getTrackWorldScale(trackDef);
+  const worldScale = getRaceWorldScale(trackDef);
+  if (authoringScale >= 0.5) {
+    return {
+      worldScale,
+      viewOffsetX: Number.isFinite(trackDef.editorViewOffsetX)
+        ? Number(trackDef.editorViewOffsetX)
+        : state.editor.viewOffsetX,
+      viewOffsetY: Number.isFinite(trackDef.editorViewOffsetY)
+        ? Number(trackDef.editorViewOffsetY)
+        : state.editor.viewOffsetY,
+    };
+  }
+
+  const viewportCenterX = WIDTH * 0.5;
+  const viewportCenterY = (HEIGHT - RACE_TOP_BAR_HEIGHT) * 0.5;
+  return {
+    worldScale,
+    viewOffsetX: viewportCenterX - (trackDef.cx + (cameraVehicle.x - trackDef.cx) * worldScale),
+    viewOffsetY: viewportCenterY - (trackDef.cy + (cameraVehicle.y - trackDef.cy) * worldScale),
+  };
+}
+
+function getRaceViewportWorldBounds(trackDef = track, cameraVehicle = car) {
+  const camera = getRaceViewportState(trackDef, cameraVehicle);
+  const worldScale = Math.max(camera.worldScale, 1e-6);
+  const minX = trackDef.cx + (0 - camera.viewOffsetX - trackDef.cx) / worldScale;
+  const maxX = trackDef.cx + (WIDTH - camera.viewOffsetX - trackDef.cx) / worldScale;
+  const minY = trackDef.cy + (0 - camera.viewOffsetY - trackDef.cy) / worldScale;
+  const maxY = trackDef.cy + (HEIGHT - camera.viewOffsetY - trackDef.cy) / worldScale;
+  return {
+    minX: Math.min(minX, maxX),
+    maxX: Math.max(minX, maxX),
+    minY: Math.min(minY, maxY),
+    maxY: Math.max(minY, maxY),
+  };
+}
+
+function resolveVehicleScreenBoundaryCollision(
+  vehicle,
+  { trackDef = track, cameraVehicle = car } = {},
+) {
+  const bounds = getRaceViewportWorldBounds(trackDef, cameraVehicle);
+  const shape = getVehicleCollisionShape(vehicle);
+  const xProjection = projectVehicleCollisionShape(shape, 1, 0);
+  const yProjection = projectVehicleCollisionShape(shape, 0, 1);
+  let correctionX = 0;
+  let correctionY = 0;
+
+  if (xProjection.min < bounds.minX) {
+    correctionX = bounds.minX - xProjection.min;
+  } else if (xProjection.max > bounds.maxX) {
+    correctionX = bounds.maxX - xProjection.max;
+  }
+  if (yProjection.min < bounds.minY) {
+    correctionY = bounds.minY - yProjection.min;
+  } else if (yProjection.max > bounds.maxY) {
+    correctionY = bounds.maxY - yProjection.max;
+  }
+  if (correctionX === 0 && correctionY === 0) {
+    return { hit: false, x: vehicle.x, y: vehicle.y, normalX: 0, normalY: 0, hitType: null };
+  }
+
+  vehicle.x += correctionX;
+  vehicle.y += correctionY;
+
+  if (correctionX !== 0) {
+    const normalX = Math.sign(correctionX);
+    const inwardSpeed = vehicle.vx * normalX;
+    if (inwardSpeed < 0) vehicle.vx -= inwardSpeed * normalX;
+  }
+  if (correctionY !== 0) {
+    const normalY = Math.sign(correctionY);
+    const inwardSpeed = vehicle.vy * normalY;
+    if (inwardSpeed < 0) vehicle.vy -= inwardSpeed * normalY;
+  }
+  vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
+
+  const normalLength = Math.hypot(correctionX, correctionY) || 1;
+  return {
+    hit: true,
+    x: vehicle.x,
+    y: vehicle.y,
+    normalX: correctionX / normalLength,
+    normalY: correctionY / normalLength,
+    hitType: "screen-edge",
+  };
+}
+
 function cross2d(ax, ay, bx, by) {
   return ax * by - ay * bx;
 }
@@ -2305,7 +2426,11 @@ function updateVehicleAudioState({
     ? 0
     : clamp(Math.abs(headingLateralSpeed) / 110, 0, 1) *
       clamp(Math.abs(headingForwardSpeed) / 45, 0, 1);
-  const airborneAmount = clamp(car.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1);
+  const airborneAmount = clamp(
+    Math.max(0, car.z - (car.supportZ || 0)) / Math.max(airCfg.maxJumpHeight, 1),
+    0,
+    1,
+  );
   const wheelSpinAmount = car.airborne
     ? clamp(
         physicsRuntime.input.throttle * 0.8 +
@@ -2357,7 +2482,11 @@ function updateAiVehicleAudioState({
     surface: surfaceName,
     isMoving: aiCar.speed > 4,
     airborne: aiCar.airborne,
-    airborneAmount: clamp(aiCar.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1),
+    airborneAmount: clamp(
+      Math.max(0, aiCar.z - (aiCar.supportZ || 0)) / Math.max(airCfg.maxJumpHeight, 1),
+      0,
+      1,
+    ),
     wheelSpinAmount,
   });
 }
@@ -2371,11 +2500,14 @@ function springLaunchApexHeight(speed) {
 function launchVehicleFromSpring(vehicle = car, runtime = physicsRuntime, speed = vehicle.speed) {
   const airCfg = physicsConfig.air;
   const apexHeight = springLaunchApexHeight(speed);
+  const support = getVehicleSupport(vehicle);
+  vehicle.supportZ = support.height;
+  vehicle.renderZ = support.visualHeight;
   vehicle.airborne = true;
   vehicle.airTime = 0;
-  vehicle.z = Math.max(vehicle.z || 0, 0.02);
+  vehicle.z = Math.max(vehicle.z || support.height, support.height + 0.02);
   vehicle.vz = Math.sqrt(2 * airCfg.gravity * apexHeight);
-  vehicle.visualScale = 1 + vehicle.z * airCfg.visualScalePerMeter;
+  vehicle.visualScale = computeVehicleVisualScale(vehicle.z);
   runtime.landingBouncePending = true;
   runtime.lastGroundedSpeed = vehicle.speed;
   runtime.wheelLastPoints = null;
@@ -2392,12 +2524,15 @@ function launchAiFromSpring() {
 function resolveVehicleLanding(
   vehicle = car,
   runtime = physicsRuntime,
-  surfaceName,
+  support,
   { playLandingAudio = false } = {},
 ) {
   const airCfg = physicsConfig.air;
-  if (vehicle.z > 0) return;
-  vehicle.z = 0;
+  if (vehicle.z > support.height) return;
+  vehicle.z = support.height;
+  vehicle.supportZ = support.height;
+  vehicle.renderZ = support.visualHeight;
+  const surfaceName = support.surface;
   const landingImpact = clamp(Math.abs(vehicle.vz) / 8, 0, 1);
   if (landingImpact > 0.08) emitLandingMarks(surfaceName, landingImpact, vehicle);
   if (vehicle.vz < -airCfg.minBounceVz && runtime.landingBouncePending) {
@@ -2412,7 +2547,7 @@ function resolveVehicleLanding(
   vehicle.vz = 0;
   vehicle.airborne = false;
   vehicle.airTime = 0;
-  vehicle.visualScale = 1;
+  vehicle.visualScale = computeVehicleVisualScale(support.height);
   runtime.landingBouncePending = false;
   runtime.landingCooldown = 0.1;
   runtime.lastGroundedSpeed = vehicle.speed;
@@ -2424,7 +2559,7 @@ function resolveVehicleLanding(
 }
 
 function resolveLanding(surfaceName) {
-  resolveVehicleLanding(car, physicsRuntime, surfaceName, {
+  resolveVehicleLanding(car, physicsRuntime, getVehicleSupport(car), {
     playLandingAudio: true,
   });
 }
@@ -2451,10 +2586,12 @@ function integrateVehicleAirborne(
 
   vehicle.vx = headingX * forwardSpeed;
   vehicle.vy = headingY * forwardSpeed;
-  const collision = resolveObjectCollisions(
+  let collision = resolveObjectCollisions(
     vehicle.x + vehicle.vx * dt,
     vehicle.y + vehicle.vy * dt,
     vehicle.z,
+    undefined,
+    { previous: { x: vehicle.x, y: vehicle.y } },
   );
   vehicle.x = collision.x;
   vehicle.y = collision.y;
@@ -2465,23 +2602,30 @@ function integrateVehicleAirborne(
       vehicle.vy -= inwardSpeed * collision.normalY;
     }
   }
+  const screenCollision = resolveVehicleScreenBoundaryCollision(vehicle);
+  if (screenCollision.hit && !collision.hit) collision = screenCollision;
 
   vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
   vehicle.vz -= airCfg.gravity * dt;
   vehicle.z += vehicle.vz * dt;
   vehicle.airTime += dt;
-  vehicle.visualScale = Math.min(1.32, 1 + Math.max(vehicle.z, 0) * airCfg.visualScalePerMeter);
+  vehicle.visualScale = computeVehicleVisualScale(vehicle.z);
+  const support = getVehicleSupport(vehicle);
+  vehicle.supportZ = support.height;
+  vehicle.renderZ = support.visualHeight;
   runtime.debug.vForward = forwardSpeed;
   runtime.debug.vLateral = 0;
   runtime.debug.z = vehicle.z;
+  runtime.debug.supportZ = vehicle.supportZ;
+  runtime.debug.renderZ = vehicle.renderZ;
   runtime.debug.vz = vehicle.vz;
   runtime.debug.pivotX = vehicle.x;
   runtime.debug.pivotY = vehicle.y;
 
-  resolveVehicleLanding(vehicle, runtime, surfaceName, {
+  resolveVehicleLanding(vehicle, runtime, support, {
     playLandingAudio,
   });
-  const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, surfaceName);
+  const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, support.surface || surfaceName);
   runtime.debug.surface = effectiveSurfaceName;
 
   const prevForward = runtime.prevForwardSpeed;
@@ -2534,6 +2678,7 @@ function integrateVehicleGround(
   const assistCfg = physicsConfig.assists;
   const driftCfg = physicsConfig.drift;
   const handbrakeCfg = physicsConfig.handbrake;
+  const slopeCfg = physicsConfig.slopes;
   const flags = physicsConfig.flags;
   const constants = physicsConfig.constants;
   updateOilCarry(runtime, groundSurfaceName, dt);
@@ -2555,17 +2700,37 @@ function integrateVehicleGround(
   runtime.surface.coastDecelMul +=
     (targetSurface.coastDecelMul - runtime.surface.coastDecelMul) * blendAlpha;
 
+  const currentSupport = getVehicleSupport(vehicle);
+  vehicle.supportZ = currentSupport.height;
+  vehicle.renderZ = currentSupport.visualHeight;
+  vehicle.z = currentSupport.height;
+  vehicle.visualScale = computeVehicleVisualScale(vehicle.z);
   const forwardX = Math.cos(vehicle.angle);
   const forwardY = Math.sin(vehicle.angle);
   const rightX = -forwardY;
   const rightY = forwardX;
+  const supportGradient = currentSupport.gradient || { x: 0, y: 0 };
+  const forwardSlope = supportGradient.x * forwardX + supportGradient.y * forwardY;
+  const sideSlope = supportGradient.x * rightX + supportGradient.y * rightY;
+  const uphillBlend = clamp(forwardSlope * 16, 0, 1);
+  const downhillBlend = clamp(-forwardSlope * 16, 0, 1);
+  const sideSlopeBlend = clamp(Math.abs(sideSlope) * 14, 0, 1);
   const previousVx = vehicle.vx;
   const previousVy = vehicle.vy;
   let forwardSpeed = vehicle.vx * forwardX + vehicle.vy * forwardY;
   let lateralSpeed = vehicle.vx * rightX + vehicle.vy * rightY;
 
   if (runtime.input.throttle > 0.01) {
-    forwardSpeed += carCfg.engineAccel * runtime.surface.engineMul * runtime.input.throttle * dt;
+    const engineSlopeMul =
+      1 -
+      uphillBlend * (slopeCfg.uphillEnginePenalty || 0.62) +
+      downhillBlend * (slopeCfg.downhillEngineBoost || 0.1);
+    forwardSpeed +=
+      carCfg.engineAccel *
+      runtime.surface.engineMul *
+      Math.max(0.08, engineSlopeMul) *
+      runtime.input.throttle *
+      dt;
   }
   if (runtime.input.brake > 0.01) {
     forwardSpeed -= carCfg.brakeDecel * runtime.input.brake * dt;
@@ -2592,9 +2757,14 @@ function integrateVehicleGround(
   if (runtime.animalImpactTime > 0 && runtime.animalImpactDecel > 0) {
     forwardSpeed = moveTowards(forwardSpeed, 0, runtime.animalImpactDecel * dt);
   }
+  forwardSpeed -= (slopeCfg.gravityAccel || 260) * forwardSlope * dt;
   forwardSpeed *= Math.exp(-carCfg.longDrag * runtime.surface.longDragMul * dt);
 
-  const maxForwardSpeed = carCfg.maxSpeed;
+  const maxForwardSpeed =
+    carCfg.maxSpeed *
+    (1 -
+      uphillBlend * (slopeCfg.uphillTopSpeedPenalty || 0.18) +
+      downhillBlend * (slopeCfg.downhillTopSpeedBoost || 0.08));
   const maxReverseSpeed = -carCfg.maxSpeed * carCfg.reverseMaxSpeedMul;
   forwardSpeed = clamp(forwardSpeed, maxReverseSpeed, maxForwardSpeed);
 
@@ -2774,6 +2944,9 @@ function integrateVehicleGround(
       effectiveRearGrip *= 0.7;
       runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
     }
+    const sideSlopeGripMul = 1 - sideSlopeBlend * (slopeCfg.lateralGripPenalty || 0.22);
+    effectiveFrontGrip *= Math.max(0.65, sideSlopeGripMul);
+    effectiveRearGrip *= Math.max(0.58, sideSlopeGripMul);
     if (runtime.impactCooldown > 0) {
       runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
     }
@@ -2884,6 +3057,10 @@ function integrateVehicleGround(
       effectiveLateralGrip *= 0.7;
       runtime.collisionGripTimer = Math.max(0, runtime.collisionGripTimer - dt);
     }
+    effectiveLateralGrip *= Math.max(
+      0.62,
+      1 - sideSlopeBlend * (slopeCfg.lateralGripPenalty || 0.22),
+    );
     if (runtime.impactCooldown > 0) {
       runtime.impactCooldown = Math.max(0, runtime.impactCooldown - dt);
     }
@@ -2915,6 +3092,8 @@ function integrateVehicleGround(
     vehicle.x + vehicle.vx * dt + pivotShiftX,
     vehicle.y + vehicle.vy * dt + pivotShiftY,
     vehicle.z || 0,
+    undefined,
+    { previous: { x: vehicle.x, y: vehicle.y } },
   );
   vehicle.x = collision.x;
   vehicle.y = collision.y;
@@ -2942,6 +3121,16 @@ function integrateVehicleGround(
       vehicle.vy *= 0.55;
     }
   }
+  const screenCollision = resolveVehicleScreenBoundaryCollision(vehicle);
+  if (screenCollision.hit) {
+    if (!collision.hit) collision.hit = true;
+    collision.x = vehicle.x;
+    collision.y = vehicle.y;
+    collision.normalX = screenCollision.normalX;
+    collision.normalY = screenCollision.normalY;
+    collision.hitType = collision.hitType || screenCollision.hitType;
+    runtime.collisionGripTimer = Math.max(runtime.collisionGripTimer, 0.04);
+  }
 
   const headingRightX = -headingForwardY;
   const headingRightY = headingForwardX;
@@ -2961,6 +3150,21 @@ function integrateVehicleGround(
   }
 
   vehicle.speed = Math.hypot(vehicle.vx, vehicle.vy);
+  const nextSupport = getSupportInfoAt(vehicle.x, vehicle.y, currentSupport.height);
+  const dropHeight = currentSupport.height - nextSupport.height;
+  const shouldDetach =
+    dropHeight > (slopeCfg.detachDropHeight || 0.4) && nextSupport.kind !== "ramp";
+  if (shouldDetach) {
+    vehicle.airborne = true;
+    vehicle.z = currentSupport.height;
+    vehicle.supportZ = nextSupport.height;
+    vehicle.renderZ = nextSupport.visualHeight;
+    vehicle.vz = Math.min(vehicle.vz, 0);
+  } else {
+    vehicle.airborne = false;
+    vehicle.vz = 0;
+    syncVehicleSupportHeight(vehicle, runtime, nextSupport);
+  }
   runtime.lastGroundedSpeed = vehicle.speed;
   const headingForwardSpeed = vehicle.vx * headingForwardX + vehicle.vy * headingForwardY;
   const headingLateralSpeed = vehicle.vx * headingRightX + vehicle.vy * headingRightY;
@@ -2970,6 +3174,8 @@ function integrateVehicleGround(
   runtime.debug.pivotX = vehicle.x + headingForwardX * pivotOffset;
   runtime.debug.pivotY = vehicle.y + headingForwardY * pivotOffset;
   runtime.debug.z = vehicle.z;
+  runtime.debug.supportZ = vehicle.supportZ;
+  runtime.debug.renderZ = vehicle.renderZ;
   runtime.debug.vz = vehicle.vz;
   runtime.debug.rearSlip = rearSlipTarget;
   runtime.debug.yawAssist = yawAssist;
@@ -2984,7 +3190,7 @@ function integrateVehicleGround(
   if (spring && !vehicleIsFlying(vehicle)) {
     launchVehicleFromSpring(vehicle, runtime);
   }
-  const skidSurface = surfaceAt(vehicle.x, vehicle.y);
+  const skidSurface = nextSupport.surface || surfaceAt(vehicle.x, vehicle.y);
   const effectiveSurfaceName = getVehicleSurfaceAt(vehicle, skidSurface);
   runtime.debug.surface = effectiveSurfaceName;
   const wheelPoints = wheelWorldPoints(vehicle);
@@ -3023,6 +3229,8 @@ function resetAiOpponentForRace(index, gridSlot, startCheckpoint) {
     aiCar.angle = gridSlot.angle;
     aiCar.speed = 0;
     aiCar.z = 0;
+    aiCar.supportZ = 0;
+    aiCar.renderZ = 0;
     aiCar.vz = 0;
     aiCar.airborne = false;
     aiCar.airTime = 0;
@@ -3084,6 +3292,8 @@ function resetAiOpponentForRace(index, gridSlot, startCheckpoint) {
       pivotX: aiCar.x,
       pivotY: aiCar.y,
       z: 0,
+      supportZ: 0,
+      renderZ: 0,
       vz: 0,
     };
     aiPhysicsRuntime.surface = {
@@ -3097,6 +3307,7 @@ function resetAiOpponentForRace(index, gridSlot, startCheckpoint) {
     aiPhysicsRuntime.particleEmitters.smokeCooldown = 0;
     aiPhysicsRuntime.particleEmitters.splashCooldown = 0;
     aiPhysicsRuntime.particleEmitters.dustCooldown = 0;
+    syncVehicleSupportHeight(aiCar, aiPhysicsRuntime);
     if (!profile.externalControl && profile.kind === "ai") {
       primeAiRaceStartPlan();
     }
@@ -3120,6 +3331,8 @@ export function resetRace() {
   car.angle = playerGridSlot.angle;
   car.speed = 0;
   car.z = 0;
+  car.supportZ = 0;
+  car.renderZ = 0;
   car.vz = 0;
   car.airborne = false;
   car.airTime = 0;
@@ -3140,6 +3353,7 @@ export function resetRace() {
   state.startSequence.elapsed = 0;
   state.startSequence.goTime = 3 + Math.random() * 2;
   state.startSequence.goFlash = 0;
+  state.startSequence.labelFadeTime = 0;
   state.startSequence.lastCountdownStep = 0;
   state.checkpointBlink.time = 0;
   state.raceSubmission.inFlight = false;
@@ -3176,12 +3390,15 @@ export function resetRace() {
   physicsRuntime.debug.rearSlip = 0;
   physicsRuntime.debug.yawAssist = 0;
   physicsRuntime.debug.z = 0;
+  physicsRuntime.debug.supportZ = 0;
+  physicsRuntime.debug.renderZ = 0;
   physicsRuntime.debug.vz = 0;
   physicsRuntime.wheelLastPoints = null;
   physicsRuntime.prevForwardSpeed = null;
   physicsRuntime.particleEmitters.smokeCooldown = 0;
   physicsRuntime.particleEmitters.splashCooldown = 0;
   physicsRuntime.particleEmitters.dustCooldown = 0;
+  syncVehicleSupportHeight(car, physicsRuntime);
   forEachAiOpponent((_, __, ___, index) => {
     resetAiOpponentForRace(
       index,
@@ -3255,6 +3472,8 @@ function resolveRaceFieldCollisions() {
       }
       field[i].runtime.collisionGripTimer = Math.max(field[i].runtime.collisionGripTimer, 0.06);
       field[j].runtime.collisionGripTimer = Math.max(field[j].runtime.collisionGripTimer, 0.06);
+      resolveVehicleScreenBoundaryCollision(field[i].vehicle);
+      resolveVehicleScreenBoundaryCollision(field[j].vehicle);
     }
   }
 }
@@ -3396,10 +3615,14 @@ export function applyExternalRivalState(index, payload = {}) {
     aiCar.angle = Number.isFinite(payload.angle) ? Number(payload.angle) : aiCar.angle;
     aiCar.speed = Number.isFinite(payload.speed) ? Number(payload.speed) : aiCar.speed;
     aiCar.z = Number.isFinite(payload.z) ? Number(payload.z) : aiCar.z;
+    aiCar.supportZ = Number.isFinite(payload.supportZ) ? Number(payload.supportZ) : aiCar.supportZ;
+    aiCar.renderZ = Number.isFinite(payload.renderZ) ? Number(payload.renderZ) : aiCar.renderZ;
     aiCar.vz = Number.isFinite(payload.vz) ? Number(payload.vz) : aiCar.vz;
     aiCar.airborne = Boolean(payload.airborne);
     aiCar.airTime = Number.isFinite(payload.airTime) ? Number(payload.airTime) : 0;
     aiCar.visualScale = Number.isFinite(payload.visualScale) ? Number(payload.visualScale) : 1;
+    resolveVehicleScreenBoundaryCollision(aiCar);
+    aiCar.speed = Math.hypot(aiCar.vx, aiCar.vy);
     aiPhysicsRuntime.input = {
       ...aiPhysicsRuntime.input,
       ...(payload.input && typeof payload.input === "object" ? payload.input : {}),
@@ -3433,6 +3656,8 @@ export function getRivalPhysicsSnapshot(index) {
     angle: aiCar.angle,
     speed: aiCar.speed,
     z: aiCar.z,
+    supportZ: aiCar.supportZ,
+    renderZ: aiCar.renderZ,
     vz: aiCar.vz,
     airborne: aiCar.airborne,
     airTime: aiCar.airTime,
@@ -3464,8 +3689,11 @@ export function updateRace(dt) {
   if (state.startSequence.goFlash > 0) {
     state.startSequence.goFlash = Math.max(0, state.startSequence.goFlash - dt);
   }
+  if (state.startSequence.labelFadeTime > 0) {
+    state.startSequence.labelFadeTime = Math.max(0, state.startSequence.labelFadeTime - dt);
+  }
 
-  const groundSurfaceName = surfaceAt(car.x, car.y);
+  const groundSurfaceName = getVehicleSupport(car).surface;
   const surfaceName = getVehicleSurfaceAt(car, groundSurfaceName);
 
   if (state.startSequence.active) {
@@ -3480,6 +3708,7 @@ export function updateRace(dt) {
     if (state.startSequence.elapsed >= state.startSequence.goTime) {
       state.startSequence.active = false;
       state.startSequence.goFlash = 0.85;
+      state.startSequence.labelFadeTime = Math.max(0, state.startSequence.labelFadeDuration || 0);
       state.raceTime = 0;
       lapData.currentLapStart = 0;
       gameAudio.playGo();
@@ -3492,7 +3721,11 @@ export function updateRace(dt) {
       surface: surfaceName,
       isMoving: false,
       airborne: vehicleIsFlying(car),
-      airborneAmount: clamp(car.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1),
+      airborneAmount: clamp(
+        Math.max(0, car.z - (car.supportZ || 0)) / Math.max(airCfg.maxJumpHeight, 1),
+        0,
+        1,
+      ),
       wheelSpinAmount: 0,
     });
     for (let index = 0; index < aiCars.length; index++) {
