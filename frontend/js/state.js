@@ -142,6 +142,17 @@ export const state = {
     viewDragging: false,
     viewDragLastScreenX: 0,
     viewDragLastScreenY: 0,
+    dragSession: {
+      active: false,
+      kind: null,
+      objectIndex: -1,
+      strokeIndex: -1,
+      anchorIndex: -1,
+      pointerOffsetX: 0,
+      pointerOffsetY: 0,
+      lastRebuildAt: 0,
+      strokeSnapshot: null,
+    },
     latestEditTarget: null,
     selectionFlash: {
       kind: null,

@@ -42,6 +42,7 @@ import {
   getEditorTopBarLayout,
   getEditorToolbarLayout,
   getGameModeRenderModel,
+  getSelectedEditorRoadAnchors,
   getLoginProviderRenderModel,
   getMainMenuRenderModel,
   getSettingsHeaderRenderModel,
@@ -3172,6 +3173,7 @@ function drawEditorOverlay() {
   const preset = getTrackPreset(state.editor.trackIndex);
   const strokes = preset.centerlineStrokes || [];
   const checkpointsList = preset.checkpoints || [];
+  const roadAnchors = getSelectedEditorRoadAnchors();
   const connectedLoop = getConnectedCenterlinePoints(strokes);
   const smoothedLoop = Array.isArray(preset.track?.centerlineLoop)
     ? preset.track.centerlineLoop
@@ -3230,6 +3232,28 @@ function drawEditorOverlay() {
     ctx.textAlign = "center";
     ctx.fillText(`${index + 1}`, frame.point.x, frame.point.y - 8);
     ctx.restore();
+  }
+  if (
+    state.editor.activeTool === "road" &&
+    state.editor.roadMode === "segment" &&
+    roadAnchors.length
+  ) {
+    const draggedAnchorIndex =
+      state.editor.dragSession.active && state.editor.dragSession.kind === "roadAnchor"
+        ? state.editor.dragSession.anchorIndex
+        : -1;
+    for (const anchor of roadAnchors) {
+      const active = anchor.pointIndex === draggedAnchorIndex;
+      ctx.save();
+      ctx.fillStyle = active ? "#ffe167" : anchor.isEndpoint ? "#ffb347" : "#7ce7ff";
+      ctx.strokeStyle = active ? "#fff7d1" : "rgba(6, 14, 20, 0.9)";
+      ctx.lineWidth = active ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, active ? 8 : 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
   drawStroke(state.editor.activeStroke, "rgba(255, 255, 255, 0.95)", 3);
 

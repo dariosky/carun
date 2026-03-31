@@ -16,13 +16,26 @@ const {
 const { getRaceWorldScale, getTrackWorldScale } = await import("../js/track.js");
 const { getRaceCameraState } = await import("../js/render.js");
 const {
+  beginEditorCanvasInteraction,
+  deleteActiveEditorSelection,
+  endEditorCanvasInteraction,
   enterEditor,
+  getSelectedEditorRoadAnchors,
   getEditorToolbarLayout,
   panEditorViewBy,
   promptClearEditorTrackRecords,
   promptClearSelectedTrackRecords,
   updateEditorCursorFromScreen,
+  updateEditorCanvasInteraction,
 } = await import("../js/menus.js");
+
+function editorWorldToScreen(trackData, worldX, worldY, viewOffsetX = 0, viewOffsetY = 0) {
+  const worldScale = Number(trackData.worldScale) || 1;
+  return {
+    x: trackData.cx + (worldX - trackData.cx) * worldScale + viewOffsetX,
+    y: trackData.cy + (worldY - trackData.cy) * worldScale + viewOffsetY,
+  };
+}
 
 test("regenerateTrackFromCenterlineStrokes keeps width profile aligned to stroke order", () => {
   const imported = importTrackPresetData({
@@ -330,6 +343,109 @@ test("editor pan moves the viewport without mutating track geometry", () => {
   updateEditorCursorFromScreen(640, 360);
   assert.equal(state.editor.cursorX, 640 + (640 - 120 - preset.track.cx) / 0.1);
   assert.equal(state.editor.cursorY, 360 + (360 + 80 - preset.track.cy) / 0.1);
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("editor canvas click selects, drags, and deletes objects", () => {
+  const imported = importTrackPresetData({
+    id: "editor-object-direct-manipulation",
+    name: "EDITOR OBJECT DIRECT",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [
+      { type: "tree", x: 520, y: 310, r: 24, angle: 0, height: 3 },
+      { type: "barrel", x: 640, y: 360, r: 12, angle: 0, height: 1 },
+    ],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  const preset = getTrackPreset(trackIndex);
+  const start = editorWorldToScreen(preset.track, 520, 310);
+  updateEditorCursorFromScreen(start.x, start.y);
+  assert.equal(beginEditorCanvasInteraction(), true);
+  assert.deepEqual(state.editor.latestEditTarget, { kind: "object", objectIndex: 0 });
+  assert.equal(state.editor.dragSession.active, true);
+  assert.equal(state.editor.dragSession.kind, "object");
+
+  const moved = editorWorldToScreen(preset.track, 610, 390);
+  updateEditorCursorFromScreen(moved.x, moved.y);
+  assert.equal(updateEditorCanvasInteraction(), true);
+  assert.equal(preset.worldObjects[0].x, 610);
+  assert.equal(preset.worldObjects[0].y, 390);
+
+  assert.equal(endEditorCanvasInteraction(), true);
+  assert.equal(state.editor.dragSession.active, false);
+
+  assert.equal(deleteActiveEditorSelection(), true);
+  assert.equal(preset.worldObjects.length, 1);
+  assert.deepEqual(state.editor.latestEditTarget, { kind: "object", objectIndex: 0 });
+
+  removeTrackPresetById(imported.id, { removePersisted: false });
+});
+
+test("selected road stroke exposes anchors and dragging one reshapes the stroke", () => {
+  const imported = importTrackPresetData({
+    id: "editor-road-anchor-drag",
+    name: "EDITOR ROAD ANCHORS",
+    source: "user",
+    ownerUserId: "user-1",
+    isPublished: false,
+    canDelete: false,
+    fromDb: false,
+    track: makeTrackData({ centerlineSmoothingMode: "raw" }),
+    checkpoints: [],
+    worldObjects: [],
+    centerlineStrokes: [
+      [
+        { x: 320, y: 240, halfWidth: 56 },
+        { x: 380, y: 240, halfWidth: 56 },
+        { x: 440, y: 250, halfWidth: 56 },
+        { x: 500, y: 280, halfWidth: 56 },
+        { x: 560, y: 330, halfWidth: 56 },
+        { x: 620, y: 390, halfWidth: 56 },
+      ],
+    ],
+    editStack: [{ kind: "stroke", strokeIndex: 0 }],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((track) => track.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  enterEditor(trackIndex);
+
+  const preset = getTrackPreset(trackIndex);
+  state.editor.latestEditTarget = { kind: "stroke", strokeIndex: 0 };
+  const anchors = getSelectedEditorRoadAnchors();
+  assert.ok(anchors.length >= 2);
+  const anchor = anchors[Math.min(1, anchors.length - 1)];
+  const beforePoint = { ...preset.centerlineStrokes[0][anchor.pointIndex] };
+
+  const start = editorWorldToScreen(preset.track, anchor.x, anchor.y);
+  updateEditorCursorFromScreen(start.x, start.y);
+  assert.equal(beginEditorCanvasInteraction(), true);
+  assert.equal(state.editor.dragSession.active, true);
+  assert.equal(state.editor.dragSession.kind, "roadAnchor");
+
+  const moved = editorWorldToScreen(preset.track, anchor.x + 45, anchor.y - 30);
+  updateEditorCursorFromScreen(moved.x, moved.y);
+  assert.equal(updateEditorCanvasInteraction(), true);
+  assert.notDeepEqual(preset.centerlineStrokes[0][anchor.pointIndex], beforePoint);
+
+  assert.equal(endEditorCanvasInteraction(), true);
+  assert.equal(state.editor.dragSession.active, false);
+  assert.notDeepEqual(preset.centerlineStrokes[0][anchor.pointIndex], beforePoint);
 
   removeTrackPresetById(imported.id, { removePersisted: false });
 });

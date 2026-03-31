@@ -46,7 +46,15 @@ import {
 } from "./state.js";
 import { clearRaceInputs, getRaceStandings, resetRace } from "./physics.js";
 import { showSnackbar } from "./snackbar.js";
-import { initCurbSegments, surfaceAt, trackProgressAtPoint } from "./track.js";
+import {
+  blobRadius,
+  getEditorWorldScale,
+  initCurbSegments,
+  normalizeWorldObject,
+  pointInsideWallFootprint,
+  surfaceAt,
+  trackProgressAtPoint,
+} from "./track.js";
 import {
   clearTrackRecords,
   logoutAuth,
@@ -100,14 +108,34 @@ const EDITOR_MIN_ANIMAL_RADIUS = 8;
 const EDITOR_MAX_ANIMAL_RADIUS = 40;
 const EDITOR_TOOLBAR_POSITION_STORAGE_KEY = "carun.editorToolbarPosition";
 const EDITOR_CHECKPOINT_PROGRESS_TOLERANCE = 0.012;
+const EDITOR_OBJECT_HIT_RADIUS_PX = 14;
+const EDITOR_STROKE_SELECT_DISTANCE_PX = 12;
+const EDITOR_ROAD_ANCHOR_RADIUS_PX = 9;
+const EDITOR_ROAD_ANCHOR_MIN_SPACING = 36;
+const EDITOR_ROAD_ANCHOR_TARGET_COUNT = 10;
+const EDITOR_ROAD_ANCHOR_FALLOFF_MUL = 1.25;
+const EDITOR_ROAD_REBUILD_THROTTLE_MS = 24;
 
 function clampWorldScale(value) {
   return Math.max(EDITOR_MIN_WORLD_SCALE, Math.min(EDITOR_MAX_WORLD_SCALE, value));
 }
 
+function clearEditorDragSession() {
+  state.editor.dragSession.active = false;
+  state.editor.dragSession.kind = null;
+  state.editor.dragSession.objectIndex = -1;
+  state.editor.dragSession.strokeIndex = -1;
+  state.editor.dragSession.anchorIndex = -1;
+  state.editor.dragSession.pointerOffsetX = 0;
+  state.editor.dragSession.pointerOffsetY = 0;
+  state.editor.dragSession.lastRebuildAt = 0;
+  state.editor.dragSession.strokeSnapshot = null;
+}
+
 function setEditorPanMode(enabled) {
   state.editor.panMode = Boolean(enabled);
   state.editor.viewDragging = false;
+  clearEditorDragSession();
 }
 
 function loadEditorToolbarPosition() {
@@ -151,6 +179,156 @@ function pointInRect(x, y, rect) {
   return (
     rect && x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
   );
+}
+
+function editorPixelToWorldDistance(trackDef, pixels) {
+  return pixels / Math.max(0.1, getEditorWorldScale(trackDef));
+}
+
+function distanceToSegment(pointX, pointY, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 1e-8) return Math.hypot(pointX - ax, pointY - ay);
+  const t = Math.max(0, Math.min(1, ((pointX - ax) * dx + (pointY - ay) * dy) / lenSq));
+  const px = ax + dx * t;
+  const py = ay + dy * t;
+  return Math.hypot(pointX - px, pointY - py);
+}
+
+function pointInsideBlobObject(x, y, obj, tolerance = 0) {
+  const rotation = obj.angle || 0;
+  const dx = x - obj.x;
+  const dy = y - obj.y;
+  const localX = dx * Math.cos(rotation) + dy * Math.sin(rotation);
+  const localY = -dx * Math.sin(rotation) + dy * Math.cos(rotation);
+  const angle = Math.atan2(localY, localX);
+  const dist = Math.hypot(localX, localY);
+  return dist <= blobRadius(obj.rx, obj.ry, angle, obj.seed || 0) + tolerance;
+}
+
+function pointInsideExpandedWall(x, y, wall, tolerance) {
+  if (pointInsideWallFootprint(x, y, wall)) return true;
+  const normalized = normalizeWorldObject(wall);
+  if (!normalized || normalized.type !== "wall") return false;
+  const dx = x - normalized.x;
+  const dy = y - normalized.y;
+  const cos = Math.cos(normalized.angle);
+  const sin = Math.sin(normalized.angle);
+  const localX = dx * cos + dy * sin;
+  const localY = -dx * sin + dy * cos;
+  return (
+    Math.abs(localX) <= normalized.length * 0.5 + tolerance &&
+    Math.abs(localY) <= normalized.width * 0.5 + tolerance
+  );
+}
+
+function pickEditorObjectAt(x, y, preset) {
+  const tolerance = editorPixelToWorldDistance(preset.track, EDITOR_OBJECT_HIT_RADIUS_PX);
+  for (let index = (preset.worldObjects?.length || 0) - 1; index >= 0; index--) {
+    const object = normalizeWorldObject(preset.worldObjects[index]);
+    if (!object) continue;
+    let hit = false;
+    if (
+      object.type === "tree" ||
+      object.type === "barrel" ||
+      object.type === "spring" ||
+      object.type === "animal"
+    ) {
+      hit = Math.hypot(x - object.x, y - object.y) <= object.r + tolerance;
+    } else if (object.type === "pond" || object.type === "oil") {
+      hit = pointInsideBlobObject(x, y, object, tolerance);
+    } else if (object.type === "wall") {
+      hit = pointInsideExpandedWall(x, y, object, tolerance);
+    }
+    if (hit) return { kind: "object", objectIndex: index };
+  }
+  return null;
+}
+
+function buildStrokeCumulativeDistances(stroke) {
+  const cumulative = new Array(stroke.length).fill(0);
+  for (let i = 1; i < stroke.length; i++) {
+    cumulative[i] =
+      cumulative[i - 1] + Math.hypot(stroke[i].x - stroke[i - 1].x, stroke[i].y - stroke[i - 1].y);
+  }
+  return cumulative;
+}
+
+function getRoadStrokeAnchorPointIndices(stroke) {
+  if (!Array.isArray(stroke) || !stroke.length) return [];
+  if (stroke.length === 1) return [0];
+  const cumulative = buildStrokeCumulativeDistances(stroke);
+  const totalLength = cumulative[cumulative.length - 1];
+  const minSpacing = Math.max(
+    EDITOR_ROAD_ANCHOR_MIN_SPACING,
+    totalLength / EDITOR_ROAD_ANCHOR_TARGET_COUNT,
+  );
+  const indices = [0];
+  let lastAnchorDistance = 0;
+  for (let i = 1; i < stroke.length - 1; i++) {
+    if (cumulative[i] - lastAnchorDistance >= minSpacing) {
+      indices.push(i);
+      lastAnchorDistance = cumulative[i];
+    }
+  }
+  if (indices[indices.length - 1] !== stroke.length - 1) {
+    indices.push(stroke.length - 1);
+  }
+  return indices;
+}
+
+export function getSelectedEditorRoadAnchors() {
+  if (state.mode !== "editor") return [];
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const target = roadSelectionTarget(preset);
+  if (!target) return [];
+  const stroke = preset.centerlineStrokes?.[target.strokeIndex];
+  if (!stroke?.length) return [];
+  return getRoadStrokeAnchorPointIndices(stroke).map((pointIndex, anchorIndex) => ({
+    anchorIndex,
+    strokeIndex: target.strokeIndex,
+    pointIndex,
+    x: stroke[pointIndex].x,
+    y: stroke[pointIndex].y,
+    isEndpoint: pointIndex === 0 || pointIndex === stroke.length - 1,
+  }));
+}
+
+function pickSelectedRoadAnchorAt(x, y, preset) {
+  if (state.editor.activeTool !== "road" || state.editor.roadMode !== "segment") return null;
+  const tolerance = editorPixelToWorldDistance(preset.track, EDITOR_ROAD_ANCHOR_RADIUS_PX + 4);
+  let best = null;
+  for (const anchor of getSelectedEditorRoadAnchors()) {
+    const distance = Math.hypot(x - anchor.x, y - anchor.y);
+    if (distance > tolerance) continue;
+    if (!best || distance < best.distance) best = { ...anchor, distance };
+  }
+  return best;
+}
+
+function pickStrokeAt(x, y, preset) {
+  if (state.editor.activeTool !== "road" || state.editor.roadMode !== "segment") return null;
+  const tolerance = editorPixelToWorldDistance(preset.track, EDITOR_STROKE_SELECT_DISTANCE_PX);
+  let best = null;
+  for (const [strokeIndex, stroke] of (preset.centerlineStrokes || []).entries()) {
+    if (!Array.isArray(stroke) || stroke.length < 2) continue;
+    for (let i = 1; i < stroke.length; i++) {
+      const distance = distanceToSegment(
+        x,
+        y,
+        stroke[i - 1].x,
+        stroke[i - 1].y,
+        stroke[i].x,
+        stroke[i].y,
+      );
+      if (distance > tolerance) continue;
+      if (!best || distance < best.distance) {
+        best = { kind: "stroke", strokeIndex, distance };
+      }
+    }
+  }
+  return best;
 }
 
 function getDefaultStrokeHalfWidth(preset) {
@@ -1507,6 +1685,7 @@ function shiftEditorStackForInsert(preset, kind, insertedIndex) {
 
 function deleteSelectedEditorTarget(kind) {
   if (state.mode !== "editor") return;
+  clearEditorDragSession();
   const preset = getTrackPreset(state.editor.trackIndex);
   const target =
     kind === "object"
@@ -1564,6 +1743,15 @@ function deleteSelectedEditorTarget(kind) {
     syncLatestEditorTarget(preset);
   }
   rebuildEditorTrackGeometry();
+}
+
+export function deleteActiveEditorSelection() {
+  if (state.mode !== "editor") return false;
+  if (state.editor.latestEditTarget?.kind === "stroke") deleteSelectedEditorTarget("stroke");
+  else if (state.editor.latestEditTarget?.kind === "checkpoint")
+    deleteSelectedEditorTarget("checkpoint");
+  else deleteSelectedEditorTarget("object");
+  return true;
 }
 
 function adjustSelectedObjectSize(direction) {
@@ -1663,6 +1851,215 @@ function startEditorViewPan() {
   state.editor.viewDragging = true;
   state.editor.viewDragLastScreenX = state.editor.cursorScreenX;
   state.editor.viewDragLastScreenY = state.editor.cursorScreenY;
+}
+
+function startEditorObjectDrag(target, preset) {
+  const object = preset.worldObjects?.[target.objectIndex];
+  if (!object) return false;
+  clearEditorDragSession();
+  state.editor.latestEditTarget = {
+    kind: "object",
+    objectIndex: target.objectIndex,
+  };
+  triggerEditorSelectionFlash("object", target.objectIndex);
+  state.editor.dragSession.active = true;
+  state.editor.dragSession.kind = "object";
+  state.editor.dragSession.objectIndex = target.objectIndex;
+  state.editor.dragSession.pointerOffsetX = Number(object.x) - state.editor.cursorX;
+  state.editor.dragSession.pointerOffsetY = Number(object.y) - state.editor.cursorY;
+  state.editor.dragSession.strokeSnapshot = null;
+  return true;
+}
+
+function startEditorRoadAnchorDrag(target, preset) {
+  const stroke = preset.centerlineStrokes?.[target.strokeIndex];
+  if (!stroke?.[target.pointIndex]) return false;
+  clearEditorDragSession();
+  state.editor.latestEditTarget = {
+    kind: "stroke",
+    strokeIndex: target.strokeIndex,
+  };
+  triggerEditorSelectionFlash("stroke", target.strokeIndex);
+  state.editor.dragSession.active = true;
+  state.editor.dragSession.kind = "roadAnchor";
+  state.editor.dragSession.strokeIndex = target.strokeIndex;
+  state.editor.dragSession.anchorIndex = target.pointIndex;
+  state.editor.dragSession.lastRebuildAt = 0;
+  state.editor.dragSession.strokeSnapshot = stroke.map((point) => ({ ...point }));
+  return true;
+}
+
+function anchorFalloffRadius(strokeSnapshot, anchorPointIndex) {
+  const anchorIndices = getRoadStrokeAnchorPointIndices(strokeSnapshot);
+  const cumulative = buildStrokeCumulativeDistances(strokeSnapshot);
+  const anchorSlot = anchorIndices.indexOf(anchorPointIndex);
+  const anchorDistance = cumulative[anchorPointIndex] || 0;
+  const prevDistance = anchorSlot > 0 ? cumulative[anchorIndices[anchorSlot - 1]] : anchorDistance;
+  const nextDistance =
+    anchorSlot >= 0 && anchorSlot < anchorIndices.length - 1
+      ? cumulative[anchorIndices[anchorSlot + 1]]
+      : anchorDistance;
+  const localSpan = Math.max(anchorDistance - prevDistance, nextDistance - anchorDistance);
+  return Math.max(EDITOR_ROAD_ANCHOR_MIN_SPACING * 1.5, localSpan * EDITOR_ROAD_ANCHOR_FALLOFF_MUL);
+}
+
+function applyRoadAnchorDrag(preset, { forceRebuild = false } = {}) {
+  const session = state.editor.dragSession;
+  const stroke = preset.centerlineStrokes?.[session.strokeIndex];
+  const snapshot = session.strokeSnapshot;
+  if (!stroke?.length || !snapshot?.length || !snapshot[session.anchorIndex]) return false;
+
+  const cumulative = buildStrokeCumulativeDistances(snapshot);
+  const radius = anchorFalloffRadius(snapshot, session.anchorIndex);
+  const anchorStart = snapshot[session.anchorIndex];
+  const dx = state.editor.cursorX - anchorStart.x;
+  const dy = state.editor.cursorY - anchorStart.y;
+  const draggedEndpoint = session.anchorIndex === 0 || session.anchorIndex === snapshot.length - 1;
+  const anchorDistance = cumulative[session.anchorIndex] || 0;
+
+  for (let i = 0; i < stroke.length; i++) {
+    const point = stroke[i];
+    const original = snapshot[i];
+    const distanceAlong = Math.abs((cumulative[i] || 0) - anchorDistance);
+    let influence = Math.max(0, 1 - distanceAlong / Math.max(radius, 1));
+    influence = influence * influence * (3 - 2 * influence);
+    const endpoint = i === 0 || i === stroke.length - 1;
+    if (endpoint && !draggedEndpoint && i !== session.anchorIndex) influence *= 0.35;
+    point.x = original.x + dx * influence;
+    point.y = original.y + dy * influence;
+  }
+
+  const now = Date.now();
+  if (forceRebuild || now - session.lastRebuildAt >= EDITOR_ROAD_REBUILD_THROTTLE_MS) {
+    rebuildEditorTrackGeometry();
+    session.lastRebuildAt = now;
+  }
+  return true;
+}
+
+export function beginEditorCanvasInteraction() {
+  if (state.mode !== "editor") return false;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  if (!preset) return false;
+
+  if (state.editor.panMode) {
+    startEditorViewPan();
+    return true;
+  }
+
+  const objectTarget = pickEditorObjectAt(state.editor.cursorX, state.editor.cursorY, preset);
+  if (objectTarget) return startEditorObjectDrag(objectTarget, preset);
+
+  const roadAnchorTarget = pickSelectedRoadAnchorAt(
+    state.editor.cursorX,
+    state.editor.cursorY,
+    preset,
+  );
+  if (roadAnchorTarget) return startEditorRoadAnchorDrag(roadAnchorTarget, preset);
+
+  const strokeTarget = pickStrokeAt(state.editor.cursorX, state.editor.cursorY, preset);
+  if (strokeTarget) {
+    state.editor.latestEditTarget = {
+      kind: "stroke",
+      strokeIndex: strokeTarget.strokeIndex,
+    };
+    triggerEditorSelectionFlash("stroke", strokeTarget.strokeIndex);
+    return true;
+  }
+
+  if (state.editor.activeTool !== "road") {
+    placeEditorObject(state.editor.activeTool);
+    return true;
+  }
+  if (state.editor.roadMode === "checkpoint") {
+    placeEditorCheckpoint();
+    return true;
+  }
+
+  const halfWidth = getDefaultStrokeHalfWidth(preset);
+  state.editor.drawing = true;
+  state.editor.activeStroke = [{ x: state.editor.cursorX, y: state.editor.cursorY, halfWidth }];
+  return true;
+}
+
+export function updateEditorCanvasInteraction() {
+  if (state.mode !== "editor") return false;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const session = state.editor.dragSession;
+  if (session.active && session.kind === "object") {
+    const object = preset?.worldObjects?.[session.objectIndex];
+    if (!object) {
+      clearEditorDragSession();
+      return false;
+    }
+    object.x = state.editor.cursorX + session.pointerOffsetX;
+    object.y = state.editor.cursorY + session.pointerOffsetY;
+    applyTrackPreset(state.editor.trackIndex);
+    return true;
+  }
+  if (session.active && session.kind === "roadAnchor") {
+    return applyRoadAnchorDrag(preset);
+  }
+
+  if (!state.editor.drawing) return false;
+  const points = state.editor.activeStroke;
+  const last = points[points.length - 1];
+  const x = state.editor.cursorX;
+  const y = state.editor.cursorY;
+  if (!last || Math.hypot(x - last.x, y - last.y) > 4) {
+    points.push({
+      x,
+      y,
+      halfWidth: last?.halfWidth || EDITOR_DEFAULT_HALF_WIDTH,
+    });
+  }
+  return true;
+}
+
+export function endEditorCanvasInteraction() {
+  if (state.mode !== "editor") return false;
+  const preset = getTrackPreset(state.editor.trackIndex);
+  const session = state.editor.dragSession;
+  if (session.active) {
+    if (session.kind === "roadAnchor") applyRoadAnchorDrag(preset, { forceRebuild: true });
+    clearEditorDragSession();
+    return true;
+  }
+
+  if (!state.editor.drawing) return false;
+  state.editor.drawing = false;
+  const stroke = state.editor.activeStroke;
+  state.editor.activeStroke = [];
+  if (stroke.length < 2) return true;
+  if (!preset.centerlineStrokes) preset.centerlineStrokes = [];
+  const nextStroke = stroke.map((point) => ({
+    x: point.x,
+    y: point.y,
+    halfWidth: Number.isFinite(point.halfWidth) ? point.halfWidth : EDITOR_DEFAULT_HALF_WIDTH,
+  }));
+  const selectedStrokeIndex =
+    state.editor.latestEditTarget?.kind === "stroke"
+      ? state.editor.latestEditTarget.strokeIndex
+      : null;
+  const insertIndex =
+    Number.isInteger(selectedStrokeIndex) &&
+    selectedStrokeIndex >= 0 &&
+    selectedStrokeIndex < preset.centerlineStrokes.length
+      ? selectedStrokeIndex + 1
+      : preset.centerlineStrokes.length;
+  preset.centerlineStrokes.splice(insertIndex, 0, nextStroke);
+  if (!preset.editStack) preset.editStack = [];
+  shiftEditorStackForInsert(preset, "stroke", insertIndex);
+  preset.editStack.push({
+    kind: "stroke",
+    strokeIndex: insertIndex,
+  });
+  state.editor.latestEditTarget = {
+    kind: "stroke",
+    strokeIndex: insertIndex,
+  };
+  triggerEditorSelectionFlash("stroke", insertIndex);
+  return true;
 }
 
 export function panEditorViewBy(dx, dy) {
@@ -1975,6 +2372,7 @@ export function enterEditor(trackIndex) {
   state.editor.viewOffsetX = Number(track.editorViewOffsetX) || 0;
   state.editor.viewOffsetY = Number(track.editorViewOffsetY) || 0;
   state.editor.viewDragging = false;
+  clearEditorDragSession();
   state.editor.toolbar.dragging = false;
   const savedToolbarPosition = loadEditorToolbarPosition();
   if (savedToolbarPosition) {
@@ -2325,7 +2723,7 @@ function onKeyDown(e) {
 
   if (
     ["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key) ||
-    (key === "backspace" &&
+    ((key === "backspace" || key === "delete") &&
       (state.mode === "trackSelect" || state.mode === "editor" || state.modal.open))
   ) {
     e.preventDefault();
@@ -2557,17 +2955,16 @@ function onKeyDown(e) {
     return;
   }
   if (state.mode === "editor" && key === "escape") {
+    clearEditorDragSession();
+    state.editor.viewDragging = false;
     state.editor.drawing = false;
     state.editor.activeStroke = [];
     returnToTrackSelect();
     return;
   }
-  if (state.mode === "editor" && key === "backspace") {
+  if (state.mode === "editor" && (key === "backspace" || key === "delete")) {
     if (e.repeat) return;
-    if (state.editor.latestEditTarget?.kind === "stroke") deleteSelectedEditorTarget("stroke");
-    else if (state.editor.latestEditTarget?.kind === "checkpoint")
-      deleteSelectedEditorTarget("checkpoint");
-    else deleteSelectedEditorTarget("object");
+    deleteActiveEditorSelection();
     return;
   }
 
@@ -3023,6 +3420,9 @@ export function initInputHandlers() {
       );
       return;
     }
+    if (state.mode === "editor" && updateEditorCanvasInteraction()) {
+      return;
+    }
     if (state.mode === "editor") {
       const toolbarHit = editorToolbarActionAt(
         state.editor.cursorScreenX,
@@ -3032,18 +3432,6 @@ export function initInputHandlers() {
         toolbarHit?.type === "action" ? editorToolbarActionLabel(toolbarHit.id) : "";
     } else {
       state.editor.toolbar.hoverLabel = "";
-    }
-    if (!state.editor.drawing || state.mode !== "editor") return;
-    const points = state.editor.activeStroke;
-    const last = points[points.length - 1];
-    const x = state.editor.cursorX;
-    const y = state.editor.cursorY;
-    if (!last || Math.hypot(x - last.x, y - last.y) > 4) {
-      points.push({
-        x,
-        y,
-        halfWidth: last?.halfWidth || EDITOR_DEFAULT_HALF_WIDTH,
-      });
     }
   });
   window.addEventListener("mousedown", (event) => {
@@ -3092,22 +3480,7 @@ export function initInputHandlers() {
       performEditorTopBarAction(topBarAction);
       return;
     }
-    if (state.editor.panMode) {
-      startEditorViewPan();
-      return;
-    }
-    if (state.editor.activeTool !== "road") {
-      placeEditorObject(state.editor.activeTool);
-      return;
-    }
-    if (state.editor.roadMode === "checkpoint") {
-      placeEditorCheckpoint();
-      return;
-    }
-    const preset = getTrackPreset(state.editor.trackIndex);
-    const halfWidth = getDefaultStrokeHalfWidth(preset);
-    state.editor.drawing = true;
-    state.editor.activeStroke = [{ x: state.editor.cursorX, y: state.editor.cursorY, halfWidth }];
+    beginEditorCanvasInteraction();
   });
   window.addEventListener("mouseup", (event) => {
     if (state.mode !== "editor" || event.button !== 0) return;
@@ -3121,39 +3494,6 @@ export function initInputHandlers() {
       state.editor.viewDragging = false;
       return;
     }
-    if (!state.editor.drawing) return;
-    state.editor.drawing = false;
-    const stroke = state.editor.activeStroke;
-    state.editor.activeStroke = [];
-    if (stroke.length < 2) return;
-    const preset = getTrackPreset(state.editor.trackIndex);
-    if (!preset.centerlineStrokes) preset.centerlineStrokes = [];
-    const nextStroke = stroke.map((p) => ({
-      x: p.x,
-      y: p.y,
-      halfWidth: Number.isFinite(p.halfWidth) ? p.halfWidth : EDITOR_DEFAULT_HALF_WIDTH,
-    }));
-    const selectedStrokeIndex =
-      state.editor.latestEditTarget?.kind === "stroke"
-        ? state.editor.latestEditTarget.strokeIndex
-        : null;
-    const insertIndex =
-      Number.isInteger(selectedStrokeIndex) &&
-      selectedStrokeIndex >= 0 &&
-      selectedStrokeIndex < preset.centerlineStrokes.length
-        ? selectedStrokeIndex + 1
-        : preset.centerlineStrokes.length;
-    preset.centerlineStrokes.splice(insertIndex, 0, nextStroke);
-    if (!preset.editStack) preset.editStack = [];
-    shiftEditorStackForInsert(preset, "stroke", insertIndex);
-    preset.editStack.push({
-      kind: "stroke",
-      strokeIndex: insertIndex,
-    });
-    state.editor.latestEditTarget = {
-      kind: "stroke",
-      strokeIndex: insertIndex,
-    };
-    triggerEditorSelectionFlash("stroke", insertIndex);
+    endEditorCanvasInteraction();
   });
 }
