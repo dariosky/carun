@@ -1,6 +1,8 @@
 export const AUDIO_TUNING = {
   masterGain: 0.86,
   vehicleBusGain: 0.94,
+  rivalBusGainMul: 0.38,
+  rivalVoiceGainMul: 0.2,
   uiBusGain: 0.9,
   impactBusGain: 0.96,
   smoothing: {

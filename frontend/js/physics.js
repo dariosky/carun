@@ -40,9 +40,9 @@ import {
   findSpringTrigger,
   findNearestTrackNavNode,
   getTrackNavigationGraph,
-  pointOnCenterLine,
   resolveObjectCollisions,
   surfaceAt,
+  trackFrameAtProgress,
   trackProgressAtPoint,
   trackStartAngle,
 } from "./track.js";
@@ -1713,35 +1713,298 @@ function updateAiVehicle(dt) {
   updateAiProgressHealth(dt, motion.collision);
 }
 
-export function resolveCarToCarCollision(
-  carA,
-  carB,
-  { radiusScale = 0.34, restitution = 0.14, pushBias = 0.5 } = {},
-) {
-  const radiusA = Math.max(carA.width, carA.height) * radiusScale;
-  const radiusB = Math.max(carB.width, carB.height) * radiusScale;
+function getVehicleHeadingAxes(vehicle) {
+  const forwardX = Math.cos(vehicle.angle);
+  const forwardY = Math.sin(vehicle.angle);
+  return {
+    forwardX,
+    forwardY,
+    rightX: -forwardY,
+    rightY: forwardX,
+  };
+}
+
+function getVehiclePivotRatio(forwardSpeed, runtime) {
+  const constants = physicsConfig.constants;
+  const flags = physicsConfig.flags;
+  let pivotRatio =
+    constants.pivotAtLowSpeedRatio +
+    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) *
+      clamp(Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1), 0, 1);
+  if (flags.HANDBRAKE_MODE && (runtime?.input?.handbrake || 0) > 0.05) {
+    pivotRatio +=
+      (constants.pivotAtLowSpeedRatio - pivotRatio) * clamp(runtime.input.handbrake, 0, 1);
+  }
+  return pivotRatio;
+}
+
+function getVehiclePivotOffset(vehicle, forwardSpeed, runtime) {
+  return vehicle.width * (getVehiclePivotRatio(forwardSpeed, runtime) - 0.5);
+}
+
+function getVehiclePivotPoint(vehicle, runtime) {
+  const { forwardX, forwardY } = getVehicleHeadingAxes(vehicle);
+  const forwardSpeed = vehicle.vx * forwardX + vehicle.vy * forwardY;
+  const pivotOffset = getVehiclePivotOffset(vehicle, forwardSpeed, runtime);
+  return {
+    x: vehicle.x + forwardX * pivotOffset,
+    y: vehicle.y + forwardY * pivotOffset,
+    offset: pivotOffset,
+    forwardSpeed,
+  };
+}
+
+function getVehicleCollisionShape(vehicle) {
+  const cfg = physicsConfig.carToCar;
+  const { forwardX, forwardY, rightX, rightY } = getVehicleHeadingAxes(vehicle);
+  const halfLength = Math.max(1, vehicle.width * cfg.bodyLengthMul * 0.5);
+  const halfWidth = Math.max(1, vehicle.height * cfg.bodyWidthMul * 0.5);
+  return {
+    x: vehicle.x,
+    y: vehicle.y,
+    forwardX,
+    forwardY,
+    rightX,
+    rightY,
+    halfLength,
+    halfWidth,
+  };
+}
+
+function projectVehicleCollisionShape(shape, axisX, axisY) {
+  const centerProjection = shape.x * axisX + shape.y * axisY;
+  const radius =
+    Math.abs(shape.forwardX * axisX + shape.forwardY * axisY) * shape.halfLength +
+    Math.abs(shape.rightX * axisX + shape.rightY * axisY) * shape.halfWidth;
+  return {
+    min: centerProjection - radius,
+    max: centerProjection + radius,
+  };
+}
+
+function getCollisionSupportSign(projection) {
+  if (projection > 1e-4) return 1;
+  if (projection < -1e-4) return -1;
+  return 0;
+}
+
+function getVehicleCollisionSupportPoint(shape, dirX, dirY) {
+  const forwardSign = getCollisionSupportSign(shape.forwardX * dirX + shape.forwardY * dirY);
+  const rightSign = getCollisionSupportSign(shape.rightX * dirX + shape.rightY * dirY);
+  return {
+    x:
+      shape.x +
+      shape.forwardX * shape.halfLength * forwardSign +
+      shape.rightX * shape.halfWidth * rightSign,
+    y:
+      shape.y +
+      shape.forwardY * shape.halfLength * forwardSign +
+      shape.rightY * shape.halfWidth * rightSign,
+  };
+}
+
+function cross2d(ax, ay, bx, by) {
+  return ax * by - ay * bx;
+}
+
+function getVehicleAngularInertia(shape) {
+  const cfg = physicsConfig.carToCar;
+  const length = shape.halfLength * 2;
+  const width = shape.halfWidth * 2;
+  return Math.max(((length * length + width * width) / 12) * cfg.inertiaMul, 1);
+}
+
+function applyCollisionYawImpulse(runtime, deltaYaw) {
+  if (!runtime) return;
+  const cfg = physicsConfig.carToCar;
+  runtime.steeringRate =
+    (runtime.steeringRate || 0) +
+    clamp(deltaYaw * cfg.yawImpulseScale, -cfg.maxYawRateDelta, cfg.maxYawRateDelta);
+}
+
+function looksLikePhysicsRuntime(value) {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    ("steeringRate" in value || "input" in value || "collisionGripTimer" in value),
+  );
+}
+
+function wrapTrackProgress(progress) {
+  return ((progress % 1) + 1) % 1;
+}
+
+function estimateTrackLoopLength(trackDef = track, sampleCount = 240) {
+  const count = Math.max(16, Math.floor(sampleCount));
+  let length = 0;
+  let prev = trackFrameAtProgress(0, trackDef).point;
+  for (let i = 1; i <= count; i++) {
+    const point = trackFrameAtProgress(i / count, trackDef).point;
+    length += Math.hypot(point.x - prev.x, point.y - prev.y);
+    prev = point;
+  }
+  return Math.max(length, 1);
+}
+
+function buildStartingGridSlot(overallIndex, startProgress, trackDef = track, loopLength = 1) {
+  const carLength = Math.max(car.width * physicsConfig.carToCar.bodyLengthMul, car.height * 2.8);
+  const rowSpacing = carLength * 2.05;
+  const rightColumnLag = 18;
+  const row = Math.floor(overallIndex / 2);
+  const isLeftColumn = overallIndex % 2 === 0;
+  const backDistance = row * rowSpacing + (isLeftColumn ? 0 : rightColumnLag);
+  const progress = wrapTrackProgress(startProgress - backDistance / Math.max(loopLength, 1));
+  const frame = trackFrameAtProgress(progress, trackDef);
+  const edgeMargin = 18;
+  const laneOffset = clamp(
+    frame.roadWidth * 0.22,
+    16,
+    Math.max(16, frame.roadWidth * 0.5 - edgeMargin),
+  );
+  const side = isLeftColumn ? -laneOffset : laneOffset;
+  return {
+    progress,
+    frame,
+    x: frame.point.x + frame.normal.x * side,
+    y: frame.point.y + frame.normal.y * side,
+    angle: Math.atan2(frame.tangent.y, frame.tangent.x),
+  };
+}
+
+export function resolveCarToCarCollision(carA, carB, runtimeA = null, runtimeB = null) {
+  if (!looksLikePhysicsRuntime(runtimeA)) runtimeA = null;
+  if (!looksLikePhysicsRuntime(runtimeB)) runtimeB = null;
+  const shapeA = getVehicleCollisionShape(carA);
+  const shapeB = getVehicleCollisionShape(carB);
+  const radiusA = Math.hypot(shapeA.halfLength, shapeA.halfWidth);
+  const radiusB = Math.hypot(shapeB.halfLength, shapeB.halfWidth);
   const dx = carB.x - carA.x;
   const dy = carB.y - carA.y;
   const distance = Math.hypot(dx, dy);
   const minDistance = radiusA + radiusB;
   if (distance >= minDistance || minDistance <= 0) return false;
 
-  const nx = distance > 1e-4 ? dx / distance : 1;
-  const ny = distance > 1e-4 ? dy / distance : 0;
-  const overlap = minDistance - distance;
-  carA.x -= nx * overlap * pushBias;
-  carA.y -= ny * overlap * pushBias;
-  carB.x += nx * overlap * (1 - pushBias);
-  carB.y += ny * overlap * (1 - pushBias);
+  const axes = [
+    [shapeA.forwardX, shapeA.forwardY],
+    [shapeA.rightX, shapeA.rightY],
+    [shapeB.forwardX, shapeB.forwardY],
+    [shapeB.rightX, shapeB.rightY],
+  ];
+  const centerDirX = distance > 1e-4 ? dx / distance : 1;
+  const centerDirY = distance > 1e-4 ? dy / distance : 0;
+  let bestScore = Infinity;
+  let bestOverlap = Infinity;
+  let normalX = distance > 1e-4 ? dx / distance : 1;
+  let normalY = distance > 1e-4 ? dy / distance : 0;
 
-  const relativeNormalVelocity = (carB.vx - carA.vx) * nx + (carB.vy - carA.vy) * ny;
-  if (relativeNormalVelocity < 0) {
-    const impulse = -(1 + restitution) * relativeNormalVelocity * 0.5;
-    carA.vx -= nx * impulse;
-    carA.vy -= ny * impulse;
-    carB.vx += nx * impulse;
-    carB.vy += ny * impulse;
+  for (const [axisBaseX, axisBaseY] of axes) {
+    const axisLength = Math.hypot(axisBaseX, axisBaseY);
+    if (axisLength <= 1e-6) continue;
+    let axisX = axisBaseX / axisLength;
+    let axisY = axisBaseY / axisLength;
+    if (axisX * dx + axisY * dy < 0) {
+      axisX *= -1;
+      axisY *= -1;
+    }
+    const projA = projectVehicleCollisionShape(shapeA, axisX, axisY);
+    const projB = projectVehicleCollisionShape(shapeB, axisX, axisY);
+    const overlap = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+    if (overlap <= 0) return false;
+    const alignment = Math.abs(axisX * centerDirX + axisY * centerDirY);
+    const axisScore = overlap / Math.max(alignment, 0.25);
+    if (
+      axisScore < bestScore ||
+      (Math.abs(axisScore - bestScore) < 1e-4 && overlap < bestOverlap)
+    ) {
+      bestScore = axisScore;
+      bestOverlap = overlap;
+      normalX = axisX;
+      normalY = axisY;
+    }
   }
+
+  const cfg = physicsConfig.carToCar;
+  const correction = Math.max(bestOverlap - cfg.positionSlop, 0) * cfg.positionalCorrection;
+  carA.x -= normalX * correction * 0.5;
+  carA.y -= normalY * correction * 0.5;
+  carB.x += normalX * correction * 0.5;
+  carB.y += normalY * correction * 0.5;
+  shapeA.x = carA.x;
+  shapeA.y = carA.y;
+  shapeB.x = carB.x;
+  shapeB.y = carB.y;
+
+  const contactA = getVehicleCollisionSupportPoint(shapeA, normalX, normalY);
+  const contactB = getVehicleCollisionSupportPoint(shapeB, -normalX, -normalY);
+  const contactX = (contactA.x + contactB.x) * 0.5;
+  const contactY = (contactA.y + contactB.y) * 0.5;
+
+  const pivotA = getVehiclePivotPoint(carA, runtimeA);
+  const pivotB = getVehiclePivotPoint(carB, runtimeB);
+  const angularA = runtimeA?.steeringRate || 0;
+  const angularB = runtimeB?.steeringRate || 0;
+  const invMassA = 1;
+  const invMassB = 1;
+  const invInertiaA = 1 / getVehicleAngularInertia(shapeA);
+  const invInertiaB = 1 / getVehicleAngularInertia(shapeB);
+  const rAx = contactX - pivotA.x;
+  const rAy = contactY - pivotA.y;
+  const rBx = contactX - pivotB.x;
+  const rBy = contactY - pivotB.y;
+  const velAx = carA.vx + -angularA * rAy;
+  const velAy = carA.vy + angularA * rAx;
+  const velBx = carB.vx + -angularB * rBy;
+  const velBy = carB.vy + angularB * rBx;
+  const relativeX = velBx - velAx;
+  const relativeY = velBy - velAy;
+  const relativeNormalVelocity = relativeX * normalX + relativeY * normalY;
+  if (relativeNormalVelocity >= 0) {
+    carA.speed = Math.hypot(carA.vx, carA.vy);
+    carB.speed = Math.hypot(carB.vx, carB.vy);
+    return true;
+  }
+
+  const rACrossN = cross2d(rAx, rAy, normalX, normalY);
+  const rBCrossN = cross2d(rBx, rBy, normalX, normalY);
+  const normalDenominator =
+    invMassA + invMassB + rACrossN * rACrossN * invInertiaA + rBCrossN * rBCrossN * invInertiaB;
+  if (normalDenominator <= 1e-6) return true;
+
+  const normalImpulse = (-(1 + cfg.restitution) * relativeNormalVelocity) / normalDenominator;
+  carA.vx -= normalX * normalImpulse * invMassA;
+  carA.vy -= normalY * normalImpulse * invMassA;
+  carB.vx += normalX * normalImpulse * invMassB;
+  carB.vy += normalY * normalImpulse * invMassB;
+  applyCollisionYawImpulse(runtimeA, -rACrossN * normalImpulse * invInertiaA);
+  applyCollisionYawImpulse(runtimeB, rBCrossN * normalImpulse * invInertiaB);
+
+  const tangentXBase = relativeX - normalX * relativeNormalVelocity;
+  const tangentYBase = relativeY - normalY * relativeNormalVelocity;
+  const tangentLength = Math.hypot(tangentXBase, tangentYBase);
+  if (tangentLength > 1e-5) {
+    const tangentX = tangentXBase / tangentLength;
+    const tangentY = tangentYBase / tangentLength;
+    const rACrossT = cross2d(rAx, rAy, tangentX, tangentY);
+    const rBCrossT = cross2d(rBx, rBy, tangentX, tangentY);
+    const tangentDenominator =
+      invMassA + invMassB + rACrossT * rACrossT * invInertiaA + rBCrossT * rBCrossT * invInertiaB;
+    if (tangentDenominator > 1e-6) {
+      const relativeTangentVelocity = relativeX * tangentX + relativeY * tangentY;
+      const maxFrictionImpulse = Math.abs(normalImpulse) * cfg.friction;
+      const tangentImpulse = clamp(
+        -relativeTangentVelocity / tangentDenominator,
+        -maxFrictionImpulse,
+        maxFrictionImpulse,
+      );
+      carA.vx -= tangentX * tangentImpulse * invMassA;
+      carA.vy -= tangentY * tangentImpulse * invMassA;
+      carB.vx += tangentX * tangentImpulse * invMassB;
+      carB.vy += tangentY * tangentImpulse * invMassB;
+      applyCollisionYawImpulse(runtimeA, -rACrossT * tangentImpulse * invInertiaA * 0.7);
+      applyCollisionYawImpulse(runtimeB, rBCrossT * tangentImpulse * invInertiaB * 0.7);
+    }
+  }
+
   carA.speed = Math.hypot(carA.vx, carA.vy);
   carB.speed = Math.hypot(carB.vx, carB.vy);
   return true;
@@ -2071,7 +2334,6 @@ function updateAiVehicleAudioState({
   headingLateralSpeed = 0,
   longAccel = 0,
 }) {
-  if (aiOpponentIndex !== 0) return;
   const carCfg = physicsConfig.car;
   const airCfg = physicsConfig.air;
   const wheelSpinAmount = aiCar.airborne
@@ -2084,6 +2346,7 @@ function updateAiVehicleAudioState({
     : 0;
 
   gameAudio.updateRivalVehicleAudio({
+    rivalIndex: aiOpponentIndex,
     speedNormalized: clamp(aiCar.speed / Math.max(carCfg.maxSpeed, 1), 0, 1),
     throttle: aiPhysicsRuntime.input.throttle,
     acceleration: clamp(longAccel / Math.max(carCfg.engineAccel, 1), -1, 1),
@@ -2645,15 +2908,7 @@ function integrateVehicleGround(
 
   const headingForwardX = Math.cos(vehicle.angle);
   const headingForwardY = Math.sin(vehicle.angle);
-  const pivotBlend = clamp(Math.abs(forwardSpeed) / Math.max(constants.pivotBlendSpeed, 1), 0, 1);
-  let pivotRatio =
-    constants.pivotAtLowSpeedRatio +
-    (constants.pivotFromRearRatio - constants.pivotAtLowSpeedRatio) * pivotBlend;
-  if (flags.HANDBRAKE_MODE && runtime.input.handbrake > 0.05) {
-    pivotRatio +=
-      (constants.pivotAtLowSpeedRatio - pivotRatio) * clamp(runtime.input.handbrake, 0, 1);
-  }
-  const pivotOffset = vehicle.width * (pivotRatio - 0.5);
+  const pivotOffset = getVehiclePivotOffset(vehicle, forwardSpeed, runtime);
   const pivotShiftX = Math.cos(oldAngle) * pivotOffset - headingForwardX * pivotOffset;
   const pivotShiftY = Math.sin(oldAngle) * pivotOffset - headingForwardY * pivotOffset;
   const collision = resolveObjectCollisions(
@@ -2758,29 +3013,14 @@ function integrateVehicleGround(
   };
 }
 
-function resetAiOpponentForRace(index, spawnPoint, headingAngle, startCheckpoint) {
+function resetAiOpponentForRace(index, gridSlot, startCheckpoint) {
   withAiOpponent(index, () => {
     const profile = getAiProfileByIndex(index);
-    const forwardX = Math.cos(headingAngle);
-    const forwardY = Math.sin(headingAngle);
-    const rightX = -forwardY;
-    const rightY = forwardX;
-    const gridSlots = [
-      { back: 38, side: 20 },
-      { back: 38, side: -20 },
-      { back: 76, side: 20 },
-      { back: 76, side: -20 },
-      { back: 114, side: 0 },
-    ];
-    const slot = gridSlots[index] || {
-      back: 38 + index * 34,
-      side: index % 2 === 0 ? 18 : -18,
-    };
-    aiCar.x = spawnPoint.x - forwardX * slot.back + rightX * slot.side;
-    aiCar.y = spawnPoint.y - forwardY * slot.back + rightY * slot.side;
+    aiCar.x = gridSlot.x;
+    aiCar.y = gridSlot.y;
     aiCar.vx = 0;
     aiCar.vy = 0;
-    aiCar.angle = headingAngle;
+    aiCar.angle = gridSlot.angle;
     aiCar.speed = 0;
     aiCar.z = 0;
     aiCar.vz = 0;
@@ -2870,13 +3110,14 @@ export function resetRace() {
   state.raceCamera.viewOffsetX = 0;
   state.raceCamera.viewOffsetY = 0;
   const spawnAngle = trackStartAngle(track);
-  const spawnPoint = pointOnCenterLine(spawnAngle, track);
-  const aheadPoint = pointOnCenterLine(spawnAngle + 0.02, track);
-  car.x = spawnPoint.x;
-  car.y = spawnPoint.y;
+  const startProgress = wrapTrackProgress(spawnAngle / (Math.PI * 2));
+  const loopLength = estimateTrackLoopLength(track);
+  const playerGridSlot = buildStartingGridSlot(0, startProgress, track, loopLength);
+  car.x = playerGridSlot.x;
+  car.y = playerGridSlot.y;
   car.vx = 0;
   car.vy = 0;
-  car.angle = Math.atan2(aheadPoint.y - spawnPoint.y, aheadPoint.x - spawnPoint.x);
+  car.angle = playerGridSlot.angle;
   car.speed = 0;
   car.z = 0;
   car.vz = 0;
@@ -2942,7 +3183,11 @@ export function resetRace() {
   physicsRuntime.particleEmitters.splashCooldown = 0;
   physicsRuntime.particleEmitters.dustCooldown = 0;
   forEachAiOpponent((_, __, ___, index) => {
-    resetAiOpponentForRace(index, spawnPoint, car.angle, startCheckpointIndex);
+    resetAiOpponentForRace(
+      index,
+      buildStartingGridSlot(index + 1, startProgress, track, loopLength),
+      startCheckpointIndex,
+    );
   });
   skidMarks.length = 0;
   state.tournamentRoom.pendingSkidMarks.length = 0;
@@ -2970,17 +3215,20 @@ export function clearRaceInputs() {
 }
 
 function resetRivalAudioState() {
-  gameAudio.updateRivalVehicleAudio({
-    speedNormalized: 0,
-    throttle: 0,
-    acceleration: 0,
-    skidAmount: 0,
-    surface: "asphalt",
-    isMoving: false,
-    airborne: false,
-    airborneAmount: 0,
-    wheelSpinAmount: 0,
-  });
+  for (let index = 0; index < aiCars.length; index++) {
+    gameAudio.updateRivalVehicleAudio({
+      rivalIndex: index,
+      speedNormalized: 0,
+      throttle: 0,
+      acceleration: 0,
+      skidAmount: 0,
+      surface: "asphalt",
+      isMoving: false,
+      airborne: false,
+      airborneAmount: 0,
+      wheelSpinAmount: 0,
+    });
+  }
 }
 
 function resolveRaceFieldCollisions() {
@@ -2995,7 +3243,14 @@ function resolveRaceFieldCollisions() {
   for (let i = 0; i < field.length - 1; i++) {
     for (let j = i + 1; j < field.length; j++) {
       if (field[i].externalControl || field[j].externalControl) continue;
-      if (!resolveCarToCarCollision(field[i].vehicle, field[j].vehicle)) {
+      if (
+        !resolveCarToCarCollision(
+          field[i].vehicle,
+          field[j].vehicle,
+          field[i].runtime,
+          field[j].runtime,
+        )
+      ) {
         continue;
       }
       field[i].runtime.collisionGripTimer = Math.max(field[i].runtime.collisionGripTimer, 0.06);
@@ -3240,17 +3495,20 @@ export function updateRace(dt) {
       airborneAmount: clamp(car.z / Math.max(airCfg.maxJumpHeight, 1), 0, 1),
       wheelSpinAmount: 0,
     });
-    gameAudio.updateRivalVehicleAudio({
-      speedNormalized: 0,
-      throttle: 0,
-      acceleration: 0,
-      skidAmount: 0,
-      surface: "asphalt",
-      isMoving: false,
-      airborne: false,
-      airborneAmount: 0,
-      wheelSpinAmount: 0,
-    });
+    for (let index = 0; index < aiCars.length; index++) {
+      gameAudio.updateRivalVehicleAudio({
+        rivalIndex: index,
+        speedNormalized: 0,
+        throttle: 0,
+        acceleration: 0,
+        skidAmount: 0,
+        surface: "asphalt",
+        isMoving: false,
+        airborne: false,
+        airborneAmount: 0,
+        wheelSpinAmount: 0,
+      });
+    }
     updateAmbientAnimalField(dt);
     return;
   }

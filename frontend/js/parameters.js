@@ -1531,6 +1531,17 @@ export const physicsConfig = {
     wallThicknessDefault: 18,
     springRadiusDefault: 16,
   },
+  carToCar: {
+    bodyLengthMul: 1.32,
+    bodyWidthMul: 1.08,
+    restitution: 0.12,
+    friction: 0.42,
+    positionalCorrection: 1.0,
+    positionSlop: 0,
+    inertiaMul: 1.2,
+    yawImpulseScale: 1.2,
+    maxYawRateDelta: 2.4,
+  },
   assists: {
     autoDriftGripCut: 0.3,
     driftAssistRecoveryBoost: 0.75,

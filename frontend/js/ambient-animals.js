@@ -73,6 +73,7 @@ const ANIMAL_KIND_CONFIG = {
     recoverDurationMin: 0.34,
     recoverDurationMax: 0.52,
     impactCooldown: 0.42,
+    postImpactChargeCooldown: 10,
     hitResponse: "ram",
     hitKnockbackMin: 30,
     hitKnockbackMax: 82,
@@ -199,6 +200,18 @@ function scheduleAnimalMode(animal, mode, objects, threatAngle = null) {
   animal.moveAngle = chooseDirectionAngle(animal, preferredAngle, mode, objects);
 }
 
+function scheduleCalmAnimalMode(animal, surface, objects) {
+  const cfg = getAnimalConfig(animal.kind);
+  const modeSeed = animal.seed + animal.decisionIndex * 1.13;
+  if (!prefersCalmSurface(cfg, surface)) {
+    scheduleAnimalMode(animal, "grassSeek", objects, null);
+  } else if (hash01(modeSeed) < (animal.kind === "bull" ? 0.72 : 0.34)) {
+    scheduleAnimalMode(animal, "idle", objects, null);
+  } else {
+    scheduleAnimalMode(animal, "wander", objects, null);
+  }
+}
+
 function createAmbientAnimalState(object, index) {
   const normalized = normalizeWorldObject(object);
   if (!normalized || normalized.type !== "animal") return null;
@@ -224,6 +237,7 @@ function createAmbientAnimalState(object, index) {
     active: true,
     hitTime: 0,
     contactCooldown: 0,
+    chargeCooldown: 0,
   };
 }
 
@@ -324,15 +338,22 @@ function updateAmbientAnimal(animal, dt, racers, objects) {
   if (animal.contactCooldown > 0) {
     animal.contactCooldown = Math.max(0, animal.contactCooldown - dt);
   }
+  if (animal.chargeCooldown > 0) {
+    animal.chargeCooldown = Math.max(0, animal.chargeCooldown - dt);
+  }
 
   const surface = surfaceAtForTrack(animal.x, animal.y, track, objects);
   const threat = getThreat(animal, racers);
   const cfg = getAnimalConfig(animal.kind);
   const threatResponse = cfg.threatResponse || "flee";
+  const chargeLocked = threatResponse === "charge" && animal.chargeCooldown > 0;
   if (animal.mode === "recover") {
     animal.modeTimer -= dt;
+    if (animal.modeTimer <= 0 && (!threat || chargeLocked)) {
+      scheduleCalmAnimalMode(animal, surface, objects);
+    }
   }
-  if (threat) {
+  if (threat && !chargeLocked) {
     if (threatResponse === "charge") {
       if (animal.mode !== "recover" || animal.modeTimer <= 0) {
         if (animal.mode !== "charge") {
@@ -348,16 +369,7 @@ function updateAmbientAnimal(animal, dt, racers, objects) {
     }
   } else if (animal.mode !== "recover") {
     animal.modeTimer -= dt;
-    if (animal.modeTimer <= 0) {
-      const modeSeed = animal.seed + animal.decisionIndex * 1.13;
-      if (!prefersCalmSurface(cfg, surface)) {
-        scheduleAnimalMode(animal, "grassSeek", objects, null);
-      } else if (hash01(modeSeed) < (animal.kind === "bull" ? 0.56 : 0.34)) {
-        scheduleAnimalMode(animal, "idle", objects, null);
-      } else {
-        scheduleAnimalMode(animal, "wander", objects, null);
-      }
-    }
+    if (animal.modeTimer <= 0) scheduleCalmAnimalMode(animal, surface, objects);
   }
 
   if (animal.mode === "idle") {
@@ -390,6 +402,10 @@ function detectAnimalHit(animal, racers, objects) {
     const impactAngle = Math.atan2(dy, dx);
     if (cfg.hitResponse === "ram") {
       animal.contactCooldown = cfg.impactCooldown || 0.4;
+      animal.chargeCooldown = Math.max(
+        animal.chargeCooldown || 0,
+        cfg.postImpactChargeCooldown || 0,
+      );
       scheduleAnimalMode(animal, "recover", objects, impactAngle + Math.PI);
       animal.speed = Math.max(animal.speed, cfg.recoverSpeed || 28);
     } else {

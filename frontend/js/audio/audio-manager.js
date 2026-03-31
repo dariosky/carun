@@ -35,6 +35,8 @@ const ANIMAL_SPLASH_AUDIO = {
   },
 };
 
+const MAX_RIVAL_AUDIO_VOICES = 6;
+
 function getAudioContextCtor() {
   if (typeof window === "undefined") return null;
   return window.AudioContext || window.webkitAudioContext || null;
@@ -49,15 +51,18 @@ export class AudioManager {
     this.uiBus = null;
     this.impactBus = null;
     this.engineSynth = null;
-    this.rivalEngineSynth = null;
     this.skidSynth = null;
     this.surfaceSynth = null;
+    this.rivalVoices = [];
     this.signalSynth = null;
     this.impactSynth = null;
     this.animalSplashPools = new Map();
     this.started = false;
     this.userGestureBound = false;
     this.lastVehicleState = { ...DEFAULT_VEHICLE_STATE };
+    this.lastRivalStates = Array.from({ length: MAX_RIVAL_AUDIO_VOICES }, () => ({
+      ...DEFAULT_VEHICLE_STATE,
+    }));
   }
 
   ensureContext() {
@@ -68,7 +73,10 @@ export class AudioManager {
     this.context = new AudioContextCtor();
     this.masterGain = createGain(this.context, 0);
     this.vehicleBus = createGain(this.context, 0);
-    this.rivalBus = createGain(this.context, AUDIO_TUNING.vehicleBusGain * 0.38);
+    this.rivalBus = createGain(
+      this.context,
+      AUDIO_TUNING.vehicleBusGain * AUDIO_TUNING.rivalBusGainMul,
+    );
     this.uiBus = createGain(this.context, AUDIO_TUNING.uiBusGain);
     this.impactBus = createGain(this.context, AUDIO_TUNING.impactBusGain);
 
@@ -79,19 +87,17 @@ export class AudioManager {
     this.impactBus.connect(this.masterGain);
 
     this.engineSynth = new EngineSynth(this.context);
-    this.rivalEngineSynth = new EngineSynth(this.context);
     this.skidSynth = new SkidSynth(this.context);
     this.surfaceSynth = new SurfaceSynth(this.context);
     this.signalSynth = new SignalSynth(this.context, this.uiBus);
     this.impactSynth = new ImpactSynth(this.context, this.impactBus);
 
     this.engineSynth.connect(this.vehicleBus);
-    this.rivalEngineSynth.connect(this.rivalBus);
     this.skidSynth.connect(this.vehicleBus);
     this.surfaceSynth.connect(this.vehicleBus);
+    this.#ensureRivalVoiceCount(MAX_RIVAL_AUDIO_VOICES);
 
     this.engineSynth.start();
-    this.rivalEngineSynth.start();
     this.skidSynth.start();
     this.surfaceSynth.start();
 
@@ -113,11 +119,14 @@ export class AudioManager {
     );
     smoothParam(
       this.rivalBus.gain,
-      AUDIO_TUNING.vehicleBusGain * 0.38,
+      AUDIO_TUNING.vehicleBusGain * AUDIO_TUNING.rivalBusGainMul,
       time,
       AUDIO_TUNING.smoothing.medium,
     );
     this.#applyVehicleState(this.lastVehicleState);
+    this.lastRivalStates.forEach((state, index) => {
+      this.#applyRivalVehicleState(index, state);
+    });
   }
 
   stop() {
@@ -127,7 +136,10 @@ export class AudioManager {
     smoothParam(this.vehicleBus.gain, 0, time, AUDIO_TUNING.smoothing.medium);
     smoothParam(this.rivalBus.gain, 0, time, AUDIO_TUNING.smoothing.medium);
     this.#applyVehicleState(DEFAULT_VEHICLE_STATE);
-    this.#applyRivalVehicleState(DEFAULT_VEHICLE_STATE);
+    this.lastRivalStates.forEach((_, index) => {
+      this.lastRivalStates[index] = { ...DEFAULT_VEHICLE_STATE };
+      this.#applyRivalVehicleState(index, DEFAULT_VEHICLE_STATE);
+    });
     this.#stopAnimalSplashPlayers();
   }
 
@@ -158,12 +170,18 @@ export class AudioManager {
   }
 
   updateRivalVehicleAudio(params) {
+    const rivalIndex = clamp(
+      Number.isInteger(params?.rivalIndex) ? params.rivalIndex : 0,
+      0,
+      MAX_RIVAL_AUDIO_VOICES - 1,
+    );
     const rivalState = {
       ...DEFAULT_VEHICLE_STATE,
       ...params,
     };
+    this.lastRivalStates[rivalIndex] = rivalState;
     if (!this.context || !this.started) return;
-    this.#applyRivalVehicleState(rivalState);
+    this.#applyRivalVehicleState(rivalIndex, rivalState);
   }
 
   playCountdownBeep(step) {
@@ -229,20 +247,48 @@ export class AudioManager {
     this.surfaceSynth.update(normalized);
   }
 
-  #applyRivalVehicleState(params) {
-    if (!this.context || !this.rivalEngineSynth) return;
+  #applyRivalVehicleState(index, params) {
+    if (!this.context) return;
+    this.#ensureRivalVoiceCount(index + 1);
+    const voice = this.rivalVoices[index];
+    if (!voice) return;
     const normalized = {
       speedNormalized: clamp(params.speedNormalized, 0, 1),
       throttle: clamp(params.throttle, 0, 1),
       acceleration: clamp(params.acceleration, -1, 1),
-      skidAmount: 0,
+      skidAmount: clamp(params.skidAmount, 0, 1),
       surface: params.surface || "asphalt",
       isMoving: Boolean(params.isMoving),
       airborne: Boolean(params.airborne),
       airborneAmount: clamp(params.airborneAmount, 0, 1),
       wheelSpinAmount: clamp(params.wheelSpinAmount, 0, 1),
     };
-    this.rivalEngineSynth.update(normalized);
+    voice.engineSynth.update(normalized);
+    voice.skidSynth.update(normalized);
+    voice.surfaceSynth.update(normalized);
+  }
+
+  #ensureRivalVoiceCount(count) {
+    if (!this.context || !this.rivalBus) return;
+    while (this.rivalVoices.length < count) {
+      const voiceBus = createGain(this.context, AUDIO_TUNING.rivalVoiceGainMul);
+      const engineSynth = new EngineSynth(this.context);
+      const skidSynth = new SkidSynth(this.context);
+      const surfaceSynth = new SurfaceSynth(this.context);
+      engineSynth.connect(voiceBus);
+      skidSynth.connect(voiceBus);
+      surfaceSynth.connect(voiceBus);
+      voiceBus.connect(this.rivalBus);
+      engineSynth.start();
+      skidSynth.start();
+      surfaceSynth.start();
+      this.rivalVoices.push({
+        bus: voiceBus,
+        engineSynth,
+        skidSynth,
+        surfaceSynth,
+      });
+    }
   }
 
   #checkoutAnimalSplashPlayer(kind) {

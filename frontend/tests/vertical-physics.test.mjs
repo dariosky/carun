@@ -89,6 +89,7 @@ const {
   importTrackPresetData,
   physicsConfig,
   removeTrackPresetById,
+  track,
   trackOptions,
   worldObjects,
 } = await import("../js/parameters.js");
@@ -129,6 +130,7 @@ const {
   resolveObjectCollisions,
   surfaceAt,
   trackFrameAtAngle,
+  trackProgressAtPoint,
 } = await import("../js/track.js");
 
 function getObjectByType(objects, type) {
@@ -531,6 +533,7 @@ test("bull hits stay non-lethal and faster bulls knock the car back harder", () 
       bullActive: bull.active,
       bullMode: bull.mode,
       bullCooldown: bull.contactCooldown,
+      bullChargeCooldown: bull.chargeCooldown,
       bloodCarry: physicsRuntime.bloodCarry,
     };
   }
@@ -550,12 +553,91 @@ test("bull hits stay non-lethal and faster bulls knock the car back harder", () 
     assert.equal(fastHit.bloodCarry, 0);
     assert.ok(slowHit.bullCooldown > 0);
     assert.ok(fastHit.bullCooldown > 0);
+    assert.ok(slowHit.bullChargeCooldown > 9.5);
+    assert.ok(fastHit.bullChargeCooldown > 9.5);
     assert.equal(fastHit.bullMode, "recover");
     assert.ok(slowHit.vx < 0);
     assert.ok(fastHit.vx < slowHit.vx - 10);
     assert.ok(Math.abs(fastHit.vx) > Math.abs(slowHit.vx));
   } finally {
     gameAudio.playAnimalSplash = originalPlayAnimalSplash;
+    removeTrackPresetById(imported.id);
+    const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
+    state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
+    if (restoreIndex >= 0) applyTrackPreset(restoreIndex);
+  }
+});
+
+test("bulls wait at least 10 seconds before charging again after a hit", () => {
+  const originalTrackId = trackOptions[0]?.id || null;
+  const imported = importTrackPresetData({
+    id: "vertical-bull-calmdown",
+    name: "VERTICAL BULL CALMDOWN",
+    track: makeTrackData(),
+    checkpoints: [],
+    worldObjects: [{ type: "animal", kind: "bull", x: 648, y: 565, r: 36, angle: 0 }],
+    centerlineStrokes: [],
+    editStack: [],
+  });
+  assert.ok(imported);
+
+  const trackIndex = trackOptions.findIndex((option) => option.id === imported.id);
+  assert.ok(trackIndex >= 0);
+  state.selectedTrackIndex = trackIndex;
+
+  try {
+    applyTrackPreset(trackIndex);
+    resetRace();
+    state.startSequence.active = false;
+    physicsConfig.flags.AI_OPPONENTS_ENABLED = false;
+
+    const bull = ambientAnimals[0];
+    bull.mode = "charge";
+    bull.speed = 92;
+    bull.targetSpeed = 92;
+    bull.moveAngle = 0;
+    bull.contactCooldown = 0;
+    bull.chargeCooldown = 0;
+
+    car.x = bull.x - 18;
+    car.y = bull.y;
+    car.vx = 72;
+    car.vy = 0;
+    car.angle = 0;
+    car.speed = 72;
+    physicsRuntime.prevForwardSpeed = 72;
+
+    updateRace(1 / 60);
+
+    assert.equal(bull.mode, "recover");
+    assert.ok(bull.chargeCooldown > 9.5);
+
+    for (let i = 0; i < 60 * 3; i++) {
+      car.x = bull.x - 28;
+      car.y = bull.y;
+      car.vx = 0;
+      car.vy = 0;
+      car.speed = 0;
+      physicsRuntime.prevForwardSpeed = 0;
+      updateRace(1 / 60);
+    }
+
+    assert.notEqual(bull.mode, "charge");
+    assert.ok(bull.chargeCooldown > 6.5);
+
+    for (let i = 0; i < 60 * 8; i++) {
+      car.x = bull.x - 28;
+      car.y = bull.y;
+      car.vx = 0;
+      car.vy = 0;
+      car.speed = 0;
+      physicsRuntime.prevForwardSpeed = 0;
+      updateRace(1 / 60);
+    }
+
+    assert.equal(bull.mode, "charge");
+    assert.equal(bull.chargeCooldown, 0);
+  } finally {
     removeTrackPresetById(imported.id);
     const restoreIndex = trackOptions.findIndex((option) => option.id === originalTrackId);
     state.selectedTrackIndex = restoreIndex >= 0 ? restoreIndex : 0;
@@ -738,8 +820,9 @@ test("ai launches when it reaches a spring mid-frame and reports flying surface"
 
     assert.equal(aiCar.airborne, true);
     assert.equal(aiPhysicsRuntime.debug.surface, "flying");
-    assert.equal(audioCalls.at(-1)?.surface, "flying");
-    assert.equal(audioCalls.at(-1)?.airborne, true);
+    const aiZeroAudio = audioCalls.find((call) => call?.rivalIndex === 0);
+    assert.equal(aiZeroAudio?.surface, "flying");
+    assert.equal(aiZeroAudio?.airborne, true);
   } finally {
     gameAudio.updateRivalVehicleAudio = originalUpdateRivalVehicleAudio;
   }
@@ -775,8 +858,14 @@ test("resetRace restores the selected preset world objects", () => {
 
 test("resetRace spawns a five-car AI field with matching heading and lap state", () => {
   enableAiOpponents();
+  assignRandomAiRoster();
   resetRace();
   const graph = getTrackNavigationGraph();
+  const playerProgress = trackProgressAtPoint(car.x, car.y, track);
+  const playerForwardX = Math.cos(car.angle);
+  const playerForwardY = Math.sin(car.angle);
+  const playerRightX = -playerForwardY;
+  const playerRightY = playerForwardX;
   assert.equal(aiCars.length, 5);
   aiCars.forEach((vehicle, index) => {
     const lap = aiLapDataList[index];
@@ -789,8 +878,29 @@ test("resetRace spawns a five-car AI field with matching heading and lap state",
 
     assert.equal(lap.lap, 1);
     assert.equal(lap.finished, false);
-    assert.equal(vehicle.angle, car.angle);
     assert.ok(Math.hypot(vehicle.x - car.x, vehicle.y - car.y) > 20);
+    const relX = vehicle.x - car.x;
+    const relY = vehicle.y - car.y;
+    const lateralOffset = relX * playerRightX + relY * playerRightY;
+    const progress = trackProgressAtPoint(vehicle.x, vehicle.y, track);
+    const backwardGap = (((playerProgress - progress) % 1) + 1) % 1;
+    if (index === 0) {
+      assert.ok(lateralOffset > 12, "the first rival should start to the right of the player");
+      assert.ok(backwardGap > 0.001, "the first rival should start slightly behind the player");
+    } else if (index >= 2) {
+      const sameColumnVehicle = aiCars[index - 2];
+      const sameColumnProgress = trackProgressAtPoint(
+        sameColumnVehicle.x,
+        sameColumnVehicle.y,
+        track,
+      );
+      const sameColumnBackwardGap = (((playerProgress - sameColumnProgress) % 1) + 1) % 1;
+      assert.ok(
+        backwardGap > sameColumnBackwardGap + 0.01,
+        "cars further back in the stagger should keep a clear extra gap on the same side",
+      );
+    }
+    assert.ok(Math.abs(vehicle.angle - car.angle) < 1.0);
     assert.ok(runtime.plannedNodeIds.length > 3);
     assert.notEqual(runtime.targetNodeId, -1);
     assert.ok(goalIndex >= 0);
@@ -1052,7 +1162,16 @@ test("finish celebration standings keep unique accent colors for AI finishers", 
 });
 
 test("car-to-car collision separates overlapping racers and exchanges velocity", () => {
-  const a = { x: 100, y: 100, vx: 40, vy: 0, width: 34, height: 20, speed: 40 };
+  const a = {
+    x: 100,
+    y: 100,
+    vx: 40,
+    vy: 0,
+    width: 34,
+    height: 20,
+    angle: 0,
+    speed: 40,
+  };
   const b = {
     x: 108,
     y: 100,
@@ -1060,16 +1179,87 @@ test("car-to-car collision separates overlapping racers and exchanges velocity",
     vy: 0,
     width: 34,
     height: 20,
+    angle: 0,
     speed: 10,
   };
+  const runtimeA = { steeringRate: 0, input: { handbrake: 0 } };
+  const runtimeB = { steeringRate: 0, input: { handbrake: 0 } };
 
-  const collided = resolveCarToCarCollision(a, b);
+  const collided = resolveCarToCarCollision(a, b, runtimeA, runtimeB);
 
   assert.equal(collided, true);
   assert.ok(a.x < 100);
   assert.ok(b.x > 108);
   assert.ok(a.vx < 40);
   assert.ok(b.vx > -10);
+  assert.ok(
+    b.x - a.x >= a.width * physicsConfig.carToCar.bodyLengthMul - 0.05,
+    "cars should be separated by at least the tuned body length on a head-on x-axis overlap",
+  );
+});
+
+test("rear-end collision transfers momentum forward with limited yaw", () => {
+  const striker = {
+    x: 100,
+    y: 100,
+    vx: 110,
+    vy: 0,
+    width: 34,
+    height: 20,
+    angle: 0,
+    speed: 110,
+  };
+  const target = {
+    x: 138,
+    y: 100,
+    vx: 55,
+    vy: 0,
+    width: 34,
+    height: 20,
+    angle: 0,
+    speed: 55,
+  };
+  const strikerRuntime = { steeringRate: 0, input: { handbrake: 0 } };
+  const targetRuntime = { steeringRate: 0, input: { handbrake: 0 } };
+
+  const collided = resolveCarToCarCollision(striker, target, strikerRuntime, targetRuntime);
+
+  assert.equal(collided, true);
+  assert.ok(target.vx > 55, "rear target should be pushed forward");
+  assert.ok(striker.vx < 110, "striker should lose forward speed");
+  assert.ok(Math.abs(targetRuntime.steeringRate) < 0.3, "square rear hits should not add much yaw");
+});
+
+test("rear-quarter collision adds yaw to the struck car", () => {
+  const striker = {
+    x: 106,
+    y: 89,
+    vx: 95,
+    vy: 26,
+    width: 34,
+    height: 20,
+    angle: 0,
+    speed: Math.hypot(95, 26),
+  };
+  const target = {
+    x: 140,
+    y: 100,
+    vx: 48,
+    vy: 0,
+    width: 34,
+    height: 20,
+    angle: 0,
+    speed: 48,
+  };
+  const strikerRuntime = { steeringRate: 0, input: { handbrake: 0 } };
+  const targetRuntime = { steeringRate: 0, input: { handbrake: 0 } };
+
+  const collided = resolveCarToCarCollision(striker, target, strikerRuntime, targetRuntime);
+
+  assert.equal(collided, true);
+  assert.ok(targetRuntime.steeringRate > 0.08, "rear-left contact should yaw the target left");
+  assert.ok(striker.vx < 95, "quarter hit should scrub striker speed");
+  assert.ok(target.vx > 48, "quarter hit should still push the target forward");
 });
 
 test("track navigation graph exposes drivable nodes and checkpoint windows", () => {
