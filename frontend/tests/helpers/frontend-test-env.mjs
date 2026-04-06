@@ -50,6 +50,8 @@ export function setupFrontendTestEnv() {
     location: { href: "http://localhost:8080/" },
     history: { replaceState: noop },
     addEventListener: noop,
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
   };
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = noop;
@@ -58,6 +60,8 @@ export function setupFrontendTestEnv() {
     setItem: noop,
   };
   globalThis.document = {
+    hidden: false,
+    addEventListener: noop,
     getElementById: () => fakeCanvas,
     createElement: () => fakeCanvas,
   };

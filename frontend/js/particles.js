@@ -109,6 +109,10 @@ export function emitFinishConfetti({ bestLap = false, bestRace = false } = {}) {
 
 const screenParticles = [];
 
+export function hasActiveScreenParticles() {
+  return screenParticles.length > 0;
+}
+
 export function emitScreenConfetti({ x, y } = {}) {
   const palette = ["#ffe066", "#ffb703", "#ff5d8f", "#57ccff", "#ffffff", "#6af0a8"];
   for (let i = 0; i < 3; i++) {

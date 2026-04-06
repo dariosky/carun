@@ -61,7 +61,6 @@ import {
   getEditorWorldScale,
   getRaceWorldScale,
   getTrackWorldScale,
-  getVehicleSupportProfile,
   initCurbSegments,
   normalizeWorldObject,
   pointOnCenterLine,
@@ -128,6 +127,7 @@ const mergedPondRenderCache = new WeakMap();
 const mergedOilRenderCache = new WeakMap();
 const previewTrackDataCache = new Map();
 const centerlineLengthCache = new WeakMap();
+const terrainOverlayCache = new WeakMap();
 
 function createTextureCanvas(width, height) {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
@@ -627,6 +627,20 @@ function drawTerrainHeightOverlay(trackDef = track, { surface = "world", editor 
   const cellSize = Math.max(24, Number(trackDef.terrainCellSize) || 56);
   const originX = Number(trackDef.terrainOriginX) || 0;
   const originY = Number(trackDef.terrainOriginY) || 0;
+  const revision = Number(trackDef.terrainRevision) || 0;
+  const signature = `${surface}:${editor ? 1 : 0}:${cols}:${rows}:${cellSize}:${originX}:${originY}:${revision}`;
+  const cached = terrainOverlayCache.get(trackDef);
+  if (cached?.signature === signature) {
+    ctx.drawImage(cached.canvas, originX, originY);
+    return;
+  }
+
+  const pixelWidth = Math.max(1, Math.ceil((cols - 1) * cellSize));
+  const pixelHeight = Math.max(1, Math.ceil((rows - 1) * cellSize));
+  const overlayCanvas = createTextureCanvas(pixelWidth, pixelHeight);
+  const overlayCtx = overlayCanvas.getContext("2d");
+  overlayCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+
   for (let row = 0; row < rows - 1; row++) {
     for (let col = 0; col < cols - 1; col++) {
       const index = row * cols + col;
@@ -641,25 +655,31 @@ function drawTerrainHeightOverlay(trackDef = track, { surface = "world", editor 
         surface,
         editor,
       });
-      const x = originX + col * cellSize;
-      const y = originY + row * cellSize;
+      const x = col * cellSize;
+      const y = row * cellSize;
 
       if (shading.highlightAlpha > 0.01) {
-        ctx.fillStyle =
+        overlayCtx.fillStyle =
           surface === "asphalt"
             ? `rgba(255, 249, 214, ${Math.min(0.36, shading.highlightAlpha).toFixed(3)})`
             : `rgba(255, 239, 150, ${Math.min(0.58, shading.highlightAlpha).toFixed(3)})`;
-        ctx.fillRect(x, y, cellSize, cellSize);
+        overlayCtx.fillRect(x, y, cellSize, cellSize);
       }
       if (shading.shadowAlpha > 0.01) {
-        ctx.fillStyle =
+        overlayCtx.fillStyle =
           surface === "asphalt"
             ? `rgba(10, 14, 20, ${Math.min(0.34, shading.shadowAlpha).toFixed(3)})`
             : `rgba(8, 24, 12, ${Math.min(0.52, shading.shadowAlpha).toFixed(3)})`;
-        ctx.fillRect(x, y, cellSize, cellSize);
+        overlayCtx.fillRect(x, y, cellSize, cellSize);
       }
     }
   }
+
+  terrainOverlayCache.set(trackDef, {
+    signature,
+    canvas: overlayCanvas,
+  });
+  ctx.drawImage(overlayCanvas, originX, originY);
 }
 
 function elevatedPoint(x, y, height) {
@@ -1641,25 +1661,20 @@ function traceKartOutlinePath() {
 
 function getVehicleRenderState(vehicle) {
   const airCfg = physicsConfig.air;
-  const supportProfile = getVehicleSupportProfile(vehicle, track, worldObjects);
   const supportHeight = Math.max(0, vehicle.renderZ || 0);
   const airborneHeight = Math.max(0, (vehicle.z || 0) - (vehicle.supportZ || 0));
   const supportLiftPx = supportHeight * airCfg.liftPxPerMeter;
   const airborneLiftPx = airborneHeight * airCfg.liftPxPerMeter;
-  const bodySortHeight = Math.max(
-    airborneHeight > 0 ? Number(vehicle.z) || 0 : supportHeight,
-    supportProfile.maxVisualHeight,
-  );
+  const bodySortHeight =
+    airborneHeight > 0 ? Math.max(Number(vehicle.z) || 0, supportHeight) : supportHeight;
   return {
     scale: Math.max(1, vehicle.visualScale || 1),
-    supportProfile,
     supportHeight,
     airborneHeight,
     bodySortHeight,
     supportLiftPx,
     airborneLiftPx,
     screenLiftPx: supportLiftPx + airborneLiftPx,
-    shadowSpread: 1 + supportHeight * 0.018 + airborneHeight * 0.05,
     shadowBaseScale: 1.11 * (1 + supportHeight * 0.018 + airborneHeight * 0.05),
     shadowFloorSquash: 1 + airborneHeight * 0.02,
   };

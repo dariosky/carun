@@ -314,6 +314,7 @@ const TRACK_PRESETS = [
       terrainOriginX: 0,
       terrainOriginY: 0,
       terrainHeights: [],
+      terrainRevision: 0,
       terrainBrushSize: DEFAULT_TERRAIN_BRUSH_SIZE,
       terrainBrushStrength: DEFAULT_TERRAIN_BRUSH_STRENGTH,
       terrainBrushHardness: DEFAULT_TERRAIN_BRUSH_HARDNESS,
@@ -444,6 +445,9 @@ function cloneTrackData(trackData) {
       ? Number(trackData.terrainOriginY)
       : 0,
     terrainHeights: cloneTerrainHeights(trackData),
+    terrainRevision: Number.isFinite(trackData.terrainRevision)
+      ? Math.max(0, Math.round(trackData.terrainRevision))
+      : 0,
     terrainBrushSize: Number.isFinite(trackData.terrainBrushSize)
       ? Number(trackData.terrainBrushSize)
       : DEFAULT_TERRAIN_BRUSH_SIZE,

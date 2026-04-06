@@ -1285,6 +1285,10 @@ test("finish celebration standings keep unique accent colors for AI finishers", 
     summary.entries.map((entry) => entry.accentColor),
     ["#d22525", "#66d987", "#ffd25e", "#34d1c6"],
   );
+  assert.deepEqual(
+    summary.entries.map((entry) => entry.gapMs),
+    [0, 1000, 2500, 4000],
+  );
   assert.equal(new Set(summary.entries.map((entry) => entry.accentColor)).size, 4);
 
   assignRandomAiRoster();

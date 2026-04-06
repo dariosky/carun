@@ -62,6 +62,10 @@ Deliver a professional-feeling indie arcade racer POC in HTML5 canvas, with stro
 - visual representation
 - physical behavior
 
+## Repo Skills
+
+- `skills/deploy-code-changes/SKILL.md`: use when asked to deploy or publish the current repository changes. The skill runs `pre-commit run --all-files`, chooses a short relevant commit message from the diff, commits directly to `main`, pushes `origin/main`, and runs `scripts/deploy.py`.
+
 ## Performance Notes
 
 - Aim for smooth real-time play on common laptop hardware; 60 FPS is the target where browser/display allow it.

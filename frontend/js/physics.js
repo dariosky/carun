@@ -469,16 +469,16 @@ export function getFinishCelebrationStandings() {
   const scopedStandings = showHumanOnly
     ? finishedStandings.filter((entry) => racerIsHuman(entry.id))
     : finishedStandings;
+  const winner = scopedStandings[0] || null;
 
   return {
     mode: showHumanOnly ? "human" : "all",
     totalRacers: showHumanOnly ? humanFieldCount : 1 + activeRivalCount,
     finishedCount: scopedStandings.length,
     entries: scopedStandings.map((entry, index, list) => {
-      const previous = list[index - 1] || null;
       const gapMs =
-        previous && Number.isFinite(previous.finishTime)
-          ? Math.max(0, Math.round((Number(entry.finishTime) - Number(previous.finishTime)) * 1000))
+        winner && Number.isFinite(winner.finishTime)
+          ? Math.max(0, Math.round((Number(entry.finishTime) - Number(winner.finishTime)) * 1000))
           : 0;
       return {
         id: entry.id,

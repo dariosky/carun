@@ -36,6 +36,7 @@ import {
   normalizeCenterlineSmoothingMode,
   TOURNAMENT_POINTS,
 } from "./parameters.js";
+import { requestImmediateFrame } from "./game-loop.js";
 import {
   assignRandomAiRoster,
   getActiveAiCars,
@@ -161,6 +162,7 @@ function ensureTerrainGrid(trackData) {
   trackData.terrainOriginX = -cellSize;
   trackData.terrainOriginY = -cellSize;
   trackData.terrainHeights = new Array(cols * rows).fill(0);
+  trackData.terrainRevision = (Number(trackData.terrainRevision) || 0) + 1;
   trackData.terrainBrushSize = clampTerrainBrushSize(trackData.terrainBrushSize);
   trackData.terrainBrushStrength = clampTerrainBrushStrength(trackData.terrainBrushStrength);
   trackData.terrainBrushHardness = clampTerrainBrushHardness(trackData.terrainBrushHardness);
@@ -211,7 +213,10 @@ function paintTerrainAtCursor(preset, direction = 1) {
     }
   }
 
-  if (changed) applyTrackPreset(state.editor.trackIndex);
+  if (changed) {
+    trackData.terrainRevision = (Number(trackData.terrainRevision) || 0) + 1;
+    applyTrackPreset(state.editor.trackIndex);
+  }
   return changed;
 }
 
@@ -3695,6 +3700,8 @@ function onKeyDown(e) {
     if (key === "d" || key === "arrowright") keys.right = true;
     if (key === " ") keys.handbrake = true;
   }
+
+  requestImmediateFrame();
 }
 
 function onKeyUp(e) {
@@ -3710,6 +3717,7 @@ function onKeyUp(e) {
   if (key === "a" || key === "arrowleft") keys.left = false;
   if (key === "d" || key === "arrowright") keys.right = false;
   if (key === " ") keys.handbrake = false;
+  requestImmediateFrame();
 }
 
 export function initInputHandlers() {
@@ -3743,6 +3751,7 @@ export function initInputHandlers() {
       state.editor.toolbar.y = state.editor.cursorScreenY - state.editor.toolbar.dragOffsetY;
       clampEditorToolbarPosition();
       saveEditorToolbarPosition();
+      requestImmediateFrame();
       return;
     }
     if (state.mode === "editor" && state.editor.viewDragging) {
@@ -3756,9 +3765,11 @@ export function initInputHandlers() {
         state.editor.cursorScreenY,
         state.editor.cursorCanvasY,
       );
+      requestImmediateFrame();
       return;
     }
     if (state.mode === "editor" && updateEditorCanvasInteraction()) {
+      requestImmediateFrame();
       return;
     }
     if (state.mode === "editor") {
@@ -3768,6 +3779,7 @@ export function initInputHandlers() {
       );
       state.editor.toolbar.hoverLabel =
         toolbarHit?.type === "action" ? editorToolbarActionLabel(toolbarHit.id) : "";
+      requestImmediateFrame();
     } else {
       state.editor.toolbar.hoverLabel = "";
     }
@@ -3777,6 +3789,7 @@ export function initInputHandlers() {
   });
   window.addEventListener("mousedown", (event) => {
     void unlockMenuMusic();
+    requestImmediateFrame();
     if (state.mode === "tournamentLobby" && event.button === 0) {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
@@ -3830,6 +3843,7 @@ export function initInputHandlers() {
     beginEditorCanvasInteraction(event.button);
   });
   window.addEventListener("mouseup", (event) => {
+    requestImmediateFrame();
     if (
       state.mode !== "editor" ||
       (event.button !== 0 && !(state.editor.activeTool === "terrain" && event.button === 2))
